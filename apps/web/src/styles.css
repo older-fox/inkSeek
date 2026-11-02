@@ -343,6 +343,140 @@
     transition: background-color 9999s ease-out;
   }
 
+  .wizard-input {
+    width: 100%;
+    height: 2.9rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--field-border);
+    background: var(--field-bg);
+    padding: 0 0.9rem;
+    color: var(--color-mist-100);
+    font-size: 0.9rem;
+    outline: none;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .wizard-input::placeholder,
+  .wizard-textarea::placeholder {
+    color: color-mix(in srgb, var(--color-mist-500) 72%, transparent);
+  }
+
+  .wizard-input:hover,
+  .wizard-textarea:hover {
+    border-color: color-mix(in srgb, var(--color-mist-500) 34%, transparent);
+  }
+
+  .wizard-input:focus,
+  .wizard-textarea:focus {
+    border-color: var(--field-focus-border);
+    background: var(--field-bg-focus);
+    box-shadow: 0 0 0 4px var(--field-focus-shadow);
+  }
+
+  .wizard-input[aria-invalid='true'],
+  .wizard-textarea[aria-invalid='true'] {
+    border-color: var(--field-invalid-border);
+  }
+
+  .wizard-input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  .wizard-input::-webkit-outer-spin-button,
+  .wizard-input::-webkit-inner-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+
+  .wizard-input-compact {
+    height: 2.5rem;
+    font-size: 0.85rem;
+  }
+
+  .wizard-textarea {
+    display: block;
+    width: 100%;
+    min-height: 6rem;
+    resize: vertical;
+    border-radius: 0.8rem;
+    border: 1px solid var(--field-border);
+    background: var(--field-bg);
+    padding: 0.75rem 0.9rem;
+    color: var(--color-mist-100);
+    font-size: 0.88rem;
+    line-height: 1.75;
+    outline: none;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .wizard-select {
+    cursor: pointer;
+    appearance: none;
+    padding-right: 2.5rem;
+  }
+
+  .wizard-select option {
+    background: var(--color-ink-900);
+    color: var(--color-mist-100);
+  }
+
+  .wizard-time {
+    min-width: 0;
+    padding: 0 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+  }
+
+  .wizard-time::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+  }
+
+  .wizard-range {
+    width: 100%;
+    height: 0.35rem;
+    border-radius: 999px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+  }
+
+  .wizard-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    border: 2px solid var(--color-ink-900);
+    background: var(--color-brass-300);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    transition: transform 120ms ease;
+  }
+
+  .wizard-range::-webkit-slider-thumb:hover {
+    transform: scale(1.12);
+  }
+
+  .wizard-range::-moz-range-thumb {
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 999px;
+    border: 2px solid var(--color-ink-900);
+    background: var(--color-brass-300);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+
+  .wizard-range:focus-visible {
+    box-shadow: 0 0 0 4px var(--field-focus-shadow);
+  }
+
   .ink-grid {
     background-image:
       linear-gradient(var(--grid-line) 1px, transparent 1px),

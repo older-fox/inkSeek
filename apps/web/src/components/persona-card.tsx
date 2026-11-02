@@ -125,7 +125,10 @@ function PersonaFront({ persona }: { persona: Persona }) {
 
       <div className="mt-auto space-y-3 border-t border-mist-100/[0.06] pt-4">
         <div className="flex gap-2.5">
-          <MessageSquareQuote className="mt-0.5 size-3.5 shrink-0 text-brass-400/75" strokeWidth={1.7} />
+          <MessageSquareQuote
+            className="mt-0.5 size-3.5 shrink-0 text-brass-400/75"
+            strokeWidth={1.7}
+          />
           <div className="min-w-0">
             <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
               语言风格
@@ -138,7 +141,9 @@ function PersonaFront({ persona }: { persona: Persona }) {
         <div className="flex gap-2.5">
           <AtSign className="mt-0.5 size-3.5 shrink-0 text-jade-400/75" strokeWidth={1.7} />
           <div className="min-w-0">
-            <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">称呼</p>
+            <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
+              称呼
+            </p>
             <p className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400">
               {persona.addressStyle}
             </p>
@@ -274,12 +279,13 @@ export function PersonaCard({ persona }: { persona: Persona }) {
   );
 }
 
-export function NewPersonaCard() {
+export function NewPersonaCard({ onCreate }: { onCreate: () => void }) {
   return (
     <button
       type="button"
-      aria-label="新建人格（即将开放）"
-      title="即将开放"
+      onClick={onCreate}
+      aria-label="新建人格，共 25 步"
+      title="新建人格"
       className={cn(
         CARD_HEIGHT,
         'group flex w-full flex-col items-center justify-center gap-4 rounded-[1.5rem] border border-dashed border-mist-100/15 bg-ink-900/20 text-mist-600 transition',
@@ -291,7 +297,7 @@ export function NewPersonaCard() {
       </span>
       <span className="text-[0.8rem]">新建人格</span>
       <span className="font-mono text-[0.55rem] uppercase tracking-[0.18em] text-mist-600">
-        Coming soon
+        25 steps · create
       </span>
     </button>
   );

@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { InputShell } from '@/components/field';
 import { NewPersonaCard, PersonaCard } from '@/components/persona-card';
+import { PersonaWizard } from '@/components/persona-wizard';
 import { api } from '@/lib/api';
 import { matchesPersona, PERSONAS } from '@/lib/personas';
 import { meQuery } from '@/lib/queries';
@@ -15,6 +16,7 @@ export function PersonasPage() {
   const queryClient = useQueryClient();
   const { data: user } = useQuery(meQuery);
   const [query, setQuery] = useState('');
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const logoutMutation = useMutation({
     mutationFn: api.logout,
@@ -60,7 +62,9 @@ export function PersonasPage() {
               </span>
               <span className="h-px w-12 bg-brass-400/25" />
               <span className="text-[0.72rem] text-mist-600">
-                {searching ? `匹配 ${personas.length} / ${PERSONAS.length}` : `已收录 ${PERSONAS.length} 位`}
+                {searching
+                  ? `匹配 ${personas.length} / ${PERSONAS.length}`
+                  : `已收录 ${PERSONAS.length} 位`}
               </span>
             </div>
 
@@ -154,10 +158,12 @@ export function PersonasPage() {
               ease: [0.22, 1, 0.36, 1],
             }}
           >
-            <NewPersonaCard />
+            <NewPersonaCard onCreate={() => setWizardOpen(true)} />
           </motion.div>
         </div>
       </div>
+
+      <PersonaWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
     </AppShell>
   );
 }
