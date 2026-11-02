@@ -40,3 +40,10 @@ export const chatMessagesQuery = (conversationId: string) =>
     queryFn: () => api.chatMessages(conversationId),
     staleTime: 5_000,
   });
+
+export const chatConversationPersonaQuery = (conversationId: string) =>
+  queryOptions({
+    queryKey: ['chat', 'persona', conversationId],
+    queryFn: () => api.chatConversationPersona(conversationId),
+    staleTime: 30_000,
+  });

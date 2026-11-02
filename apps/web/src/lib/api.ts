@@ -6,6 +6,7 @@ import type {
   ChatChannelConnectInput,
   ChatChannelSummary,
   ChatConversationKind,
+  ChatConversationPersonaRecord,
   ChatConversationSummary,
   ChatMessagePage,
   ChatMessageSummary,
@@ -17,6 +18,7 @@ import type {
   RedisProbeResult,
   RedisSettingsInput,
   RedisSettingsResult,
+  SaveConversationPersonaInput,
   SettingsOverview,
 } from '@inkseek/shared';
 
@@ -127,6 +129,18 @@ export const api = {
       `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
       {
         method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  chatConversationPersona: (conversationId: string) =>
+    request<ChatConversationPersonaRecord>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}/persona`,
+    ),
+  saveChatConversationPersona: (conversationId: string, input: SaveConversationPersonaInput) =>
+    request<ChatConversationPersonaRecord>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}/persona`,
+      {
+        method: 'PUT',
         body: JSON.stringify(input),
       },
     ),

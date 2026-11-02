@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -16,19 +17,23 @@ import {
   chatConversationQuerySchema,
   chatMessageQuerySchema,
   connectChatChannelSchema,
+  saveConversationPersonaSchema,
   sendChatMessageSchema,
   type ChatChannelConnectInput,
   type ChatChannelSummary,
   type ChatConversationKind,
+  type ChatConversationPersonaRecord,
   type ChatConversationSummary,
   type ChatMessagePage,
   type ChatMessageSummary,
   type ChatSendMessageInput,
+  type SaveConversationPersonaInput,
 } from '@inkseek/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { ChatEventsService } from './chat-events.service.js';
+import { ChatPersonaService } from './chat-persona.service.js';
 import { ChatService } from './chat.service.js';
 
 interface ConversationQuery {
@@ -47,6 +52,7 @@ interface MessageQuery {
 export class ChatController {
   constructor(
     private readonly chat: ChatService,
+    private readonly personas: ChatPersonaService,
     private readonly events: ChatEventsService,
   ) {}
 
@@ -97,6 +103,22 @@ export class ChatController {
     @Body(new ZodValidationPipe(sendChatMessageSchema)) input: ChatSendMessageInput,
   ): Promise<ChatMessageSummary> {
     return this.chat.sendMessage(id, input);
+  }
+
+  @Get('conversations/:id/persona')
+  @ApiOperation({ summary: '读取会话所属的群人格或私聊人格' })
+  persona(@Param('id') id: string): Promise<ChatConversationPersonaRecord> {
+    return this.personas.get(id);
+  }
+
+  @Put('conversations/:id/persona')
+  @ApiOperation({ summary: '保存会话所属的群人格或私聊人格' })
+  savePersona(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(saveConversationPersonaSchema))
+    input: SaveConversationPersonaInput,
+  ): Promise<ChatConversationPersonaRecord> {
+    return this.personas.save(id, input);
   }
 
   @Get('events')

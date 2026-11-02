@@ -9,27 +9,14 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
 import { PersonaFieldCard } from '@/components/persona-field-controls';
 import { PersonaMetadataView } from '@/components/persona-metadata-view';
 import { cn } from '@/lib/cn';
-import {
-  PRIVATE_ATTRIBUTE_COUNT,
-  PRIVATE_PERSONA_GROUPS,
-  privatePersonaDefaults,
-  privatePersonaMetadata,
-  readPrivatePersonaMeta,
-  readPrivatePersonaOverrides,
-  writePrivatePersonaMeta,
-  writePrivatePersonaOverride,
-} from '@/lib/private-persona';
-import {
-  appendPersonaHistory,
-  formatPersonaValue,
-  type PersonaMetadata,
-} from '@/lib/persona-metadata';
+import { useConversationPersona } from '@/lib/conversation-persona';
+import { PRIVATE_ATTRIBUTE_COUNT, PRIVATE_PERSONA_GROUPS } from '@/lib/private-persona';
 import { personaForChannel, type PersonaValue } from '@/lib/channel-persona';
 import type { Channel, SourcedConversation } from '@/lib/connections';
 
@@ -61,28 +48,26 @@ export function PrivatePersonaPanel({
   onClose: () => void;
 }) {
   const [activeGroupId, setActiveGroupId] = useState(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
-  const [overrides, setOverrides] = useState<Record<string, PersonaValue>>({});
-  const [meta, setMeta] = useState<PersonaMetadata | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
-  // 人格记忆按渠道命名空间隔离：渠道 id + QQ 号，避免不同渠道的同号联系人串数据。
-  const personaKey =
-    conversation && channel ? `${channel.id}:${conversation.externalId}` : (conversation?.id ?? '');
-  const values = conversation ? { ...privatePersonaDefaults(), ...overrides } : null;
+  const { values, meta, ready, error, syncState, update, flush } = useConversationPersona(
+    conversation,
+    'PRIVATE',
+  );
   const metadataActive = activeGroupId === META_TAB_ID;
   const activeGroup =
     PRIVATE_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PRIVATE_PERSONA_GROUPS[0];
 
   useEffect(() => {
-    if (conversation && personaKey) {
+    if (conversation) {
       setActiveGroupId(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
-      setOverrides(readPrivatePersonaOverrides(personaKey));
-      setMeta(readPrivatePersonaMeta(personaKey) ?? privatePersonaMetadata());
-    } else {
-      setOverrides({});
-      setMeta(null);
     }
-  }, [conversation, personaKey]);
+  }, [conversation]);
+
+  const close = useCallback(() => {
+    flush();
+    onClose();
+  }, [flush, onClose]);
 
   useEffect(() => {
     if (!conversation) {
@@ -95,13 +80,13 @@ export function PrivatePersonaPanel({
         return;
       }
       if (event.key === 'Escape') {
-        onClose();
+        close();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [conversation, onClose]);
+  }, [conversation, close]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -115,22 +100,7 @@ export function PrivatePersonaPanel({
   }
 
   const handleChange = (key: string, label: string, value: PersonaValue) => {
-    if (!conversation || !personaKey) {
-      return;
-    }
-    const previous = values?.[key];
-    setOverrides((current) => ({ ...current, [key]: value }));
-    writePrivatePersonaOverride(personaKey, key, value);
-
-    if (meta) {
-      const nextMeta = appendPersonaHistory(meta, {
-        field: label,
-        from: formatPersonaValue(previous),
-        to: formatPersonaValue(value),
-      });
-      setMeta(nextMeta);
-      writePrivatePersonaMeta(personaKey, nextMeta);
-    }
+    update(key, label, value);
   };
 
   return createPortal(
@@ -142,7 +112,7 @@ export function PrivatePersonaPanel({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          onClick={onClose}
+          onClick={close}
           className="fixed inset-0 z-[110] flex items-stretch justify-center bg-[#05090e]/70 backdrop-blur-sm sm:items-center sm:p-6"
         >
           <motion.div
@@ -209,7 +179,7 @@ export function PrivatePersonaPanel({
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={close}
                 aria-label="关闭私聊人格面板"
                 className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
               >
@@ -312,57 +282,73 @@ export function PrivatePersonaPanel({
                 ref={contentRef}
                 className="min-h-0 flex-1 overflow-y-auto px-4 py-5 [scrollbar-width:thin] sm:px-7 sm:py-6"
               >
-                <AnimatePresence mode="wait" initial={false}>
-                  {metadataActive && meta ? (
-                    <motion.div
-                      key={META_TAB_ID}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      transition={{ duration: 0.2, ease: EASE }}
-                    >
-                      <PersonaMetadataView meta={meta} />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key={activeGroup.id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      transition={{ duration: 0.2, ease: EASE }}
-                    >
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
-                              {activeGroup.title}
-                            </h3>
-                            <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
-                              {activeGroup.tagline}
-                            </span>
+                {!ready ? (
+                  <div className="flex min-h-[18rem] flex-col items-center justify-center gap-2 px-6 text-center">
+                    <span className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-brass-400/70">
+                      {error ? '读取失败' : '正在同步'}
+                    </span>
+                    <p className="font-display text-[1rem] text-mist-200">
+                      {error ? '暂时无法读取这个人的关系属性' : '正在读取私聊人格快照…'}
+                    </p>
+                    <p className="max-w-sm text-[0.78rem] leading-6 text-mist-500">
+                      {error
+                        ? '请确认 API 服务在线后重新打开面板，读取成功前不开放编辑，以免覆盖数据库内容。'
+                        : '读取完成后即可继续编辑，所有修改都会保存到数据库。'}
+                    </p>
+                  </div>
+                ) : (
+                  <AnimatePresence mode="wait" initial={false}>
+                    {metadataActive && meta ? (
+                      <motion.div
+                        key={META_TAB_ID}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, ease: EASE }}
+                      >
+                        <PersonaMetadataView meta={meta} source="database" />
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key={activeGroup.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, ease: EASE }}
+                      >
+                        <div className="flex flex-wrap items-end justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
+                                {activeGroup.title}
+                              </h3>
+                              <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
+                                {activeGroup.tagline}
+                              </span>
+                            </div>
+                            <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
+                              {activeGroup.description}
+                            </p>
                           </div>
-                          <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
-                            {activeGroup.description}
-                          </p>
+                          <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
+                            {activeGroup.fields.length} 项
+                          </span>
                         </div>
-                        <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
-                          {activeGroup.fields.length} 项
-                        </span>
-                      </div>
 
-                      <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
-                        {activeGroup.fields.map((field) => (
-                          <PersonaFieldCard
-                            key={field.key}
-                            field={field}
-                            value={values[field.key]}
-                            onChange={(next) => handleChange(field.key, field.label, next)}
-                          />
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                        <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
+                          {activeGroup.fields.map((field) => (
+                            <PersonaFieldCard
+                              key={field.key}
+                              field={field}
+                              value={values[field.key]}
+                              onChange={(next) => handleChange(field.key, field.label, next)}
+                            />
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
               </div>
             </div>
 
@@ -370,7 +356,20 @@ export function PrivatePersonaPanel({
               <p className="font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
                 对象快照 · {PRIVATE_ATTRIBUTE_COUNT} 项属性
               </p>
-              <p className="text-[0.68rem] text-mist-600">一人一份 · 编辑即时保存在本地</p>
+              <p
+                className={cn(
+                  'text-[0.68rem]',
+                  syncState === 'error' ? 'text-signal-400' : 'text-mist-600',
+                )}
+              >
+                {syncState === 'saving'
+                  ? '正在保存…'
+                  : syncState === 'error'
+                    ? '保存失败，请重试'
+                    : syncState === 'saved'
+                      ? '已保存至数据库'
+                      : '一人一份 · 编辑自动保存至数据库'}
+              </p>
             </footer>
           </motion.div>
         </motion.div>

@@ -5,6 +5,7 @@ import { ChatEventsService } from './chat-events.service.js';
 import { ChatMediaService } from './chat-media.service.js';
 import { ChatMessageProcessor } from './chat-message-processor.service.js';
 import { ChatMessagesService } from './chat-messages.service.js';
+import { ChatPersonaService } from './chat-persona.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
 import { ChatService } from './chat.service.js';
 
@@ -15,6 +16,7 @@ import { ChatService } from './chat.service.js';
     ChatService,
     ChatRuntimeService,
     ChatMessagesService,
+    ChatPersonaService,
     ChatMediaService,
     ChatMessageProcessor,
     ChatEventsService,

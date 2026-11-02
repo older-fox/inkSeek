@@ -129,6 +129,20 @@ export const chatMessageQuerySchema = z.object({
   limit: z.coerce.number().int('数量必须是整数').min(1).max(200).default(50),
 });
 
+export const chatPersonaHistoryEntrySchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  time: z.string().trim().min(1).max(40),
+  field: z.string().trim().min(1).max(80),
+  from: z.string().max(2000),
+  to: z.string().max(2000),
+  reason: z.string().trim().min(1).max(80),
+});
+
+export const saveConversationPersonaSchema = z.object({
+  values: z.record(z.string().min(1).max(80), chatPersonaValueSchema),
+  history: z.array(chatPersonaHistoryEntrySchema).max(200, '人格历史最多保留 200 条').default([]),
+});
+
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
@@ -139,3 +153,4 @@ export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
 export type ChatChannelPersonaInput = z.infer<typeof chatChannelPersonaSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
+export type SaveConversationPersonaInput = z.infer<typeof saveConversationPersonaSchema>;

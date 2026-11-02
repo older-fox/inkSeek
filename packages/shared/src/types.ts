@@ -192,6 +192,38 @@ export interface ChatMessagePage {
   hasMore: boolean;
 }
 
+export interface ChatPersonaHistoryEntry {
+  id: string;
+  time: string;
+  field: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface ChatPersonaMetadata {
+  createdAt: string;
+  updatedAt: string;
+  history: ChatPersonaHistoryEntry[];
+}
+
+/**
+ * Persona state attached to one conversation. GROUP rows are keyed by the
+ * conversation; PRIVATE rows are keyed by (channelId, contactId), so the same
+ * person shares one profile across every private scene in that channel.
+ */
+export interface ChatConversationPersonaRecord {
+  kind: ChatConversationKind;
+  conversationId: string;
+  channelId: string;
+  /** Present for PRIVATE conversations; null for GROUP. */
+  contactId: string | null;
+  values: Record<string, ChatPersonaValue>;
+  meta: ChatPersonaMetadata;
+  /** False when the record is still synthesized from defaults and not yet stored. */
+  persisted: boolean;
+}
+
 export interface ChatGroupMemberSummary {
   id: string;
   externalId: string;

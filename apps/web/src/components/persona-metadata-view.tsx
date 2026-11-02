@@ -51,7 +51,13 @@ function ChangeCell({ entry }: { entry: PersonaHistoryEntry }) {
   );
 }
 
-export function PersonaMetadataView({ meta }: { meta: PersonaMetadata }) {
+export function PersonaMetadataView({
+  meta,
+  source = 'local',
+}: {
+  meta: PersonaMetadata;
+  source?: 'local' | 'database';
+}) {
   const [visible, setVisible] = useState(INITIAL_ROWS);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,7 +99,9 @@ export function PersonaMetadataView({ meta }: { meta: PersonaMetadata }) {
             </span>
           </div>
           <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
-            这份人格快照的创建、更新与变更记录，只保存在本地。
+            {source === 'database'
+              ? '这份人格快照的创建、更新与变更记录，随快照保存在数据库。'
+              : '这份人格快照的创建、更新与变更记录，只保存在本地。'}
           </p>
         </div>
         <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">

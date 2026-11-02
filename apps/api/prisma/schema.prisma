@@ -104,10 +104,11 @@ model ChatChannel {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  contacts      ChatContact[]
-  conversations ChatConversation[]
-  messages      ChatMessageRecord[]
-  persona       ChatChannelPersona?
+  contacts        ChatContact[]
+  conversations   ChatConversation[]
+  messages        ChatMessageRecord[]
+  persona         ChatChannelPersona?
+  privatePersonas ChatPrivatePersona[]
 
   @@unique([platform, accountId])
 }
@@ -143,8 +144,9 @@ model ChatContact {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  messages    ChatMessageRecord[]
-  memberships ChatGroupMember[]
+  messages        ChatMessageRecord[]
+  memberships     ChatGroupMember[]
+  privatePersonas ChatPrivatePersona[]
 
   @@unique([channelId, externalId])
   @@index([channelId])
@@ -165,8 +167,9 @@ model ChatConversation {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
-  messages ChatMessageRecord[]
-  members  ChatGroupMember[]
+  messages     ChatMessageRecord[]
+  members      ChatGroupMember[]
+  groupPersona ChatGroupPersona?
 
   @@unique([channelId, kind, externalId])
   @@index([channelId, kind, lastMessageAt])
@@ -231,6 +234,35 @@ model ChatImageAsset {
   createdAt DateTime          @default(now())
 
   @@index([messageId, position])
+}
+
+/// Long-lived group persona state. Keyed by the conversation so two channels
+/// never share a group's memory, even when the QQ group number matches.
+model ChatGroupPersona {
+  id             String           @id @default(cuid())
+  conversationId String           @unique
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  values         Json
+  history        Json
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+/// Person-level relationship memory, keyed by (channelId, contactId). The same
+/// person reuses this profile across every private and group scene.
+model ChatPrivatePersona {
+  id        String      @id @default(cuid())
+  channelId String
+  channel   ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   ChatContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  values    Json
+  history   Json
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([channelId, contactId])
+  @@index([contactId])
 }
 
 model ChatVoiceAsset {
