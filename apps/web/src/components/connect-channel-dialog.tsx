@@ -116,10 +116,9 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
       const styles = window.getComputedStyle(shell);
       const border =
         Number.parseFloat(styles.borderTopWidth) + Number.parseFloat(styles.borderBottomWidth);
+      // offsetHeight ignores the entrance scale transform; the extra pixel absorbs rounding.
       const next =
-        header.getBoundingClientRect().height +
-        content.getBoundingClientRect().height +
-        (Number.isFinite(border) ? border : 0);
+        header.offsetHeight + content.offsetHeight + (Number.isFinite(border) ? border : 0) + 1;
       setFrameHeight(next > 0 ? next : null);
     };
 
