@@ -252,18 +252,24 @@ export function PersonaCard({ persona }: { persona: Persona }) {
         'group block w-full cursor-pointer text-left [perspective:1600px] transition-transform duration-300 hover:-translate-y-1 focus-visible:outline-none',
       )}
     >
-      <motion.div
-        animate={{ rotateY: flipped ? 180 : 0 }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="relative h-full w-full [transform-style:preserve-3d] [will-change:transform]"
-      >
-        <div className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] [backface-visibility:hidden]">
+      <div className="relative h-full w-full [transform-style:preserve-3d]">
+        <motion.div
+          initial={false}
+          animate={{ rotateY: flipped ? 180 : 0 }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+        >
           <PersonaFront persona={persona} />
-        </div>
-        <div className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] [backface-visibility:hidden] [transform:rotateY(180deg)]">
+        </motion.div>
+        <motion.div
+          initial={false}
+          animate={{ rotateY: flipped ? 0 : -180 }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+        >
           <PersonaBack persona={persona} />
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
     </button>
   );
 }
