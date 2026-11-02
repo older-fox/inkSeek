@@ -4,3 +4,7 @@ dist
 coverage
 pnpm-lock.yaml
 apps/api/src/generated
+
+# Escaped raw markdown archives (blank lines are significant)
+doc/design.md
+doc/values.md

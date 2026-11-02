@@ -207,8 +207,7 @@ export function ModelProviderSection({ providers }: ModelProviderSectionProps) {
             <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-jade-400/20 bg-jade-400/[0.06] px-4 py-3">
               <CheckCircle2 className="size-4 shrink-0 text-jade-300" />
               <p className="min-w-0 flex-1 text-[0.78rem] text-mist-300">
-                <span className="font-medium text-jade-300">{lastSaved.name}</span>{' '}
-                测试通过并已保存
+                <span className="font-medium text-jade-300">{lastSaved.name}</span> 测试通过并已保存
                 <span className="ml-2 font-mono text-[0.62rem] text-mist-600">
                   {lastSaved.latencyMs}ms
                 </span>
@@ -345,7 +344,8 @@ export function ModelProviderSection({ providers }: ModelProviderSectionProps) {
 
               <div className="flex flex-col gap-3 border-t border-mist-100/[0.06] pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-[0.68rem] leading-5 text-mist-600">
-                  保存时会请求 <span className="font-mono text-mist-500">{protocolMeta.placeholder}/models</span>
+                  保存时会请求{' '}
+                  <span className="font-mono text-mist-500">{protocolMeta.placeholder}/models</span>
                 </p>
                 <PrimaryButton
                   type="submit"
@@ -444,7 +444,9 @@ function ProviderRow({
             </span>
           </div>
 
-          <p className="mt-1.5 truncate font-mono text-[0.68rem] text-mist-600">{provider.baseUrl}</p>
+          <p className="mt-1.5 truncate font-mono text-[0.68rem] text-mist-600">
+            {provider.baseUrl}
+          </p>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.64rem] text-mist-600">
             <span className="inline-flex items-center gap-1">

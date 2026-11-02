@@ -4,12 +4,12 @@ inkSeek 是一个 Agent 聊天控制平台，后续将支持定时任务、聊�
 
 ## 文档索引
 
-| 文档 | 内容 |
-| --- | --- |
-| [architecture/overview.md](./architecture/overview.md) | 总体架构、目录结构、配置策略、认证与引导流程、数据模型 |
-| [adr/0001-stack-selection.md](./adr/0001-stack-selection.md) | 技术选型决策记录（含取舍理由） |
-| [api/README.md](./api/README.md) | HTTP API 契约、错误格式、鉴权说明 |
-| [runbooks/local-development.md](./runbooks/local-development.md) | 本地开发启动、迁移、排障手册 |
+| 文档                                                             | 内容                                                   |
+| ---------------------------------------------------------------- | ------------------------------------------------------ |
+| [architecture/overview.md](./architecture/overview.md)           | 总体架构、目录结构、配置策略、认证与引导流程、数据模型 |
+| [adr/0001-stack-selection.md](./adr/0001-stack-selection.md)     | 技术选型决策记录（含取舍理由）                         |
+| [api/README.md](./api/README.md)                                 | HTTP API 契约、错误格式、鉴权说明                      |
+| [runbooks/local-development.md](./runbooks/local-development.md) | 本地开发启动、迁移、排障手册                           |
 
 ## 当前能力
 

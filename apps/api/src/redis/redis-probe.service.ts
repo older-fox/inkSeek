@@ -48,7 +48,10 @@ export class RedisProbeService {
           await client.ping();
         })(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('Redis connection timed out')), CONNECT_TIMEOUT_MS);
+          timer = setTimeout(
+            () => reject(new Error('Redis connection timed out')),
+            CONNECT_TIMEOUT_MS,
+          );
         }),
       ]);
     } finally {

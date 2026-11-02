@@ -6,10 +6,7 @@ import {
 } from '@inkseek/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import {
-  AnimatePresence,
-  motion,
-} from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -39,7 +36,11 @@ import { bootstrapStatusQuery, meQuery } from '@/lib/queries';
 
 const redisFormSchema = z.object({
   host: z.string().trim().min(1, '请填写 Redis 主机地址'),
-  port: z.number().int('端口必须是整数').min(1, '端口范围为 1-65535').max(65535, '端口范围为 1-65535'),
+  port: z
+    .number()
+    .int('端口必须是整数')
+    .min(1, '端口范围为 1-65535')
+    .max(65535, '端口范围为 1-65535'),
   db: z.number().int('数据库编号必须是整数').min(0, '数据库编号不能小于 0'),
   password: z.string().max(256, '密码过长').optional(),
   tls: z.boolean(),
@@ -402,7 +403,11 @@ export function SetupPage() {
                           className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
                           aria-label={showPassword ? '隐藏密码' : '显示密码'}
                         >
-                          {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                          {showPassword ? (
+                            <EyeOff className="size-4" />
+                          ) : (
+                            <Eye className="size-4" />
+                          )}
                         </button>
                       }
                     >

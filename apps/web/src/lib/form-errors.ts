@@ -14,7 +14,8 @@ export function applyApiFieldErrors<T extends FieldValues>(
 
   for (const [key, messages] of Object.entries(error.fieldErrors)) {
     const field = stripPrefixes.reduce(
-      (current, prefix) => (current.startsWith(`${prefix}.`) ? current.slice(prefix.length + 1) : current),
+      (current, prefix) =>
+        current.startsWith(`${prefix}.`) ? current.slice(prefix.length + 1) : current,
       key,
     );
 

@@ -89,8 +89,7 @@ function PersonaFront({ persona }: { persona: Persona }) {
           <p className="mt-1 text-[0.7rem] text-mist-500">
             {persona.occupation}
             <span className="mx-1.5 text-mist-600">·</span>
-            {persona.age} 岁
-            <span className="mx-1.5 text-mist-600">·</span>
+            {persona.age} 岁<span className="mx-1.5 text-mist-600">·</span>
             {persona.gender}
           </p>
         </div>
@@ -174,8 +173,7 @@ function PersonaBack({ persona }: { persona: Persona }) {
           <p className="mt-1 text-[0.68rem] text-mist-500">
             {persona.occupation}
             <span className="mx-1.5 text-mist-600">·</span>
-            {persona.age} 岁
-            <span className="mx-1.5 text-mist-600">·</span>
+            {persona.age} 岁<span className="mx-1.5 text-mist-600">·</span>
             {persona.gender}
           </p>
         </div>

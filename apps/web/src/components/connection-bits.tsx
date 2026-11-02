@@ -4,8 +4,7 @@ import { PLATFORMS, type ChannelAccent, type PlatformId } from '@/lib/connection
 const ACCENT_SURFACE: Record<ChannelAccent, string> = {
   brass:
     'border-brass-400/25 bg-gradient-to-br from-brass-400/25 via-brass-400/10 to-transparent text-brass-300',
-  jade:
-    'border-jade-400/25 bg-gradient-to-br from-jade-400/25 via-jade-400/10 to-transparent text-jade-300',
+  jade: 'border-jade-400/25 bg-gradient-to-br from-jade-400/25 via-jade-400/10 to-transparent text-jade-300',
 };
 
 const AVATAR_SIZE = {

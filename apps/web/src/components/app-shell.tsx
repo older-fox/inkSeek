@@ -93,7 +93,8 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
             Control
           </p>
           {navItems.map(({ label, icon: Icon, to, soon }) => {
-            const active = to === '/connections' ? pathname.startsWith('/connections') : pathname === to;
+            const active =
+              to === '/connections' ? pathname.startsWith('/connections') : pathname === to;
             const content = (
               <>
                 <Icon className="size-[1.05rem]" strokeWidth={1.6} />
@@ -135,7 +136,9 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
               {initial}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[0.82rem] font-medium text-mist-200">{user.displayName}</p>
+              <p className="truncate text-[0.82rem] font-medium text-mist-200">
+                {user.displayName}
+              </p>
               <p className="truncate font-mono text-[0.6rem] uppercase tracking-[0.14em] text-mist-600">
                 {user.role === 'ADMIN' ? 'Administrator' : 'Member'}
               </p>

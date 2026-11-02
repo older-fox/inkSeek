@@ -45,12 +45,15 @@ export function ConnectionsLayout() {
             互联中心
           </h1>
           <p className="mt-3 max-w-2xl text-[0.9rem] leading-7 text-mist-500">
-            TA 与现实世界之间的桥。接入即时通讯平台后，账号资料会自动同步，私聊与群聊也会按平台汇入这里。
+            TA
+            与现实世界之间的桥。接入即时通讯平台后，账号资料会自动同步，私聊与群聊也会按平台汇入这里。
           </p>
         </div>
 
         <div className="w-full shrink-0 rounded-2xl border border-mist-100/[0.07] bg-ink-900/30 px-4 py-3 sm:w-[17rem]">
-          <p className="font-mono text-[0.52rem] uppercase tracking-[0.2em] text-mist-600">Bridge</p>
+          <p className="font-mono text-[0.52rem] uppercase tracking-[0.2em] text-mist-600">
+            Bridge
+          </p>
           <div className="mt-1.5 flex items-center gap-2">
             <span className="relative flex size-1.5">
               {channels.length > 0 ? (

@@ -25,15 +25,15 @@
 
 常见 `code`：
 
-| code | HTTP | 说明 |
-| --- | --- | --- |
-| `VALIDATION_ERROR` | 400 | Zod 校验失败 |
-| `REDIS_UNREACHABLE` | 400 | Redis 探活失败 |
-| `INVALID_CREDENTIALS` | 401 | 用户名或密码错误 |
-| `UNAUTHORIZED` | 401 | 未登录或会话失效 |
-| `ALREADY_INITIALIZED` | 409 | 系统已完成初始化 |
-| `NOT_FOUND` | 404 | 资源不存在 |
-| `INTERNAL_ERROR` | 500 | 未预期错误 |
+| code                  | HTTP | 说明             |
+| --------------------- | ---- | ---------------- |
+| `VALIDATION_ERROR`    | 400  | Zod 校验失败     |
+| `REDIS_UNREACHABLE`   | 400  | Redis 探活失败   |
+| `INVALID_CREDENTIALS` | 401  | 用户名或密码错误 |
+| `UNAUTHORIZED`        | 401  | 未登录或会话失效 |
+| `ALREADY_INITIALIZED` | 409  | 系统已完成初始化 |
+| `NOT_FOUND`           | 404  | 资源不存在       |
+| `INTERNAL_ERROR`      | 500  | 未预期错误       |
 
 ## 端点
 

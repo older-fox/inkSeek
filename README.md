@@ -4,13 +4,13 @@ Agent 聊天控制平台。TypeScript 全栈 monorepo，规划能力包括定时
 
 ## 技术栈
 
-| 层 | 技术 |
-| --- | --- |
-| 构建 | pnpm 12 workspace + Turborepo 2 + TypeScript 6 |
-| 后端 | NestJS 12 (ESM) + Fastify 5 + Prisma 7 + PostgreSQL |
+| 层   | 技术                                                                |
+| ---- | ------------------------------------------------------------------- |
+| 构建 | pnpm 12 workspace + Turborepo 2 + TypeScript 6                      |
+| 后端 | NestJS 12 (ESM) + Fastify 5 + Prisma 7 + PostgreSQL                 |
 | 前端 | React 19 + Vite 8 + TanStack Router/Query + Tailwind CSS 4 + Motion |
-| 校验 | Zod（`packages/shared` 前后端共享） |
-| 字体 | Sora / Manrope / Noto Sans SC / JetBrains Mono（自托管） |
+| 校验 | Zod（`packages/shared` 前后端共享）                                 |
+| 字体 | Sora / Manrope / Noto Sans SC / JetBrains Mono（自托管）            |
 
 ## 快速开始
 
@@ -51,16 +51,16 @@ doc             架构、ADR、API 与开发手册
 
 ## 脚本
 
-| 命令 | 说明 |
-| --- | --- |
-| `pnpm dev` | 并行启动 API 与 Web |
-| `pnpm build` | 构建全部应用 |
-| `pnpm typecheck` | 全仓类型检查 |
-| `pnpm lint` | ESLint |
-| `pnpm format` | Prettier 格式化 |
-| `pnpm db:migrate` | 创建并应用开发迁移 |
-| `pnpm db:deploy` | 应用已有迁移 |
-| `pnpm db:studio` | Prisma Studio |
+| 命令              | 说明                |
+| ----------------- | ------------------- |
+| `pnpm dev`        | 并行启动 API 与 Web |
+| `pnpm build`      | 构建全部应用        |
+| `pnpm typecheck`  | 全仓类型检查        |
+| `pnpm lint`       | ESLint              |
+| `pnpm format`     | Prettier 格式化     |
+| `pnpm db:migrate` | 创建并应用开发迁移  |
+| `pnpm db:deploy`  | 应用已有迁移        |
+| `pnpm db:studio`  | Prisma Studio       |
 
 ## 文档
 

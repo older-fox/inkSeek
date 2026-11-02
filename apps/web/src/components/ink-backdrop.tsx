@@ -7,7 +7,10 @@ interface InkBackdropProps {
 
 export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
   return (
-    <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 overflow-hidden', className)}>
+    <div
+      aria-hidden="true"
+      className={cn('pointer-events-none absolute inset-0 overflow-hidden', className)}
+    >
       <div className={cn('absolute inset-0 ink-grid', subtle ? 'opacity-30' : 'opacity-60')} />
 
       <div
@@ -35,8 +38,7 @@ export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
       <div
         className="absolute bottom-[-18rem] left-[30%] size-[34rem] rounded-full blur-3xl animate-drift-a"
         style={{
-          background:
-            'radial-gradient(circle at center, var(--orb-amber), transparent 66%)',
+          background: 'radial-gradient(circle at center, var(--orb-amber), transparent 66%)',
           animationDelay: '-7s',
         }}
       />

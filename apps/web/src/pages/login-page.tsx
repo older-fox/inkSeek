@@ -2,7 +2,16 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { loginSchema, type LoginInput } from '@inkseek/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowRight, CalendarClock, Eye, EyeOff, LockKeyhole, MessagesSquare, UserRound, Waves } from 'lucide-react';
+import {
+  ArrowRight,
+  CalendarClock,
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  MessagesSquare,
+  UserRound,
+  Waves,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -70,9 +79,7 @@ export function LoginPage() {
         <h2 className="mt-5 font-display text-2xl font-semibold tracking-tight text-mist-100">
           登录控制台
         </h2>
-        <p className="mt-2 text-sm leading-6 text-mist-500">
-          使用初始化时创建的管理员账户继续。
-        </p>
+        <p className="mt-2 text-sm leading-6 text-mist-500">使用初始化时创建的管理员账户继续。</p>
 
         <form className="mt-7 space-y-5" onSubmit={onSubmit} noValidate>
           <Field label="用户名" htmlFor="username" error={errors.username?.message}>

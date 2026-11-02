@@ -14,7 +14,14 @@ export function BrandMark({ className, compact = false }: BrandMarkProps) {
       <span className="relative grid size-10 shrink-0 place-items-center rounded-[0.9rem] border border-brass-400/25 bg-ink-900/80 shadow-[inset_0_1px_0_rgba(244,239,230,0.08)]">
         <svg viewBox="0 0 32 32" className="size-6" aria-hidden="true">
           <defs>
-            <linearGradient id={gradientId} x1="6" y1="4" x2="26" y2="28" gradientUnits="userSpaceOnUse">
+            <linearGradient
+              id={gradientId}
+              x1="6"
+              y1="4"
+              x2="26"
+              y2="28"
+              gradientUnits="userSpaceOnUse"
+            >
               <stop stopColor="#F7E5BF" />
               <stop offset="1" stopColor="#B9853F" />
             </linearGradient>

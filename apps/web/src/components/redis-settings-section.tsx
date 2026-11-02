@@ -215,7 +215,9 @@ export function RedisSettingsSection({ redis }: RedisSettingsSectionProps) {
               type={showPassword ? 'text' : 'password'}
               autoComplete="new-password"
               disabled={clearPassword}
-              placeholder={redis?.hasPassword && !clearPassword ? '留空保持已保存密码' : '留空表示无密码'}
+              placeholder={
+                redis?.hasPassword && !clearPassword ? '留空保持已保存密码' : '留空表示无密码'
+              }
               {...form.register('password')}
             />
           </InputShell>

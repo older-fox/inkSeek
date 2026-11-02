@@ -33,17 +33,17 @@ pnpm dev              # 同时启动 API(3100) 与 Web(5173)
 
 ## 常用脚本
 
-| 命令 | 说明 |
-| --- | --- |
-| `pnpm dev` | Turborepo 并行启动全部应用 |
-| `pnpm build` | 构建全部包与应用 |
-| `pnpm typecheck` | 全仓类型检查 |
-| `pnpm lint` | ESLint |
-| `pnpm format` | Prettier 格式化 |
-| `pnpm db:generate` | 重新生成 Prisma Client |
-| `pnpm db:migrate` | 创建并应用开发迁移 |
-| `pnpm db:deploy` | 生产模式应用迁移 |
-| `pnpm db:studio` | 打开 Prisma Studio |
+| 命令               | 说明                       |
+| ------------------ | -------------------------- |
+| `pnpm dev`         | Turborepo 并行启动全部应用 |
+| `pnpm build`       | 构建全部包与应用           |
+| `pnpm typecheck`   | 全仓类型检查               |
+| `pnpm lint`        | ESLint                     |
+| `pnpm format`      | Prettier 格式化            |
+| `pnpm db:generate` | 重新生成 Prisma Client     |
+| `pnpm db:migrate`  | 创建并应用开发迁移         |
+| `pnpm db:deploy`   | 生产模式应用迁移           |
+| `pnpm db:studio`   | 打开 Prisma Studio         |
 
 单独启动：
 
@@ -54,11 +54,11 @@ pnpm --filter @inkseek/web dev
 
 ## 端口
 
-| 服务 | 端口 |
-| --- | --- |
+| 服务        | 端口               |
+| ----------- | ------------------ |
 | Web（Vite） | 5173（strictPort） |
-| API | 3100 |
-| Swagger | 3100 `/api/docs` |
+| API         | 3100               |
+| Swagger     | 3100 `/api/docs`   |
 
 Vite 将 `/api` 代理到 `http://localhost:3100`。如端口被占用，需同时调整 `apps/api/src/main.ts` 与 `apps/web/vite.config.ts`。
 

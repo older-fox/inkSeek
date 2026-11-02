@@ -37,7 +37,10 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
     if (!user) {
-      throw new UnauthorizedException({ code: 'SESSION_INVALID', message: '登录已失效，请重新登录' });
+      throw new UnauthorizedException({
+        code: 'SESSION_INVALID',
+        message: '登录已失效，请重新登录',
+      });
     }
 
     return toAuthUser(user);

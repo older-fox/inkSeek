@@ -44,9 +44,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return undefined as T;
   }
 
-  const body = (await response.json().catch(() => null)) as
-    | (T & Partial<ApiErrorBody>)
-    | null;
+  const body = (await response.json().catch(() => null)) as (T & Partial<ApiErrorBody>) | null;
 
   if (!response.ok) {
     const error = body?.error;

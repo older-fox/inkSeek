@@ -20,26 +20,26 @@ pnpm workspace + Turborepo 管理任务编排；`apps/*` 与 `packages/*` 均为
 
 ### API（apps/api）
 
-| 目录 | 职责 |
-| --- | --- |
-| `src/main.ts` | Fastify 适配器、Cookie 插件、全局异常过滤、Swagger（`/api/docs`）、监听 3100 |
-| `src/database/` | `PrismaService`（全局模块），通过 `PrismaPg` 驱动适配器连接 PostgreSQL |
-| `src/config/` | 系统配置读写服务（仅走 Prisma）、配置键常量、全局模块 |
-| `src/auth/` | 登录、会话解析、Cookie 签发、`AuthGuard`、`@CurrentUser()` |
-| `src/bootstrap/` | 初始化状态、Redis 探活、首次初始化事务 |
-| `src/health/` | 健康检查（含数据库连通性） |
-| `src/common/` | Zod 校验管道、异常过滤器、scrypt 密码服务 |
-| `src/generated/prisma/` | Prisma 生成的客户端（构建产物，已 gitignore） |
+| 目录                    | 职责                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `src/main.ts`           | Fastify 适配器、Cookie 插件、全局异常过滤、Swagger（`/api/docs`）、监听 3100 |
+| `src/database/`         | `PrismaService`（全局模块），通过 `PrismaPg` 驱动适配器连接 PostgreSQL       |
+| `src/config/`           | 系统配置读写服务（仅走 Prisma）、配置键常量、全局模块                        |
+| `src/auth/`             | 登录、会话解析、Cookie 签发、`AuthGuard`、`@CurrentUser()`                   |
+| `src/bootstrap/`        | 初始化状态、Redis 探活、首次初始化事务                                       |
+| `src/health/`           | 健康检查（含数据库连通性）                                                   |
+| `src/common/`           | Zod 校验管道、异常过滤器、scrypt 密码服务                                    |
+| `src/generated/prisma/` | Prisma 生成的客户端（构建产物，已 gitignore）                                |
 
 ### Web（apps/web）
 
-| 目录 | 职责 |
-| --- | --- |
-| `src/router.tsx` | 路由定义与 `beforeLoad` 守卫（初始化状态 / 登录态跳转） |
-| `src/lib/` | API 客户端、Query 定义、表单错误映射、QueryClient |
-| `src/components/` | 品牌标识、背景、表单控件、按钮、认证布局、控制台外壳 |
-| `src/pages/` | 引导页、登录页、空首页 |
-| `src/styles.css` | Tailwind 4 主题变量、玻璃面板、网格背景、动画关键帧 |
+| 目录              | 职责                                                    |
+| ----------------- | ------------------------------------------------------- |
+| `src/router.tsx`  | 路由定义与 `beforeLoad` 守卫（初始化状态 / 登录态跳转） |
+| `src/lib/`        | API 客户端、Query 定义、表单错误映射、QueryClient       |
+| `src/components/` | 品牌标识、背景、表单控件、按钮、认证布局、控制台外壳    |
+| `src/pages/`      | 引导页、登录页、空首页                                  |
+| `src/styles.css`  | Tailwind 4 主题变量、玻璃面板、网格背景、动画关键帧     |
 
 ## 配置策略（强约束）
 
