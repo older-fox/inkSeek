@@ -391,7 +391,7 @@ export function LevelControl({
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         className="wizard-range mt-2"
-        style={{ background: levelTrack(percent) }}
+        style={{ '--range-track': levelTrack(percent) } as CSSProperties}
         aria-label={label}
         aria-valuetext={current}
       />
@@ -463,7 +463,7 @@ export function SliderControl({
           onChange(Math.min(max, Math.max(min, next)));
         }}
         className="wizard-range mt-2"
-        style={{ background: sliderTrack(min, max, clamped) }}
+        style={{ '--range-track': sliderTrack(min, max, clamped) } as CSSProperties}
         aria-label={label}
         aria-valuetext={`${clamped}，可调范围 ${min} 到 ${max}`}
       />
