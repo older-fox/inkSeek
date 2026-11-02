@@ -9,9 +9,9 @@ import {
   Compass,
   LoaderCircle,
   LogOut,
-  MessageSquare,
   Settings2,
   UsersRound,
+  Waypoints,
 } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { BrandMark } from '@/components/brand-mark';
@@ -28,14 +28,14 @@ interface AppShellProps {
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  to?: '/' | '/personas';
+  to?: '/' | '/personas' | '/connections';
   soon?: boolean;
 }
 
 const navItems: NavItem[] = [
   { label: '概览', icon: Compass, to: '/' },
   { label: '人格中心', icon: UsersRound, to: '/personas' },
-  { label: '对话', icon: MessageSquare, soon: true },
+  { label: '互联中心', icon: Waypoints, to: '/connections' },
   { label: '智能体', icon: Bot, soon: true },
   { label: '定时任务', icon: CalendarClock, soon: true },
   { label: '数据洞察', icon: BarChart3, soon: true },
@@ -45,8 +45,17 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
   const initial = (user.displayName || user.username).slice(0, 1).toUpperCase();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const mainRef = useRef<HTMLElement>(null);
-  const sectionLabel =
-    pathname === '/personas' ? '人格中心' : pathname === '/settings' ? '系统设置' : '概览';
+  const sectionLabel = pathname.startsWith('/connections')
+    ? pathname === '/connections/private'
+      ? '互联中心 · 私聊'
+      : pathname === '/connections/groups'
+        ? '互联中心 · 群聊'
+        : '互联中心'
+    : pathname === '/personas'
+      ? '人格中心'
+      : pathname === '/settings'
+        ? '系统设置'
+        : '概览';
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
@@ -84,6 +93,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
             Control
           </p>
           {navItems.map(({ label, icon: Icon, to, soon }) => {
+            const active = to === '/connections' ? pathname.startsWith('/connections') : pathname === to;
             const content = (
               <>
                 <Icon className="size-[1.05rem]" strokeWidth={1.6} />
@@ -100,7 +110,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
               <Link
                 key={label}
                 to={to}
-                data-active={pathname === to ? 'true' : 'false'}
+                data-active={active ? 'true' : 'false'}
                 className="nav-item w-full text-left"
               >
                 {content}

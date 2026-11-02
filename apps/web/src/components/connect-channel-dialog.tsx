@@ -1,0 +1,406 @@
+import { Check, ChevronRight, LoaderCircle, RadioTower, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { GhostButton, PrimaryButton } from '@/components/button';
+import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
+import { cn } from '@/lib/cn';
+import {
+  createNapCatChannel,
+  NAPCAT_ACCOUNT,
+  PLATFORMS,
+  PLATFORM_LIST,
+  type Channel,
+  type PlatformDefinition,
+  type PlatformId,
+} from '@/lib/connections';
+
+interface ConnectChannelDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onConnected: (channel: Channel) => void;
+  connectedPlatforms: readonly PlatformId[];
+}
+
+type Phase = 'choose' | 'connecting' | 'ready';
+
+const CONNECT_STEPS = ['建立与 NapCat 的本地通道', '读取当前登录账号资料', '同步全部私聊与群聊'];
+
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+export function ConnectChannelDialog({
+  open,
+  onClose,
+  onConnected,
+  connectedPlatforms,
+}: ConnectChannelDialogProps) {
+  const [phase, setPhase] = useState<Phase>('choose');
+  const [progress, setProgress] = useState(0);
+  const [activePlatform, setActivePlatform] = useState<PlatformId>('qq');
+
+  useEffect(() => {
+    if (!open) {
+      setPhase('choose');
+      setProgress(0);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || phase !== 'connecting') {
+      return undefined;
+    }
+
+    setProgress(0);
+    const timers = [
+      window.setTimeout(() => setProgress(1), 480),
+      window.setTimeout(() => setProgress(2), 1020),
+      window.setTimeout(() => setPhase('ready'), 1680),
+    ];
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [open, phase]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  const handleSelect = (platform: PlatformDefinition) => {
+    if (!platform.available || connectedPlatforms.includes(platform.id)) {
+      return;
+    }
+
+    setActivePlatform(platform.id);
+    setPhase('connecting');
+  };
+
+  const handleConfirm = () => {
+    onConnected(createNapCatChannel());
+    onClose();
+  };
+
+  const platform = PLATFORMS[activePlatform];
+
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="connect-channel"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={onClose}
+          className="fixed inset-0 z-[110] flex items-stretch justify-center bg-[#05090e]/70 backdrop-blur-sm sm:items-center sm:p-6"
+        >
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="connect-channel-title"
+            onClick={(event) => event.stopPropagation()}
+            initial={{ opacity: 0, y: 24, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 18, scale: 0.99 }}
+            transition={{ duration: 0.32, ease: EASE }}
+            className="relative flex h-dvh w-full flex-col overflow-hidden bg-ink-900 text-mist-100 sm:h-auto sm:max-h-[min(92dvh,46rem)] sm:max-w-2xl sm:rounded-[1.6rem] sm:border sm:border-mist-100/10 sm:shadow-[0_40px_120px_-30px_rgba(0,0,0,0.75)]"
+          >
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 h-36 opacity-70"
+              style={{
+                background:
+                  'radial-gradient(26rem 11rem at 18% 0%, var(--orb-brass), transparent 70%)',
+              }}
+            />
+
+            <div className="relative flex items-center justify-between gap-4 px-6 pt-6 sm:px-8">
+              <span className="font-mono text-[0.58rem] uppercase tracking-[0.3em] text-brass-400/75">
+                {phase === 'choose' ? 'Connect Channel' : phase === 'connecting' ? 'Handshake' : 'Account Found'}
+              </span>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="关闭"
+                className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="relative min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-4 sm:px-8 sm:pb-8">
+              <AnimatePresence mode="wait" initial={false}>
+                {phase === 'choose' && (
+                  <motion.div
+                    key="choose"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22, ease: EASE }}
+                  >
+                    <h2
+                      id="connect-channel-title"
+                      className="font-display text-[1.6rem] font-semibold leading-tight tracking-[-0.02em] text-mist-100"
+                    >
+                      把 TA 接到现实世界
+                    </h2>
+                    <p className="mt-3 max-w-lg text-[0.82rem] leading-6 text-mist-500">
+                      选择一个即时通讯平台。接入后，登录账号资料会自动同步，收到的私聊与群聊消息也会汇入互联中心。
+                    </p>
+
+                    <div className="mt-6 space-y-2.5">
+                      {PLATFORM_LIST.map((item) => {
+                        const connected = connectedPlatforms.includes(item.id);
+                        const selectable = item.available && !connected;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            disabled={!selectable}
+                            onClick={() => handleSelect(item)}
+                            className={cn(
+                              'group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition',
+                              selectable
+                                ? 'border-mist-100/[0.08] bg-ink-950/25 hover:border-brass-400/35 hover:bg-ink-950/45'
+                                : 'cursor-not-allowed border-mist-100/[0.06] bg-ink-950/20 opacity-55',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'grid size-11 shrink-0 place-items-center rounded-xl border font-display text-[0.9rem] font-semibold',
+                                item.accent === 'jade'
+                                  ? 'border-jade-400/25 bg-gradient-to-br from-jade-400/25 to-transparent text-jade-300'
+                                  : 'border-brass-400/25 bg-gradient-to-br from-brass-400/25 to-transparent text-brass-300',
+                              )}
+                            >
+                              {item.short}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <span className="text-[0.86rem] font-medium text-mist-200">
+                                  {item.name}
+                                </span>
+                                <span className="font-mono text-[0.55rem] uppercase tracking-[0.14em] text-mist-600">
+                                  {item.connector}
+                                </span>
+                              </span>
+                              <span className="mt-1 block text-[0.66rem] leading-5 text-mist-600">
+                                {item.description}
+                              </span>
+                            </span>
+                            <span
+                              className={cn(
+                                'shrink-0 rounded-full border px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em]',
+                                connected
+                                  ? 'border-jade-400/25 bg-jade-400/10 text-jade-300'
+                                  : item.available
+                                    ? 'border-brass-400/25 bg-brass-400/[0.08] text-brass-300'
+                                    : 'border-mist-100/10 text-mist-600',
+                              )}
+                            >
+                              {connected ? '已接入' : item.available ? '可接入' : '规划中'}
+                            </span>
+                            <ChevronRight className="size-4 shrink-0 text-mist-600 transition group-hover:text-brass-300" />
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <p className="mt-5 flex items-start gap-2 rounded-xl border border-mist-100/[0.06] bg-ink-950/20 px-3.5 py-2.5 text-[0.64rem] leading-5 text-mist-600">
+                      <RadioTower className="mt-0.5 size-3.5 shrink-0 text-brass-400/70" />
+                      当前版本仅演示 QQ · NapCat 的接入流程，账号资料与消息均为模拟数据。
+                    </p>
+                  </motion.div>
+                )}
+
+                {phase === 'connecting' && (
+                  <motion.div
+                    key="connecting"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22, ease: EASE }}
+                    className="py-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-12 place-items-center rounded-2xl border border-brass-400/25 bg-brass-400/10">
+                        <LoaderCircle className="size-5 animate-spin text-brass-300" />
+                      </span>
+                      <div>
+                        <h2
+                          id="connect-channel-title"
+                          className="font-display text-[1.35rem] font-semibold text-mist-100"
+                        >
+                          正在连接 {platform.connector}
+                        </h2>
+                        <p className="mt-0.5 text-[0.7rem] text-mist-600">
+                          正在读取 {platform.name} 当前登录的账号…
+                        </p>
+                      </div>
+                    </div>
+
+                    <ol className="mt-6 space-y-2.5">
+                      {CONNECT_STEPS.map((step, index) => {
+                        const done = index < progress;
+                        const active = index === progress;
+
+                        return (
+                          <li
+                            key={step}
+                            className={cn(
+                              'flex items-center gap-3 rounded-xl border px-3.5 py-2.5 transition',
+                              done
+                                ? 'border-jade-400/20 bg-jade-400/[0.05]'
+                                : active
+                                  ? 'border-brass-400/25 bg-brass-400/[0.06]'
+                                  : 'border-mist-100/[0.06] bg-ink-950/20',
+                            )}
+                          >
+                            <span className="grid size-5 shrink-0 place-items-center">
+                              {done ? (
+                                <Check className="size-3.5 text-jade-400" strokeWidth={2.4} />
+                              ) : active ? (
+                                <LoaderCircle className="size-3.5 animate-spin text-brass-300" />
+                              ) : (
+                                <span className="size-1.5 rounded-full bg-mist-600/50" />
+                              )}
+                            </span>
+                            <span
+                              className={cn(
+                                'text-[0.72rem]',
+                                done ? 'text-mist-400' : active ? 'text-mist-200' : 'text-mist-600',
+                              )}
+                            >
+                              {step}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+
+                    <div className="mt-5 flex items-center gap-3 rounded-2xl border border-mist-100/[0.06] bg-ink-950/20 p-3.5">
+                      <span className="size-11 shrink-0 animate-pulse rounded-xl bg-mist-100/[0.06]" />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <span className="block h-2.5 w-24 animate-pulse rounded-full bg-mist-100/[0.08]" />
+                        <span className="block h-2 w-40 animate-pulse rounded-full bg-mist-100/[0.05]" />
+                      </div>
+                      <PlatformChip platform={activePlatform} connector />
+                    </div>
+
+                    <div className="mt-5 flex justify-end">
+                      <GhostButton type="button" onClick={onClose} className="h-9 px-3 text-[0.7rem]">
+                        取消
+                      </GhostButton>
+                    </div>
+                  </motion.div>
+                )}
+
+                {phase === 'ready' && (
+                  <motion.div
+                    key="ready"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22, ease: EASE }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-12 place-items-center rounded-2xl border border-jade-400/25 bg-jade-400/10 text-jade-400">
+                        <Check className="size-5" strokeWidth={2.2} />
+                      </span>
+                      <div>
+                        <h2
+                          id="connect-channel-title"
+                          className="font-display text-[1.35rem] font-semibold text-mist-100"
+                        >
+                          已找到登录账号
+                        </h2>
+                        <p className="mt-1 text-[0.7rem] leading-5 text-mist-600">
+                          资料由 {platform.connector} 自动读取。确认后即可开始接收消息。
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl border border-mist-100/[0.08] bg-ink-950/25 p-4">
+                      <div className="flex items-start gap-3.5">
+                        <ChannelAvatar
+                          initials={NAPCAT_ACCOUNT.initials}
+                          accent={platform.accent}
+                          size="lg"
+                          online
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-display text-[1.05rem] font-semibold text-mist-100">
+                              {NAPCAT_ACCOUNT.displayName}
+                            </p>
+                            <PlatformChip platform={activePlatform} connector />
+                          </div>
+                          <p className="mt-1 font-mono text-[0.62rem] tracking-[0.08em] text-mist-500">
+                            QQ {NAPCAT_ACCOUNT.accountId}
+                          </p>
+                          <p className="mt-2 border-l-2 border-brass-400/40 pl-2.5 text-[0.68rem] leading-5 text-mist-500">
+                            {NAPCAT_ACCOUNT.signature}
+                          </p>
+                        </div>
+                      </div>
+
+                      <dl className="mt-4 grid gap-2 border-t border-mist-100/[0.06] pt-3.5 sm:grid-cols-2">
+                        {[
+                          { term: '登录状态', value: '在线 · 已授权' },
+                          { term: '接入方式', value: `${platform.name} · ${platform.connector}` },
+                          { term: '消息范围', value: '全部私聊与群聊' },
+                          { term: '连接位置', value: '本机控制面' },
+                        ].map((item) => (
+                          <div key={item.term} className="flex items-center justify-between gap-3">
+                            <dt className="text-[0.6rem] text-mist-600">{item.term}</dt>
+                            <dd className="text-right text-[0.64rem] text-mist-300">{item.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+
+                    <p className="mt-4 text-[0.64rem] leading-5 text-mist-600">
+                      确认接入后，互联中心会保持这条通道，并把收到的消息按私聊与群聊归档。
+                    </p>
+
+                    <div className="mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+                      <GhostButton
+                        type="button"
+                        onClick={() => setPhase('connecting')}
+                        className="h-11 px-4 text-[0.75rem]"
+                      >
+                        重新检测
+                      </GhostButton>
+                      <PrimaryButton
+                        type="button"
+                        onClick={handleConfirm}
+                        icon={<Check className="size-4" strokeWidth={2.2} />}
+                        className="h-11 sm:w-auto sm:px-6"
+                      >
+                        确认接入
+                      </PrimaryButton>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}

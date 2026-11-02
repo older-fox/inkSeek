@@ -10,9 +10,13 @@ import {
 import { AppLayout } from '@/components/app-layout';
 import { AuthShell } from '@/components/auth-shell';
 import { PrimaryButton } from '@/components/button';
+import { ConnectionsLayout } from '@/components/connections-layout';
+import { ConnectionsPage } from '@/pages/connections-page';
+import { GroupChatsPage } from '@/pages/group-chats-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
 import { PersonasPage } from '@/pages/personas-page';
+import { PrivateChatsPage } from '@/pages/private-chats-page';
 import { SettingsPage } from '@/pages/settings-page';
 import { SetupPage } from '@/pages/setup-page';
 import { queryClient } from '@/lib/query-client';
@@ -111,6 +115,30 @@ const personasRoute = createRoute({
   component: PersonasPage,
 });
 
+const connectionsLayoutRoute = createRoute({
+  getParentRoute: () => appRoute,
+  id: 'connections',
+  component: ConnectionsLayout,
+});
+
+const connectionsRoute = createRoute({
+  getParentRoute: () => connectionsLayoutRoute,
+  path: '/connections',
+  component: ConnectionsPage,
+});
+
+const privateChatsRoute = createRoute({
+  getParentRoute: () => connectionsLayoutRoute,
+  path: '/connections/private',
+  component: PrivateChatsPage,
+});
+
+const groupChatsRoute = createRoute({
+  getParentRoute: () => connectionsLayoutRoute,
+  path: '/connections/groups',
+  component: GroupChatsPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/settings',
@@ -150,7 +178,12 @@ const setupRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  appRoute.addChildren([indexRoute, personasRoute, settingsRoute]),
+  appRoute.addChildren([
+    indexRoute,
+    personasRoute,
+    connectionsLayoutRoute.addChildren([connectionsRoute, privateChatsRoute, groupChatsRoute]),
+    settingsRoute,
+  ]),
   loginRoute,
   setupRoute,
 ]);
