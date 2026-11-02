@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# generated
+apps/api/src/generated/
+apps/api/prisma/*.db
+
+# tooling / editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+.DS_Store

@@ -1,93 +1,71 @@
-# inkSeek-platform
+# inkSeek Platform
 
+Agent 聊天控制平台。TypeScript 全栈 monorepo，规划能力包括定时任务、聊天界面与高级数据可视化。当前里程碑：工程脚手架、数据库引导初始化、登录与空首页。
 
+## 技术栈
 
-## Getting started
+| 层 | 技术 |
+| --- | --- |
+| 构建 | pnpm 12 workspace + Turborepo 2 + TypeScript 6 |
+| 后端 | NestJS 12 (ESM) + Fastify 5 + Prisma 7 + PostgreSQL |
+| 前端 | React 19 + Vite 8 + TanStack Router/Query + Tailwind CSS 4 + Motion |
+| 校验 | Zod（`packages/shared` 前后端共享） |
+| 字体 | Sora / Manrope / Noto Sans SC / JetBrains Mono（自托管） |
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 快速开始
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+前置：Node >= 22.12、pnpm 12、可用的 PostgreSQL 与 Redis。
 
-## Add your files
+```bash
+# 1. 配置数据库连接（.env 仅此一项）
+cp .env.example .env
+# 编辑 .env 中的 DATABASE_URL
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+# 2. 安装依赖并应用迁移
+pnpm install
+pnpm db:deploy
+
+# 3. 启动
+pnpm dev
+```
+
+打开 http://localhost:5173，首次访问会进入引导页：填写 Redis 连接 → 创建管理员账户 → 自动登录进入控制台。
+
+- API：http://localhost:3100/api/v1
+- Swagger：http://localhost:3100/api/docs
+
+## 目录结构
 
 ```
-cd existing_repo
-git remote add origin https://git.olderfox.com/inkseek/inkseek-platform.git
-git branch -M main
-git push -uf origin main
+apps/api        NestJS 后端（Prisma、认证、引导、健康检查）
+apps/web        React 前端（引导页、登录页、控制台外壳）
+packages/shared Zod schema 与共享类型
+doc             架构、ADR、API 与开发手册
 ```
 
-## Integrate with your tools
+## 配置约定
 
-* [Set up project integrations](https://git.olderfox.com/inkseek/inkseek-platform/-/settings/integrations)
+- `.env` **只保存** `DATABASE_URL`。
+- Redis 连接、管理员账户等运行配置存储于数据库 `SystemConfig` 表。
+- 所有数据库访问使用 Prisma ORM，禁止拼接 SQL 字符串。
 
-## Collaborate with your team
+## 脚本
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+| 命令 | 说明 |
+| --- | --- |
+| `pnpm dev` | 并行启动 API 与 Web |
+| `pnpm build` | 构建全部应用 |
+| `pnpm typecheck` | 全仓类型检查 |
+| `pnpm lint` | ESLint |
+| `pnpm format` | Prettier 格式化 |
+| `pnpm db:migrate` | 创建并应用开发迁移 |
+| `pnpm db:deploy` | 应用已有迁移 |
+| `pnpm db:studio` | Prisma Studio |
 
-## Test and Deploy
+## 文档
 
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- [文档索引](./doc/README.md)
+- [架构总览](./doc/architecture/overview.md)
+- [技术选型 ADR](./doc/adr/0001-stack-selection.md)
+- [API 契约](./doc/api/README.md)
+- [本地开发手册](./doc/runbooks/local-development.md)

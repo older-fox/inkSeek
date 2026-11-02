@@ -1,0 +1,33 @@
+{
+  "name": "inkseek-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "inkSeek agent chat control platform",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @inkseek/api db:generate",
+    "db:migrate": "pnpm --filter @inkseek/api db:migrate",
+    "db:deploy": "pnpm --filter @inkseek/api db:deploy",
+    "db:studio": "pnpm --filter @inkseek/api db:studio",
+    "postinstall": "pnpm db:generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.14.0",
+    "prettier": "3.9.10",
+    "turbo": "2.11.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
