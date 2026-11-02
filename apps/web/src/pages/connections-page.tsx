@@ -29,7 +29,7 @@ function ChannelCard({ channel, onRemove }: { channel: Channel; onRemove: () => 
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.4, ease: EASE }}
-      className="glass-panel relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5"
+      className="glass-panel relative flex h-full flex-col overflow-clip rounded-[1.5rem] p-5"
     >
       <div
         className="pointer-events-none absolute -right-20 -top-24 size-52 rounded-full opacity-70 blur-2xl"
