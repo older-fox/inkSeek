@@ -9,12 +9,12 @@ import {
   LevelControl,
   LinesControl,
   NumberControl,
-  SelectControl,
   SliderControl,
   SwitchControl,
   TextAreaControl,
   TextControl,
   TimeRangeControl,
+  TimeZonePicker,
 } from '@/components/persona-form-controls';
 import { cn } from '@/lib/cn';
 import {
@@ -883,7 +883,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               required
               hint="影响回复的节奏感，以及长句是否会被拆开。"
             />
-            <SelectControl
+            <TimeZonePicker
               id="persona-time-offset"
               label="时差"
               value={String(data.timeOffset)}

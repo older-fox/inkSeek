@@ -435,11 +435,6 @@
     letter-spacing: 0.04em;
   }
 
-  .wizard-time::-webkit-calendar-picker-indicator {
-    cursor: pointer;
-    opacity: 0.55;
-  }
-
   .wizard-range {
     width: 100%;
     height: 0.35rem;

@@ -1,5 +1,14 @@
-import { ChevronDown, Plus, TriangleAlert, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Check, ChevronDown, Clock, Plus, TriangleAlert, X } from 'lucide-react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
 import {
   charCount,
@@ -621,27 +630,376 @@ export function TimeRangeControl({
   return (
     <FieldFrame label={label} required={required} hint={hint} error={error}>
       <div className="flex items-center gap-2">
-        <input
-          type="time"
-          className="wizard-input wizard-time"
+        <TimeField
           value={start}
-          onChange={(event) => onStartChange(event.target.value)}
-          aria-label={`${label}开始时间`}
-          aria-invalid={error ? 'true' : 'false'}
+          onChange={onStartChange}
+          ariaLabel={`${label}开始时间`}
+          invalid={Boolean(error)}
         />
         <span className="shrink-0 text-[0.7rem] text-mist-600">→</span>
-        <input
-          type="time"
-          className="wizard-input wizard-time"
+        <TimeField
           value={end}
-          onChange={(event) => onEndChange(event.target.value)}
-          aria-label={`${label}结束时间`}
-          aria-invalid={error ? 'true' : 'false'}
+          onChange={onEndChange}
+          ariaLabel={`${label}结束时间`}
+          invalid={Boolean(error)}
         />
       </div>
       <p className="font-mono text-[0.55rem] uppercase tracking-[0.14em] text-mist-600">
         {duration === null ? '跨度 —' : `跨度 ${minutesLabel(duration)}`}
       </p>
+    </FieldFrame>
+  );
+}
+
+const POPOVER_MAX_HEIGHT = 300;
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
+
+interface PickerPopoverProps {
+  open: boolean;
+  onClose: () => void;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  minWidth?: number;
+  maxWidth?: number;
+  children: ReactNode;
+}
+
+function PickerPopover({
+  open,
+  onClose,
+  anchorRef,
+  minWidth = 232,
+  maxWidth = 420,
+  children,
+}: PickerPopoverProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(null);
+      return;
+    }
+
+    const anchor = anchorRef.current;
+
+    if (!anchor) {
+      return;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(
+      Math.max(rect.width, minWidth),
+      maxWidth,
+      window.innerWidth - 24,
+    );
+    const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const openAbove = spaceBelow < POPOVER_MAX_HEIGHT && rect.top > spaceBelow;
+
+    setStyle(
+      openAbove
+        ? { bottom: window.innerHeight - rect.top + 8, left, width }
+        : { top: rect.bottom + 8, left, width },
+    );
+  }, [open, anchorRef, minWidth, maxWidth]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+
+      if (panelRef.current?.contains(target) || anchorRef.current?.contains(target)) {
+        return;
+      }
+
+      onClose();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    const handleDismiss = (event: Event) => {
+      if (panelRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      onClose();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleDismiss, true);
+    window.addEventListener('resize', handleDismiss);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleDismiss, true);
+      window.removeEventListener('resize', handleDismiss);
+    };
+  }, [open, onClose, anchorRef]);
+
+  if (!open || !style) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
+      style={style}
+      className="glass-panel fixed z-[120] rounded-2xl p-3 shadow-panel"
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+interface TimeFieldProps {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  invalid?: boolean;
+}
+
+export function TimeField({ value, onChange, ariaLabel, invalid }: TimeFieldProps) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const selectedHourRef = useRef<HTMLButtonElement>(null);
+  const selectedMinuteRef = useRef<HTMLButtonElement>(null);
+  const [hour = '00', minute = '00'] = value.split(':');
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      selectedHourRef.current?.scrollIntoView({ block: 'nearest' });
+      selectedMinuteRef.current?.scrollIntoView({ block: 'nearest' });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-invalid={invalid ? 'true' : 'false'}
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'wizard-input wizard-time flex items-center justify-between gap-2 text-left',
+          open &&
+            'border-[var(--field-focus-border)] bg-[var(--field-bg-focus)] shadow-[0_0_0_4px_var(--field-focus-shadow)]',
+        )}
+      >
+        <span className="font-mono tracking-[0.06em]">
+          {hour}:{minute}
+        </span>
+        <Clock className="size-3.5 shrink-0 text-mist-600" strokeWidth={1.7} />
+      </button>
+
+      <PickerPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={anchorRef}
+        minWidth={280}
+        maxWidth={340}
+      >
+        <div className="flex items-center justify-between gap-3 px-1 pb-2.5">
+          <span className="font-mono text-[0.54rem] uppercase tracking-[0.2em] text-mist-600">
+            Select Time
+          </span>
+          <span className="font-mono text-[0.72rem] text-brass-300">
+            {hour}:{minute}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div
+            role="listbox"
+            aria-label="小时"
+            className="h-48 overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-1"
+          >
+            {HOUR_OPTIONS.map((option) => (
+              <button
+                key={option}
+                ref={option === hour ? selectedHourRef : undefined}
+                type="button"
+                role="option"
+                aria-selected={option === hour}
+                onClick={() => onChange(`${option}:${minute}`)}
+                className={cn(
+                  'flex h-8 w-full items-center justify-center rounded-lg font-mono text-[0.72rem] transition',
+                  option === hour
+                    ? 'bg-brass-400/15 text-brass-200'
+                    : 'text-mist-500 hover:bg-mist-100/[0.06] hover:text-mist-100',
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+
+          <div
+            role="listbox"
+            aria-label="分钟"
+            className="h-48 overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-1"
+          >
+            {MINUTE_OPTIONS.map((option) => (
+              <button
+                key={option}
+                ref={option === minute ? selectedMinuteRef : undefined}
+                type="button"
+                role="option"
+                aria-selected={option === minute}
+                onClick={() => onChange(`${hour}:${option}`)}
+                className={cn(
+                  'flex h-8 w-full items-center justify-center rounded-lg font-mono text-[0.72rem] transition',
+                  option === minute
+                    ? 'bg-brass-400/15 text-brass-200'
+                    : 'text-mist-500 hover:bg-mist-100/[0.06] hover:text-mist-100',
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-2.5 flex items-center justify-between gap-3">
+          <span className="pl-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
+            24 小时制
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="rounded-lg border border-brass-400/30 bg-brass-400/10 px-3 py-1.5 text-[0.68rem] text-brass-200 transition hover:bg-brass-400/20"
+          >
+            完成
+          </button>
+        </div>
+      </PickerPopover>
+    </>
+  );
+}
+
+interface TimeZonePickerProps {
+  id: string;
+  label: string;
+  value: string;
+  options: readonly SelectOption[];
+  onChange: (value: string) => void;
+  required?: boolean;
+  hint?: string;
+  error?: string;
+}
+
+export function TimeZonePicker({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+  required,
+  hint,
+  error,
+}: TimeZonePickerProps) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      selectedRef.current?.scrollIntoView({ block: 'nearest' });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  return (
+    <FieldFrame id={id} label={label} required={required} hint={hint} error={error}>
+      <button
+        id={id}
+        ref={anchorRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-invalid={error ? 'true' : 'false'}
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'wizard-input flex items-center justify-between gap-3 text-left',
+          open &&
+            'border-[var(--field-focus-border)] bg-[var(--field-bg-focus)] shadow-[0_0_0_4px_var(--field-focus-shadow)]',
+        )}
+      >
+        <span className="truncate text-[0.86rem] text-mist-200">{selected?.label ?? '—'}</span>
+        <ChevronDown
+          className={cn(
+            'size-4 shrink-0 text-mist-600 transition-transform duration-200',
+            open && 'rotate-180',
+          )}
+        />
+      </button>
+
+      <PickerPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={anchorRef}
+        minWidth={240}
+        maxWidth={320}
+      >
+        <div
+          role="listbox"
+          aria-label={label}
+          className="max-h-64 overflow-y-auto overscroll-contain p-0.5"
+        >
+          {options.map((option) => {
+            const isSelected = option.value === value;
+
+            return (
+              <button
+                key={option.value}
+                ref={isSelected ? selectedRef : undefined}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-[0.76rem] transition',
+                  isSelected
+                    ? 'bg-brass-400/12 text-brass-200'
+                    : 'text-mist-400 hover:bg-mist-100/[0.05] hover:text-mist-100',
+                )}
+              >
+                <span>{option.label}</span>
+                {isSelected && <Check className="size-3.5 shrink-0 text-brass-300" />}
+              </button>
+            );
+          })}
+        </div>
+      </PickerPopover>
     </FieldFrame>
   );
 }
