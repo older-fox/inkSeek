@@ -497,6 +497,12 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
             hint: '发起话题与行动的倾向强度',
             kind: 'score',
           },
+          {
+            key: 'location',
+            label: '当前位置',
+            hint: '此刻所在地点',
+            kind: 'text',
+          },
         ],
       },
     ],
@@ -504,7 +510,7 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
   {
     id: 'baselines',
     title: '数值基线',
-    description: '心理与身体的初始刻度，以及情绪、好感的衰减动力学。',
+    description: '心理与身体的基线、当前状态，以及情绪、好感的衰减动力学。',
     sections: [
       {
         id: 'baselines-core',
@@ -611,6 +617,48 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
         ],
       },
       {
+        id: 'baselines-state',
+        title: '当前状态',
+        fields: [
+          {
+            key: 'mood_tags',
+            label: '当前情绪标签',
+            hint: '此刻的情绪状态，不无理由跳变',
+            kind: 'tags',
+          },
+          {
+            key: 'mood_intensity',
+            label: '情绪强度',
+            hint: '情绪标签的强度，决定语气幅度',
+            kind: 'score',
+          },
+          {
+            key: 'stress',
+            label: '压力',
+            hint: '心理压力，有恢复途径',
+            kind: 'score',
+          },
+          {
+            key: 'health_tags',
+            label: '健康状态',
+            hint: '身体状况标签，优先于体能数值',
+            kind: 'tags',
+          },
+          {
+            key: 'grooming',
+            label: '整洁程度',
+            hint: '对仪容与环境整洁的当前状态',
+            kind: 'score',
+          },
+          {
+            key: 'social_battery',
+            label: '社交电量',
+            hint: '社交耐力余量，耗尽后回复变短',
+            kind: 'score',
+          },
+        ],
+      },
+      {
         id: 'baselines-dynamics',
         title: '动态参数',
         fields: [
@@ -638,12 +686,6 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
             label: '压力恢复半衰期',
             hint: '压力消退速度',
             kind: 'duration',
-          },
-          {
-            key: 'social_battery_max',
-            label: '社交电量上限',
-            hint: '社交耐力天花板',
-            kind: 'score',
           },
         ],
       },
@@ -790,6 +832,7 @@ const SHEN_YAN: ChannelPersona = {
     sleep_depth: 2,
     proactive_triggers: ['连续 3 天无互动且好感 > 60', '修完一批档案的当晚'],
     proactivity: 28,
+    location: '档案馆后间',
     confidence: 62,
     self_control: 86,
     shame: 71,
@@ -807,11 +850,16 @@ const SHEN_YAN: ChannelPersona = {
     sensitivity_map: ['后颈 8', '耳后 7', '手腕 5'],
     touch_preference: '先询问',
     physique_effect_cap: 12,
+    mood_tags: ['专注', '疲惫'],
+    mood_intensity: 46,
+    stress: 58,
+    health_tags: ['手腕旧伤', '睡眠不足'],
+    grooming: 55,
     emotional_inertia_sec: 5400,
     mood_decay_halflife_sec: 21600,
     affinity_halflife_day: 30,
     stress_recovery_halflife_sec: 21600,
-    social_battery_max: 62,
+    social_battery: 62,
     hard_limits_global: SHARED_HARD_LIMITS,
     explicit_level_char: '无',
     experience_level: 2,
@@ -894,6 +942,7 @@ const JIANG_SHU: ChannelPersona = {
     sleep_depth: 1,
     proactive_triggers: ['有未署名的信需要辨认时', '连续 2 天无互动且好感 > 55'],
     proactivity: 36,
+    location: '老邮局后间',
     confidence: 70,
     self_control: 78,
     shame: 52,
@@ -911,11 +960,16 @@ const JIANG_SHU: ChannelPersona = {
     sensitivity_map: ['耳后 6', '指尖 5', '肩胛 4'],
     touch_preference: '先询问',
     physique_effect_cap: 14,
+    mood_tags: ['平静', '克制'],
+    mood_intensity: 32,
+    stress: 29,
+    health_tags: ['轻微颈椎不适'],
+    grooming: 78,
     emotional_inertia_sec: 3600,
     mood_decay_halflife_sec: 14400,
     affinity_halflife_day: 45,
     stress_recovery_halflife_sec: 14400,
-    social_battery_max: 76,
+    social_battery: 76,
     hard_limits_global: SHARED_HARD_LIMITS,
     explicit_level_char: '无',
     experience_level: 3,
@@ -994,6 +1048,7 @@ const WEN_ZHOU: ChannelPersona = {
     sleep_depth: 3,
     proactive_triggers: ['节目开播前 30 分钟', '连续 3 晚收到同一听众的沉默'],
     proactivity: 44,
+    location: '电台直播间',
     confidence: 74,
     self_control: 69,
     shame: 38,
@@ -1011,11 +1066,16 @@ const WEN_ZHOU: ChannelPersona = {
     sensitivity_map: ['耳后 9', '后颈 7', '手腕 5'],
     touch_preference: '先口头确认',
     physique_effect_cap: 10,
+    mood_tags: ['松弛', '微困'],
+    mood_intensity: 41,
+    stress: 34,
+    health_tags: ['作息倒置', '嗓子发干'],
+    grooming: 61,
     emotional_inertia_sec: 2700,
     mood_decay_halflife_sec: 10800,
     affinity_halflife_day: 21,
     stress_recovery_halflife_sec: 10800,
-    social_battery_max: 84,
+    social_battery: 84,
     hard_limits_global: SHARED_HARD_LIMITS,
     explicit_level_char: '无',
     experience_level: 3,
@@ -1062,6 +1122,10 @@ export function personaForChannel(channel: Channel): ChannelPersona {
 
 const PERSONA_OVERRIDE_STORAGE_KEY = 'inkseek-channel-persona-values';
 
+const LEGACY_OVERRIDE_KEYS: Record<string, string> = {
+  social_battery_max: 'social_battery',
+};
+
 function isPersonaValue(value: unknown): value is PersonaValue {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return true;
@@ -1095,6 +1159,14 @@ export function readChannelPersonaOverrides(channelId: string): Record<string, P
     Object.entries(stored as Record<string, unknown>).forEach(([key, value]) => {
       if (isPersonaValue(value)) {
         result[key] = value;
+      }
+    });
+
+    Object.entries(LEGACY_OVERRIDE_KEYS).forEach(([legacy, canonical]) => {
+      const legacyValue = result[legacy];
+      if (legacyValue !== undefined) {
+        result[canonical] ??= legacyValue;
+        delete result[legacy];
       }
     });
     return result;
