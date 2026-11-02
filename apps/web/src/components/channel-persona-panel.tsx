@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
+import { TimeField, TimeZonePicker } from '@/components/persona-form-controls';
 import { PersonaRevisionList } from '@/components/persona-revision-list';
 import { cn } from '@/lib/cn';
 import {
@@ -30,6 +31,7 @@ import {
   type PersonaValue,
 } from '@/lib/channel-persona';
 import type { Channel } from '@/lib/connections';
+import { minutesLabel, PERSONA_TIMEZONE_OPTIONS, rangeDurationMinutes } from '@/lib/persona-draft';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -124,10 +126,7 @@ function PersonaFieldEditor({
 }) {
   const [text, setText] = useState(() => {
     if (Array.isArray(value)) {
-      return value.join('，');
-    }
-    if (typeof value === 'boolean') {
-      return value ? '是' : '否';
+      return value.join(field.kind === 'list' ? '\n' : '，');
     }
     return value === undefined ? '' : String(value);
   });
@@ -141,6 +140,14 @@ function PersonaFieldEditor({
         onCommit(
           text
             .split(/[,，]/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+        );
+        return;
+      case 'list':
+        onCommit(
+          text
+            .split(/\r?\n/)
             .map((item) => item.trim())
             .filter(Boolean),
         );
@@ -191,37 +198,6 @@ function PersonaFieldEditor({
       commit();
     }
   };
-
-  if (field.kind === 'boolean') {
-    const active = value === true || value === 'true';
-
-    return (
-      <div className="mt-2 flex items-center gap-1.5">
-        {[true, false].map((flag) => (
-          <button
-            key={flag ? 'yes' : 'no'}
-            type="button"
-            onClick={() => onCommit(flag)}
-            className={cn(
-              'flex-1 rounded-lg border px-2 py-1.5 text-[0.74rem] transition',
-              active === flag
-                ? 'border-jade-400/30 bg-jade-400/10 text-jade-200'
-                : 'border-mist-100/[0.08] text-mist-500 hover:bg-mist-100/[0.04]',
-            )}
-          >
-            {flag ? '是' : '否'}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={onCancel}
-          className="shrink-0 px-2 py-1.5 text-[0.7rem] text-mist-500 transition hover:text-mist-300"
-        >
-          取消
-        </button>
-      </div>
-    );
-  }
 
   if (field.kind === 'score') {
     const score = numericValid ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
@@ -277,13 +253,14 @@ function PersonaFieldEditor({
     );
   }
 
-  if (field.kind === 'paragraph' || field.kind === 'code') {
+  if (field.kind === 'paragraph' || field.kind === 'code' || field.kind === 'list') {
     return (
       <div className="mt-2 space-y-2">
         <textarea
-          rows={3}
+          rows={field.kind === 'list' ? 4 : 3}
           value={text}
           autoFocus
+          placeholder={field.kind === 'list' ? '每行一条' : undefined}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleTextareaKeyDown}
           className={cn(
@@ -309,6 +286,173 @@ function PersonaFieldEditor({
         className={EDITOR_INPUT}
       />
       <EditorActions onCancel={onCancel} onCommit={commit} />
+    </div>
+  );
+}
+
+function SwitchFieldControl({
+  field,
+  value,
+  onChange,
+}: {
+  field: PersonaField;
+  value: PersonaValue | undefined;
+  onChange: (value: PersonaValue) => void;
+}) {
+  const checked = value === true || value === 'true';
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={field.label}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'mt-2.5 flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-left transition',
+        checked
+          ? 'border-brass-400/35 bg-brass-400/[0.08] hover:bg-brass-400/[0.12]'
+          : 'border-mist-100/[0.08] bg-ink-950/30 hover:border-mist-100/20',
+      )}
+    >
+      <span
+        className={cn(
+          'text-[0.8rem] font-medium transition',
+          checked ? 'text-brass-200' : 'text-mist-500',
+        )}
+      >
+        {checked ? '开启' : '关闭'}
+      </span>
+      <span
+        className={cn(
+          'relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200',
+          checked ? 'border-brass-400/50 bg-brass-400/70' : 'border-mist-100/15 bg-ink-950/60',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform duration-200',
+            checked ? 'translate-x-4' : 'translate-x-0.5',
+          )}
+        />
+      </span>
+    </button>
+  );
+}
+
+function LevelFieldControl({
+  field,
+  value,
+  onChange,
+}: {
+  field: PersonaField;
+  value: PersonaValue | undefined;
+  onChange: (value: PersonaValue) => void;
+}) {
+  const levels = field.levels ?? [];
+
+  if (levels.length === 0) {
+    return null;
+  }
+
+  const max = levels.length - 1;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  const index = Number.isFinite(numeric) ? Math.min(max, Math.max(0, Math.round(numeric))) : 0;
+  const current = levels[index] ?? '';
+
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[0.84rem] font-medium text-mist-200">{current}</span>
+        <span className="font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
+          {index + 1} / {levels.length}
+        </span>
+      </div>
+      <div
+        role="group"
+        aria-label={field.label}
+        className="mt-2 grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${levels.length}, minmax(0, 1fr))` }}
+      >
+        {levels.map((label, levelIndex) => (
+          <button
+            key={label}
+            type="button"
+            title={label}
+            aria-label={label}
+            aria-pressed={levelIndex === index}
+            onClick={() => onChange(levelIndex)}
+            className={cn(
+              'h-1.5 rounded-full transition',
+              levelIndex <= index
+                ? 'bg-gradient-to-r from-brass-400/80 to-brass-300'
+                : 'bg-mist-100/12 hover:bg-mist-100/25',
+            )}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[0.56rem] leading-4 text-mist-600">
+        <span className="truncate">{levels[0]}</span>
+        <span className="truncate text-right">{levels[max]}</span>
+      </div>
+    </div>
+  );
+}
+
+function TimezoneFieldControl({
+  field,
+  value,
+  onChange,
+}: {
+  field: PersonaField;
+  value: PersonaValue | undefined;
+  onChange: (value: PersonaValue) => void;
+}) {
+  return (
+    <div className="mt-2.5">
+      <TimeZonePicker
+        id={`persona-inline-${field.key}`}
+        label={field.label}
+        value={typeof value === 'string' ? value : ''}
+        options={PERSONA_TIMEZONE_OPTIONS}
+        onChange={onChange}
+        bare
+      />
+    </div>
+  );
+}
+
+function TimeRangeFieldControl({
+  field,
+  value,
+  onChange,
+}: {
+  field: PersonaField;
+  value: PersonaValue | undefined;
+  onChange: (value: PersonaValue) => void;
+}) {
+  const raw = typeof value === 'string' ? value : '';
+  const [start = '00:00', end = '00:00'] = raw.split('-');
+  const duration = rangeDurationMinutes(start, end);
+
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center gap-1.5">
+        <TimeField
+          value={start}
+          onChange={(next) => onChange(`${next}-${end}`)}
+          ariaLabel={`${field.label}开始时间`}
+        />
+        <span className="shrink-0 text-[0.68rem] text-mist-600">→</span>
+        <TimeField
+          value={end}
+          onChange={(next) => onChange(`${start}-${next}`)}
+          ariaLabel={`${field.label}结束时间`}
+        />
+      </div>
+      <p className="mt-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
+        {duration === null ? '跨度 —' : `跨度 ${minutesLabel(duration)}`}
+      </p>
     </div>
   );
 }
@@ -371,6 +515,26 @@ function PersonaFieldValue({
         </div>
       );
     }
+    case 'list': {
+      const items = Array.isArray(value) ? value : [String(value)];
+
+      return (
+        <ol className="mt-2 space-y-1">
+          {items.map((item, index) => (
+            <li
+              key={`${item}-${index}`}
+              className="flex items-start gap-2 text-[0.8rem] leading-6 text-mist-300"
+            >
+              <span
+                aria-hidden="true"
+                className="mt-2 size-1 shrink-0 rounded-full bg-brass-400/70"
+              />
+              <span className="min-w-0 break-words">{item}</span>
+            </li>
+          ))}
+        </ol>
+      );
+    }
     case 'duration': {
       const numeric = typeof value === 'number' ? value : Number(value);
 
@@ -399,26 +563,6 @@ function PersonaFieldValue({
             </span>
           ) : null}
         </p>
-      );
-    }
-    case 'boolean': {
-      const active = value === true || value === 'true';
-
-      return (
-        <span
-          className={cn(
-            'mt-2 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[0.6rem] uppercase tracking-[0.1em]',
-            active
-              ? 'border-jade-400/25 bg-jade-400/[0.08] text-jade-300'
-              : 'border-mist-100/[0.08] bg-ink-950/30 text-mist-500',
-          )}
-        >
-          <span
-            className={cn('size-1 rounded-full', active ? 'bg-jade-400' : 'bg-mist-600')}
-            aria-hidden="true"
-          />
-          {active ? '是' : '否'}
-        </span>
       );
     }
     case 'quote':
@@ -454,6 +598,11 @@ function PersonaFieldCard({
   onChange: (value: PersonaValue) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const inlineControl =
+    field.kind === 'boolean' ||
+    field.kind === 'level' ||
+    field.kind === 'timezone' ||
+    field.kind === 'time-range';
 
   return (
     <div
@@ -470,7 +619,7 @@ function PersonaFieldCard({
           <code className="min-w-0 break-all text-right font-mono text-[0.54rem] leading-5 text-mist-600">
             {field.key}
           </code>
-          {!editing && (
+          {!editing && !inlineControl && (
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -483,7 +632,15 @@ function PersonaFieldCard({
           )}
         </div>
       </div>
-      {editing ? (
+      {field.kind === 'boolean' ? (
+        <SwitchFieldControl field={field} value={value} onChange={onChange} />
+      ) : field.kind === 'level' ? (
+        <LevelFieldControl field={field} value={value} onChange={onChange} />
+      ) : field.kind === 'timezone' ? (
+        <TimezoneFieldControl field={field} value={value} onChange={onChange} />
+      ) : field.kind === 'time-range' ? (
+        <TimeRangeFieldControl field={field} value={value} onChange={onChange} />
+      ) : editing ? (
         <PersonaFieldEditor
           field={field}
           value={value}
@@ -663,7 +820,7 @@ export function ChannelPersonaPanel({
                 <p className="mt-1 text-[0.82rem] leading-7 text-mist-500">
                   {`${textValue(values, 'identity', persona.identity)} · 「${textValue(
                     values,
-                    'anchors.quote',
+                    'anchor_quote',
                     persona.quote,
                   )}」`}
                 </p>

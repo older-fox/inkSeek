@@ -1,107 +1,106 @@
-export type ConflictStyle = 'avoid' | 'confront' | 'reason' | 'cold_war' | 'withdraw_then_explain';
-export type HumorStyle = 'dry' | 'self_deprecating' | 'roast' | 'none';
-export type MemoryBias = 'balanced' | 'detail' | 'grudge' | 'forgetful';
-export type SentenceLength = 'short' | 'medium' | 'long' | 'mixed';
-export type PunctuationStyle = 'minimal' | 'plain' | 'soft' | 'strict' | 'lively' | 'bookish';
-export type OnlinePolicy = 'always' | 'rhythm' | 'adaptive';
+export type ConflictStyle =
+  '回避' | '对抗' | '讲理' | '冷战' | '先退后解释' | '先听完再划界' | '先降温再划界';
+export type HumorStyle = '冷幽默' | '自嘲' | '吐槽' | '不接梗' | '机锋';
+export type MemoryBias = '均衡' | '记细节' | '记仇' | '健忘' | '偏记人' | '偏记声音';
+export type SentenceLength = '短句' | '中句' | '长句' | '长短混用';
+export type PunctuationStyle = '极简' | '常规' | '柔软' | '严整' | '活泼' | '书卷' | '省略号偏多';
+export type OnlinePolicy = '常在线' | '按作息' | '自适应';
 
 export type NumericKey =
-  | 'typoLevel'
-  | 'splitLevel'
-  | 'emojiLevel'
-  | 'typingLevel'
-  | 'sleepDepth'
+  | 'typo_level'
+  | 'split_level'
+  | 'emoji_level'
+  | 'typing_level'
+  | 'sleep_depth'
   | 'confidence'
-  | 'selfControl'
+  | 'self_control'
   | 'shame'
-  | 'trustBias'
-  | 'attachment'
-  | 'possessiveness'
+  | 'trust_bias'
+  | 'attachment_style'
+  | 'possessiveness_base'
   | 'agreeableness'
   | 'proactivity'
   | 'curiosity'
-  | 'stamina'
+  | 'stamina_max'
   | 'strength'
   | 'agility'
-  | 'painTolerance'
-  | 'recovery'
+  | 'pain_tolerance'
+  | 'recovery_rate'
   | 'sensitivity';
 
 export interface PersonaDraft {
   name: string;
-  nickname: string;
+  aliases: string[];
   age: string;
   identity: string;
   occupation: string;
-  species: string;
-  height: string;
-  weight: string;
-  timeAwareness: boolean;
+  race: string;
+  height_cm: string;
+  weight_kg: string;
+  time_awareness: boolean;
 
-  bodyDescription: string;
+  body_type: string;
   appearance: string;
 
-  hairstyle: string;
+  hair: string;
   outfit: string;
 
   voice: string;
 
-  worldview: string;
+  world_setting: string;
   backstory: string;
-  knowledgeBoundary: string;
+  knowledge_boundary: string;
 
-  coreValues: string[];
+  core_values: string[];
   taboos: string[];
   fears: string[];
-  weaknesses: string[];
-  redLines: string[];
+  soft_spots: string[];
+  non_negotiable: string[];
 
-  longTermGoal: string;
-  currentGoal: string;
-  doingNow: string;
+  long_term_motivation: string;
+  current_goal: string;
+  doing_now: string;
   obstacle: string;
 
-  conflictStyle: ConflictStyle;
-  humorStyle: HumorStyle;
-  memoryBias: MemoryBias;
-  sentenceLength: SentenceLength;
+  conflict_style: ConflictStyle;
+  humor_style: HumorStyle;
+  memory_bias: MemoryBias;
+  sentence_length: SentenceLength;
   punctuation: PunctuationStyle;
-  typoLevel: number;
-  splitLevel: number;
+  typo_level: number;
+  split_level: number;
 
   particles: string[];
   openers: string[];
 
-  bannedWords: string;
+  banned_words: string[];
 
-  emojiLevel: number;
-  typingLevel: number;
-  timeOffset: number;
+  emoji_level: number;
+  typing_level: number;
+  time_zone: string;
 
-  sleepStart: string;
-  sleepEnd: string;
-  awakeStart: string;
-  awakeEnd: string;
-  onlinePolicy: OnlinePolicy;
-  sleepDepth: number;
+  sleep_window: string;
+  awake_window: string;
+  online_policy: OnlinePolicy;
+  sleep_depth: number;
 
   confidence: number;
-  selfControl: number;
+  self_control: number;
   shame: number;
-  trustBias: number;
+  trust_bias: number;
 
-  attachment: number;
-  possessiveness: number;
+  attachment_style: number;
+  possessiveness_base: number;
   agreeableness: number;
   proactivity: number;
 
   curiosity: number;
-  stamina: number;
+  stamina_max: number;
   strength: number;
   agility: number;
 
-  painTolerance: number;
-  recovery: number;
+  pain_tolerance: number;
+  recovery_rate: number;
   sensitivity: number;
 }
 
@@ -110,79 +109,77 @@ export const DRAFT_STORAGE_KEY = 'inkseek-persona-draft';
 export function createDefaultDraft(): PersonaDraft {
   return {
     name: '',
-    nickname: '',
+    aliases: [''],
     age: '',
     identity: '',
     occupation: '',
-    species: '',
-    height: '',
-    weight: '',
-    timeAwareness: true,
+    race: '',
+    height_cm: '',
+    weight_kg: '',
+    time_awareness: true,
 
-    bodyDescription: '',
+    body_type: '',
     appearance: '',
 
-    hairstyle: '',
+    hair: '',
     outfit: '',
 
     voice: '',
 
-    worldview: '',
+    world_setting: '',
     backstory: '',
-    knowledgeBoundary: '',
+    knowledge_boundary: '',
 
-    coreValues: [''],
+    core_values: [''],
     taboos: [''],
     fears: [''],
-    weaknesses: [''],
-    redLines: [''],
+    soft_spots: [''],
+    non_negotiable: [''],
 
-    longTermGoal: '',
-    currentGoal: '',
-    doingNow: '',
+    long_term_motivation: '',
+    current_goal: '',
+    doing_now: '',
     obstacle: '',
 
-    conflictStyle: 'reason',
-    humorStyle: 'dry',
-    memoryBias: 'balanced',
-    sentenceLength: 'mixed',
-    punctuation: 'plain',
-    typoLevel: 0,
-    splitLevel: 2,
+    conflict_style: '讲理',
+    humor_style: '冷幽默',
+    memory_bias: '均衡',
+    sentence_length: '长短混用',
+    punctuation: '常规',
+    typo_level: 0,
+    split_level: 2,
 
     particles: [''],
     openers: [''],
 
-    bannedWords: '',
+    banned_words: [''],
 
-    emojiLevel: 1,
-    typingLevel: 2,
-    timeOffset: 0,
+    emoji_level: 1,
+    typing_level: 2,
+    time_zone: '北京时间',
 
-    sleepStart: '23:00',
-    sleepEnd: '07:00',
-    awakeStart: '09:00',
-    awakeEnd: '18:00',
-    onlinePolicy: 'rhythm',
-    sleepDepth: 2,
+    sleep_window: '23:00-07:00',
+    awake_window: '09:00-18:00',
+    online_policy: '按作息',
+    sleep_depth: 2,
 
     confidence: 50,
-    selfControl: 50,
+    self_control: 50,
     shame: 50,
-    trustBias: 50,
+    trust_bias: 50,
 
-    attachment: 50,
-    possessiveness: 50,
+    attachment_style: 50,
+    possessiveness_base: 50,
     agreeableness: 50,
     proactivity: 50,
 
     curiosity: 50,
-    stamina: 50,
+    stamina_max: 50,
     strength: 50,
     agility: 50,
 
-    painTolerance: 50,
-    recovery: 50,
+    pain_tolerance: 50,
+    recovery_rate: 50,
     sensitivity: 30,
   };
 }
@@ -287,7 +284,7 @@ export const STEPS: readonly StepMeta[] = [
   {
     id: 11,
     phase: 2,
-    title: '性格弱点',
+    title: '软肋',
     caption: '什么是 TA 无法拒绝的温柔，也是道歉能生效的依据。',
   },
   {
@@ -402,52 +399,65 @@ export interface ChoiceOption<T extends string = string> {
 }
 
 export const CONFLICT_OPTIONS: readonly ChoiceOption<ConflictStyle>[] = [
-  { value: 'avoid', label: '回避', hint: '先退开，避开正面冲突' },
-  { value: 'confront', label: '对抗', hint: '正面顶回去，不轻易让步' },
-  { value: 'reason', label: '讲理', hint: '把逻辑与事实摆出来' },
-  { value: 'cold_war', label: '冷战', hint: '不吵，但态度明显降温' },
-  {
-    value: 'withdraw_then_explain',
-    label: '先退后解释',
-    hint: '先离开现场，冷静后再说明',
-  },
+  { value: '回避', label: '回避', hint: '先退开，避开正面冲突' },
+  { value: '对抗', label: '对抗', hint: '正面顶回去，不轻易让步' },
+  { value: '讲理', label: '讲理', hint: '把逻辑与事实摆出来' },
+  { value: '冷战', label: '冷战', hint: '不吵，但态度明显降温' },
+  { value: '先退后解释', label: '先退后解释', hint: '先离开现场，冷静后再说明' },
+  { value: '先听完再划界', label: '先听完再划界', hint: '先让对方说完，再明确边界' },
+  { value: '先降温再划界', label: '先降温再划界', hint: '先把气氛缓下来，再谈边界' },
 ];
 
 export const HUMOR_OPTIONS: readonly ChoiceOption<HumorStyle>[] = [
-  { value: 'dry', label: '冷幽默', hint: '冷不丁来一句' },
-  { value: 'self_deprecating', label: '自嘲', hint: '先拿自己开刀' },
-  { value: 'roast', label: '吐槽', hint: '嘴上不饶人' },
-  { value: 'none', label: '不接梗', hint: '很少开玩笑' },
+  { value: '冷幽默', label: '冷幽默', hint: '冷不丁来一句' },
+  { value: '自嘲', label: '自嘲', hint: '先拿自己开刀' },
+  { value: '吐槽', label: '吐槽', hint: '嘴上不饶人' },
+  { value: '不接梗', label: '不接梗', hint: '很少开玩笑' },
+  { value: '机锋', label: '机锋', hint: '话里带钩，点到为止' },
 ];
 
 export const MEMORY_OPTIONS: readonly ChoiceOption<MemoryBias>[] = [
-  { value: 'balanced', label: '均衡', hint: '记住重要的，也放过琐碎的' },
-  { value: 'detail', label: '记细节', hint: '你说过的小事 TA 都会记得' },
-  { value: 'grudge', label: '记仇', hint: '被冒犯的事会留很久' },
-  { value: 'forgetful', label: '健忘', hint: '需要你提醒，才想得起来' },
+  { value: '均衡', label: '均衡', hint: '记住重要的，也放过琐碎的' },
+  { value: '记细节', label: '记细节', hint: '你说过的小事 TA 都会记得' },
+  { value: '记仇', label: '记仇', hint: '被冒犯的事会留很久' },
+  { value: '健忘', label: '健忘', hint: '需要你提醒，才想得起来' },
+  { value: '偏记人', label: '偏记人', hint: '更记得人与关系，而不是事件细节' },
+  { value: '偏记声音', label: '偏记声音', hint: '更记得语气、声线与说话方式' },
 ];
 
 export const SENTENCE_OPTIONS: readonly ChoiceOption<SentenceLength>[] = [
-  { value: 'short', label: '短句', hint: '一句一口气，少用连接词' },
-  { value: 'medium', label: '中句', hint: '长度适中，表达完整' },
-  { value: 'long', label: '长句', hint: '习惯把话讲透' },
-  { value: 'mixed', label: '长短混用', hint: '随情绪与场景变化' },
+  { value: '短句', label: '短句', hint: '一句一口气，少用连接词' },
+  { value: '中句', label: '中句', hint: '长度适中，表达完整' },
+  { value: '长句', label: '长句', hint: '习惯把话讲透' },
+  { value: '长短混用', label: '长短混用', hint: '随情绪与场景变化' },
 ];
 
 export const PUNCTUATION_OPTIONS: readonly ChoiceOption<PunctuationStyle>[] = [
-  { value: 'minimal', label: '极简', example: '「在」「嗯 你说」' },
-  { value: 'plain', label: '常规', example: '「在的，你说吧。」' },
-  { value: 'soft', label: '柔软', example: '「在的～」「你说吧…」' },
-  { value: 'strict', label: '严整', example: '「在。你说吧，我听着。」' },
-  { value: 'lively', label: '活泼', example: '「在在在！！」「你说你说？」' },
-  { value: 'bookish', label: '书卷', example: '「在——你说吧；我这边正好空着。」' },
+  { value: '极简', label: '极简', example: '「在」「嗯 你说」' },
+  { value: '常规', label: '常规', example: '「在的，你说吧。」' },
+  { value: '柔软', label: '柔软', example: '「在的～」「你说吧…」' },
+  { value: '严整', label: '严整', example: '「在。你说吧，我听着。」' },
+  { value: '活泼', label: '活泼', example: '「在在在！！」「你说你说？」' },
+  { value: '书卷', label: '书卷', example: '「在——你说吧；我这边正好空着。」' },
+  { value: '省略号偏多', label: '省略号偏多', example: '「在的……你说吧……」' },
 ];
 
 export const ONLINE_OPTIONS: readonly ChoiceOption<OnlinePolicy>[] = [
-  { value: 'always', label: '常在线', hint: '消息几乎总能及时收到' },
-  { value: 'rhythm', label: '按作息', hint: '醒着就在，睡后不回' },
-  { value: 'adaptive', label: '自适应', hint: '根据对话与关系调整上线频率' },
+  { value: '常在线', label: '常在线', hint: '消息几乎总能及时收到' },
+  { value: '按作息', label: '按作息', hint: '醒着就在，睡后不回' },
+  { value: '自适应', label: '自适应', hint: '根据对话与关系调整上线频率' },
 ];
+
+export const PERSONA_TIMEZONE_OPTIONS = [
+  { value: '北京时间', label: '北京时间 · 东八区' },
+  { value: '东京时间', label: '东京时间 · 东九区' },
+  { value: '首尔时间', label: '首尔时间 · 东九区' },
+  { value: '悉尼时间', label: '悉尼时间 · 东十区' },
+  { value: '伦敦时间', label: '伦敦时间 · 零时区' },
+  { value: '巴黎时间', label: '巴黎时间 · 东一区' },
+  { value: '纽约时间', label: '纽约时间 · 西五区' },
+  { value: '洛杉矶时间', label: '洛杉矶时间 · 西八区' },
+] as const;
 
 export const LEVEL_OPTIONS = {
   typo: ['从不出错', '极少手滑', '偶尔打错', '经常打错', '容易打错'],
@@ -477,7 +487,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       defaultValue: 50,
     },
     {
-      key: 'selfControl',
+      key: 'self_control',
       label: '自控力',
       hint: '抵御诱惑与蛊惑、守住分寸的能力。',
       min: 20,
@@ -493,7 +503,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       defaultValue: 50,
     },
     {
-      key: 'trustBias',
+      key: 'trust_bias',
       label: '信任倾向',
       hint: '对陌生对象的初始信任，关系值未设时的回退。',
       min: 20,
@@ -503,7 +513,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
   ],
   23: [
     {
-      key: 'attachment',
+      key: 'attachment_style',
       label: '粘人程度',
       hint: '一般性依恋倾向，影响 TA 对疏离的敏感度。',
       min: 20,
@@ -511,7 +521,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       defaultValue: 50,
     },
     {
-      key: 'possessiveness',
+      key: 'possessiveness_base',
       label: '占有欲望',
       hint: '低：不在意关注分配；高：在意优先级。',
       min: 20,
@@ -545,7 +555,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       defaultValue: 50,
     },
     {
-      key: 'stamina',
+      key: 'stamina_max',
       label: '体力上限',
       hint: '持续行动与抗疲劳的天花板，低：易累、需休息。',
       min: 20,
@@ -571,7 +581,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
   ],
   25: [
     {
-      key: 'painTolerance',
+      key: 'pain_tolerance',
       label: '疼痛耐受度',
       hint: '低：反应明显；高：少抱怨。不美化伤害。',
       min: 20,
@@ -579,7 +589,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       defaultValue: 50,
     },
     {
-      key: 'recovery',
+      key: 'recovery_rate',
       label: '回复速度',
       hint: '体力、情绪与轻伤的恢复快慢。低：需长休。',
       min: 20,
@@ -641,6 +651,33 @@ export function rangeDurationMinutes(start: string, end: string): number | null 
 
   const duration = to - from;
   return duration <= 0 ? duration + 24 * 60 : duration;
+}
+
+export function parseWindow(value: string): { start: string; end: string } | null {
+  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(value.trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const [, startHour, startMinute, endHour, endMinute] = match;
+
+  if (!startHour || !startMinute || !endHour || !endMinute) {
+    return null;
+  }
+
+  const start = `${startHour}:${startMinute}`;
+  const end = `${endHour}:${endMinute}`;
+
+  if (toMinutes(start) === null || toMinutes(end) === null) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+export function joinWindow(start: string, end: string): string {
+  return `${start}-${end}`;
 }
 
 export function minutesLabel(minutes: number): string {
@@ -762,7 +799,7 @@ function checkList(
   lines: readonly string[],
   key: string,
   label: string,
-  max: number,
+  max: number | null,
   perLine: number,
   min = 0,
 ): void {
@@ -773,7 +810,7 @@ function checkList(
     return;
   }
 
-  if (items.length > max) {
+  if (max !== null && items.length > max) {
     errors[key] = `${label}最多 ${max} 条`;
     return;
   }
@@ -789,22 +826,22 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
   switch (step) {
     case 1:
       checkText(errors, draft.name, 'name', '姓名', 20, true);
-      checkText(errors, draft.nickname, 'nickname', '绰号', 5);
+      checkList(errors, draft.aliases, 'aliases', '化名与绰号', 5, 10);
       checkText(errors, draft.identity, 'identity', '身份', 20);
       checkText(errors, draft.occupation, 'occupation', '职业', 20, true);
-      checkText(errors, draft.species, 'species', '种族', 10, true);
+      checkText(errors, draft.race, 'race', '种族', 10, true);
       checkNumber(errors, draft.age, 'age', '年龄', 10, null, true, ' 岁');
-      checkNumber(errors, draft.height, 'height', '身高', 100, 400, true, ' cm');
-      checkNumber(errors, draft.weight, 'weight', '体重', 20, 300, true, ' kg');
+      checkNumber(errors, draft.height_cm, 'height_cm', '身高', 100, 400, true, ' cm');
+      checkNumber(errors, draft.weight_kg, 'weight_kg', '体重', 20, 300, true, ' kg');
       break;
 
     case 2:
-      checkText(errors, draft.bodyDescription, 'bodyDescription', '体型描述', 80);
+      checkText(errors, draft.body_type, 'body_type', '体型描述', 80);
       checkText(errors, draft.appearance, 'appearance', '外貌描述', 300, true);
       break;
 
     case 3:
-      checkText(errors, draft.hairstyle, 'hairstyle', '发型描述', 300, true);
+      checkText(errors, draft.hair, 'hair', '发型描述', 300, true);
       checkText(errors, draft.outfit, 'outfit', '服装描述', 300, true);
       break;
 
@@ -813,7 +850,7 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
 
     case 5:
-      checkText(errors, draft.worldview, 'worldview', '世界观', 500);
+      checkText(errors, draft.world_setting, 'world_setting', '世界观', 500);
       break;
 
     case 6:
@@ -821,11 +858,11 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
 
     case 7:
-      checkText(errors, draft.knowledgeBoundary, 'knowledgeBoundary', '知识边界', 500);
+      checkText(errors, draft.knowledge_boundary, 'knowledge_boundary', '知识边界', 500);
       break;
 
     case 8:
-      checkList(errors, draft.coreValues, 'coreValues', '核心价值观', 5, 20, 1);
+      checkList(errors, draft.core_values, 'core_values', '核心价值观', null, 20, 1);
       break;
 
     case 9:
@@ -837,23 +874,23 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
 
     case 11:
-      checkList(errors, draft.weaknesses, 'weaknesses', '性格弱点', 5, 20);
+      checkList(errors, draft.soft_spots, 'soft_spots', '软肋', 5, 20);
       break;
 
     case 12:
-      checkList(errors, draft.redLines, 'redLines', '绝对红线', 5, 20);
+      checkList(errors, draft.non_negotiable, 'non_negotiable', '绝对红线', 5, 20);
       break;
 
     case 13:
-      checkText(errors, draft.longTermGoal, 'longTermGoal', '长期目标', 60);
+      checkText(errors, draft.long_term_motivation, 'long_term_motivation', '长期目标', 60);
       break;
 
     case 14:
-      checkText(errors, draft.currentGoal, 'currentGoal', '当前目标', 60);
+      checkText(errors, draft.current_goal, 'current_goal', '当前目标', 60);
       break;
 
     case 15:
-      checkText(errors, draft.doingNow, 'doingNow', '正在做的事', 100);
+      checkText(errors, draft.doing_now, 'doing_now', '正在做的事', 100);
       break;
 
     case 16:
@@ -869,35 +906,37 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
 
     case 19:
-      checkText(errors, draft.bannedWords, 'bannedWords', '禁用词汇', 200);
+      checkList(errors, draft.banned_words, 'banned_words', '禁用语', 20, 20);
       break;
 
     case 20:
       break;
 
     case 21: {
-      if (!draft.sleepStart || !draft.sleepEnd) {
-        errors.sleepStart = '请填写完整的睡眠时间段';
+      const sleep = parseWindow(draft.sleep_window);
+      if (!sleep) {
+        errors.sleep_window = '请填写完整的睡眠时间段';
       } else {
-        const sleepDuration = rangeDurationMinutes(draft.sleepStart, draft.sleepEnd);
+        const sleepDuration = rangeDurationMinutes(sleep.start, sleep.end);
         if (sleepDuration === null || sleepDuration < 180 || sleepDuration > 720) {
-          errors.sleepEnd = '睡眠跨度需在 3–12 小时之间';
+          errors.sleep_window = '睡眠跨度需在 3–12 小时之间';
         }
       }
 
-      if (!draft.awakeStart || !draft.awakeEnd) {
-        errors.awakeStart = '请填写完整的清醒时间段';
+      const awake = parseWindow(draft.awake_window);
+      if (!awake) {
+        errors.awake_window = '请填写完整的清醒时间段';
       } else {
-        const awakeDuration = rangeDurationMinutes(draft.awakeStart, draft.awakeEnd);
+        const awakeDuration = rangeDurationMinutes(awake.start, awake.end);
         if (awakeDuration === null || awakeDuration < 180 || awakeDuration > 720) {
-          errors.awakeEnd = '清醒跨度需在 3–12 小时之间';
-        } else {
-          const sleepDuration = rangeDurationMinutes(draft.sleepStart, draft.sleepEnd);
+          errors.awake_window = '清醒跨度需在 3–12 小时之间';
+        } else if (sleep) {
+          const sleepDuration = rangeDurationMinutes(sleep.start, sleep.end);
           if (
             sleepDuration !== null &&
-            windowsOverlap(draft.sleepStart, sleepDuration, draft.awakeStart, awakeDuration)
+            windowsOverlap(sleep.start, sleepDuration, awake.start, awakeDuration)
           ) {
-            errors.awakeStart = '清醒时段不能与睡眠时段重叠';
+            errors.awake_window = '清醒时段不能与睡眠时段重叠';
           }
         }
       }
@@ -996,9 +1035,141 @@ export function clearDraft(): void {
   }
 }
 
+const LEGACY_KEY_MAP: Record<string, string> = {
+  species: 'race',
+  height: 'height_cm',
+  weight: 'weight_kg',
+  bodyDescription: 'body_type',
+  hairstyle: 'hair',
+  worldview: 'world_setting',
+  knowledgeBoundary: 'knowledge_boundary',
+  timeAwareness: 'time_awareness',
+  coreValues: 'core_values',
+  weaknesses: 'soft_spots',
+  redLines: 'non_negotiable',
+  longTermGoal: 'long_term_motivation',
+  currentGoal: 'current_goal',
+  doingNow: 'doing_now',
+  conflictStyle: 'conflict_style',
+  humorStyle: 'humor_style',
+  memoryBias: 'memory_bias',
+  sentenceLength: 'sentence_length',
+  typoLevel: 'typo_level',
+  splitLevel: 'split_level',
+  emojiLevel: 'emoji_level',
+  typingLevel: 'typing_level',
+  onlinePolicy: 'online_policy',
+  sleepDepth: 'sleep_depth',
+  selfControl: 'self_control',
+  trustBias: 'trust_bias',
+  attachment: 'attachment_style',
+  possessiveness: 'possessiveness_base',
+  stamina: 'stamina_max',
+  painTolerance: 'pain_tolerance',
+  recovery: 'recovery_rate',
+};
+
+const LEGACY_CHOICE_MAP: Record<string, Record<string, string>> = {
+  conflict_style: {
+    avoid: '回避',
+    confront: '对抗',
+    reason: '讲理',
+    cold_war: '冷战',
+    withdraw_then_explain: '先退后解释',
+  },
+  humor_style: {
+    dry: '冷幽默',
+    self_deprecating: '自嘲',
+    roast: '吐槽',
+    none: '不接梗',
+  },
+  memory_bias: {
+    balanced: '均衡',
+    detail: '记细节',
+    grudge: '记仇',
+    forgetful: '健忘',
+  },
+  sentence_length: {
+    short: '短句',
+    medium: '中句',
+    long: '长句',
+    mixed: '长短混用',
+  },
+  punctuation: {
+    minimal: '极简',
+    plain: '常规',
+    soft: '柔软',
+    strict: '严整',
+    lively: '活泼',
+    bookish: '书卷',
+  },
+  online_policy: {
+    always: '常在线',
+    rhythm: '按作息',
+    adaptive: '自适应',
+  },
+};
+
+const TIME_OFFSET_ZONE: Record<number, string> = {
+  [-8]: '洛杉矶时间',
+  [-5]: '纽约时间',
+  0: '伦敦时间',
+  1: '巴黎时间',
+  8: '北京时间',
+  9: '东京时间',
+};
+
+function migrateLegacyDraft(source: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...source };
+
+  if (next.aliases === undefined && typeof next.nickname === 'string') {
+    const nickname = next.nickname.trim();
+    next.aliases = nickname ? [nickname] : [''];
+  }
+
+  if (next.banned_words === undefined && typeof next.bannedWords === 'string') {
+    const words = next.bannedWords
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    next.banned_words = words.length > 0 ? words : [''];
+  }
+
+  if (next.sleep_window === undefined) {
+    const start = typeof next.sleepStart === 'string' ? next.sleepStart : '23:00';
+    const end = typeof next.sleepEnd === 'string' ? next.sleepEnd : '07:00';
+    next.sleep_window = joinWindow(start, end);
+  }
+
+  if (next.awake_window === undefined) {
+    const start = typeof next.awakeStart === 'string' ? next.awakeStart : '09:00';
+    const end = typeof next.awakeEnd === 'string' ? next.awakeEnd : '18:00';
+    next.awake_window = joinWindow(start, end);
+  }
+
+  if (next.time_zone === undefined && typeof next.timeOffset === 'number') {
+    next.time_zone = TIME_OFFSET_ZONE[next.timeOffset] ?? '北京时间';
+  }
+
+  for (const [legacy, current] of Object.entries(LEGACY_KEY_MAP)) {
+    if (next[current] === undefined && next[legacy] !== undefined) {
+      next[current] = next[legacy];
+    }
+  }
+
+  for (const [key, valueMap] of Object.entries(LEGACY_CHOICE_MAP)) {
+    const value = next[key];
+    if (typeof value === 'string' && value in valueMap) {
+      next[key] = valueMap[value];
+    }
+  }
+
+  return next;
+}
+
 function hydrateDraft(raw: unknown): PersonaDraft {
   const defaults = createDefaultDraft();
-  const source = (raw ?? {}) as Record<string, unknown>;
+  const source = migrateLegacyDraft((raw ?? {}) as Record<string, unknown>);
   const merged: Record<string, unknown> = {};
 
   for (const [key, fallback] of Object.entries(defaults)) {
@@ -1019,13 +1190,11 @@ function hydrateDraft(raw: unknown): PersonaDraft {
 
   const draft = merged as unknown as PersonaDraft;
 
-  (['typoLevel', 'splitLevel', 'emojiLevel', 'typingLevel', 'sleepDepth'] as const).forEach(
+  (['typo_level', 'split_level', 'emoji_level', 'typing_level', 'sleep_depth'] as const).forEach(
     (key) => {
       draft[key] = Math.min(4, Math.max(0, Math.round(draft[key])));
     },
   );
-
-  draft.timeOffset = Math.min(12, Math.max(-12, Math.round(draft.timeOffset)));
 
   Object.values(SLIDER_GROUPS).forEach((sliders) => {
     sliders.forEach((slider) => {

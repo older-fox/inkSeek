@@ -520,7 +520,7 @@ interface LinesControlProps {
   label: string;
   lines: string[];
   onChange: (lines: string[]) => void;
-  max: number;
+  max?: number;
   perLineMax: number;
   required?: boolean;
   hint?: string;
@@ -559,7 +559,7 @@ export function LinesControl({
       label={label}
       required={required}
       hint={hint}
-      counter={`${filled} / ${max} 条`}
+      counter={max === undefined ? `${filled} 条` : `${filled} / ${max} 条`}
       error={error}
     >
       <div className="space-y-2">
@@ -589,7 +589,7 @@ export function LinesControl({
           </div>
         ))}
 
-        {lines.length < max && (
+        {(max === undefined || lines.length < max) && (
           <button
             type="button"
             onClick={() => onChange([...lines, ''])}
@@ -688,11 +688,7 @@ function PickerPopover({
     }
 
     const rect = anchor.getBoundingClientRect();
-    const width = Math.min(
-      Math.max(rect.width, minWidth),
-      maxWidth,
-      window.innerWidth - 24,
-    );
+    const width = Math.min(Math.max(rect.width, minWidth), maxWidth, window.innerWidth - 24);
     const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
     const spaceBelow = window.innerHeight - rect.bottom - 12;
     const openAbove = spaceBelow < POPOVER_MAX_HEIGHT && rect.top > spaceBelow;
@@ -906,6 +902,7 @@ interface TimeZonePickerProps {
   required?: boolean;
   hint?: string;
   error?: string;
+  bare?: boolean;
 }
 
 export function TimeZonePicker({
@@ -917,6 +914,7 @@ export function TimeZonePicker({
   required,
   hint,
   error,
+  bare = false,
 }: TimeZonePickerProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -935,8 +933,8 @@ export function TimeZonePicker({
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
-  return (
-    <FieldFrame id={id} label={label} required={required} hint={hint} error={error}>
+  const control = (
+    <>
       <button
         id={id}
         ref={anchorRef}
@@ -1000,6 +998,16 @@ export function TimeZonePicker({
           })}
         </div>
       </PickerPopover>
+    </>
+  );
+
+  if (bare) {
+    return control;
+  }
+
+  return (
+    <FieldFrame id={id} label={label} required={required} hint={hint} error={error}>
+      {control}
     </FieldFrame>
   );
 }
