@@ -10,6 +10,8 @@ import {
   Plus,
   Search,
   Send,
+  User,
+  Users,
   Waypoints,
   X,
 } from 'lucide-react';
@@ -18,6 +20,8 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEve
 import { toast } from 'sonner';
 import { InputShell } from '@/components/field';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
+import { GroupPersonaPanel } from '@/components/group-persona-panel';
+import { PrivatePersonaPanel } from '@/components/private-persona-panel';
 import { cn } from '@/lib/cn';
 import {
   PLATFORMS,
@@ -370,6 +374,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
   const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [personaOpen, setPersonaOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const conversations = useMemo(() => conversationsFor(channels, kind), [channels, kind]);
@@ -417,6 +422,8 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
 
   const selfChannel =
     channels.find((channel) => channel.id === activeConversation?.source.id) ?? channels[0];
+  const activeChannel =
+    channels.find((channel) => channel.id === activeConversation?.source.id) ?? null;
   const selfName = selfChannel?.displayName ?? '我';
   const selfInitial = selfChannel?.initials.slice(0, 1) ?? '我';
 
@@ -429,6 +436,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
 
   useEffect(() => {
     setAttachments([]);
+    setPersonaOpen(false);
   }, [selectedId]);
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
@@ -667,6 +675,21 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                 </p>
               </div>
 
+              <button
+                type="button"
+                onClick={() => setPersonaOpen(true)}
+                aria-label={kind === 'group' ? '查看群聊人格参数' : '查看私聊人格参数'}
+                title={kind === 'group' ? '群聊人格参数' : '私聊人格参数'}
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-brass-400/30 bg-brass-400/[0.08] px-2.5 font-mono text-[0.58rem] tracking-[0.08em] text-brass-300 transition hover:bg-brass-400/[0.16]"
+              >
+                {kind === 'group' ? (
+                  <Users className="size-3.5" strokeWidth={1.8} />
+                ) : (
+                  <User className="size-3.5" strokeWidth={1.8} />
+                )}
+                <span className="hidden sm:inline">{kind === 'group' ? '群人格' : '私人格'}</span>
+              </button>
+
               <SyncPill label="实时同步" className="hidden sm:inline-flex" />
             </header>
 
@@ -761,6 +784,20 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
           </div>
         )}
       </section>
+
+      {kind === 'group' ? (
+        <GroupPersonaPanel
+          conversation={personaOpen ? activeConversation : null}
+          channel={activeChannel}
+          onClose={() => setPersonaOpen(false)}
+        />
+      ) : (
+        <PrivatePersonaPanel
+          conversation={personaOpen ? activeConversation : null}
+          channel={activeChannel}
+          onClose={() => setPersonaOpen(false)}
+        />
+      )}
     </div>
   );
 }
