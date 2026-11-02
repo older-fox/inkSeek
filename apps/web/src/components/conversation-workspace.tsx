@@ -1,7 +1,11 @@
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  Check,
+  ChevronDown,
   ImagePlus,
+  Layers,
+  ListFilter,
   MessagesSquare,
   Plus,
   Search,
@@ -9,26 +13,21 @@ import {
   Waypoints,
   X,
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ClipboardEvent,
-  type FormEvent,
-} from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { InputShell } from '@/components/field';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
 import { cn } from '@/lib/cn';
 import {
   PLATFORMS,
+  conversationSources,
   conversationsFor,
   useChannels,
   type ChatMessage,
   type Conversation,
   type ConversationKind,
+  type ConversationSourceSummary,
 } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -154,9 +153,7 @@ function ConversationRow({
             {PLATFORMS[conversation.platform].name}
           </span>
           {kind === 'group' && conversation.members !== undefined && (
-            <span className="font-mono text-[0.5rem] text-mist-600">
-              {conversation.members} 人
-            </span>
+            <span className="font-mono text-[0.5rem] text-mist-600">{conversation.members} 人</span>
           )}
           {conversation.unread > 0 && (
             <span className="ml-auto grid h-4 min-w-4 place-items-center rounded-full bg-brass-400/20 px-1 font-mono text-[0.48rem] text-brass-300">
@@ -170,6 +167,161 @@ function ConversationRow({
         </span>
       </span>
     </button>
+  );
+}
+
+function SourceFilter({
+  sources,
+  value,
+  total,
+  onChange,
+}: {
+  sources: readonly ConversationSourceSummary[];
+  value: string | null;
+  total: number;
+  onChange: (sourceId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const active = sources.find((source) => source.id === value) ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const select = (sourceId: string | null) => {
+    onChange(sourceId);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={active ? `当前来源：${active.displayName}` : '筛选消息来源'}
+        title="筛选消息来源"
+        onClick={() => setOpen((previous) => !previous)}
+        className={cn(
+          'inline-flex h-7 max-w-[10.5rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.62rem] transition',
+          open || active
+            ? 'border-brass-400/35 bg-brass-400/[0.09] text-brass-200'
+            : 'border-mist-100/[0.08] bg-ink-950/25 text-mist-400 hover:border-brass-400/25 hover:text-brass-200',
+        )}
+      >
+        <ListFilter className="size-3.5 shrink-0" strokeWidth={1.8} />
+        <span className="truncate">{active ? active.displayName : '全部来源'}</span>
+        <ChevronDown
+          className={cn('size-3 shrink-0 transition-transform duration-200', open && 'rotate-180')}
+          strokeWidth={2}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="listbox"
+            aria-label="消息来源"
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.97 }}
+            transition={{ duration: 0.16, ease: EASE }}
+            className="glass-panel absolute right-0 top-[calc(100%+0.45rem)] z-40 w-[14.5rem] origin-top-right rounded-2xl p-1.5 shadow-[0_28px_60px_-32px_rgba(0,0,0,0.85)]"
+          >
+            <p className="px-2 pb-1 pt-1.5 font-mono text-[0.48rem] uppercase tracking-[0.22em] text-mist-600">
+              Message Source
+            </p>
+
+            <button
+              type="button"
+              role="option"
+              aria-selected={!active}
+              onClick={() => select(null)}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition',
+                !active ? 'bg-mist-100/[0.07]' : 'hover:bg-mist-100/[0.04]',
+              )}
+            >
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-mist-100/10 bg-ink-950/40 text-mist-400">
+                <Layers className="size-3.5" strokeWidth={1.7} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.72rem] text-mist-200">全部来源</span>
+                <span className="mt-0.5 block truncate font-mono text-[0.5rem] tracking-[0.08em] text-mist-600">
+                  {sources.length} 个账号汇总
+                </span>
+              </span>
+              <span className="shrink-0 rounded-full border border-mist-100/[0.06] bg-ink-950/40 px-1.5 py-0.5 font-mono text-[0.5rem] text-mist-500">
+                {total}
+              </span>
+              {!active && <Check className="size-3.5 shrink-0 text-brass-300" strokeWidth={2.2} />}
+            </button>
+
+            {sources.map((source) => {
+              const selected = source.id === value;
+
+              return (
+                <button
+                  key={source.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => select(source.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition',
+                    selected ? 'bg-mist-100/[0.07]' : 'hover:bg-mist-100/[0.04]',
+                  )}
+                >
+                  <ChannelAvatar
+                    initials={source.initials}
+                    accent={source.accent}
+                    size="sm"
+                    className="size-7 rounded-lg text-[0.62rem]"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[0.72rem] text-mist-200">
+                      {source.displayName}
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-[0.5rem] tracking-[0.08em] text-mist-600">
+                      {PLATFORMS[source.platform].name} {source.accountId}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-full border border-mist-100/[0.06] bg-ink-950/40 px-1.5 py-0.5 font-mono text-[0.5rem] text-mist-500">
+                    {source.count}
+                  </span>
+                  {selected && (
+                    <Check className="size-3.5 shrink-0 text-brass-300" strokeWidth={2.2} />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -213,6 +365,7 @@ function ChannelRequired({ kind }: { kind: ConversationKind }) {
 export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const channels = useChannels();
   const [query, setQuery] = useState('');
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -220,29 +373,50 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const conversations = useMemo(() => conversationsFor(channels, kind), [channels, kind]);
+  const sources = useMemo(() => conversationSources(channels, kind), [channels, kind]);
+
+  useEffect(() => {
+    setSourceId((current) =>
+      current && !sources.some((source) => source.id === current) ? null : current,
+    );
+  }, [sources]);
+
+  const visibleConversations = useMemo(
+    () =>
+      sourceId
+        ? conversations.filter((conversation) => conversation.source.id === sourceId)
+        : conversations,
+    [conversations, sourceId],
+  );
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
-      return conversations;
+      return visibleConversations;
     }
 
-    return conversations.filter((conversation) =>
-      [conversation.name, conversation.handle, conversation.lastMessage, conversation.messages.at(-1)?.text ?? '']
+    return visibleConversations.filter((conversation) =>
+      [
+        conversation.name,
+        conversation.handle,
+        conversation.lastMessage,
+        conversation.messages.at(-1)?.text ?? '',
+      ]
         .join(' ')
         .toLowerCase()
         .includes(normalized),
     );
-  }, [conversations, query]);
+  }, [visibleConversations, query]);
 
-  const activeConversation = conversations.find((conversation) => conversation.id === selectedId) ?? null;
+  const activeConversation =
+    visibleConversations.find((conversation) => conversation.id === selectedId) ?? null;
 
   const activeMessages = activeConversation
     ? [...activeConversation.messages, ...(localMessages[activeConversation.id] ?? [])]
     : [];
 
   const selfChannel =
-    channels.find((channel) => channel.platform === activeConversation?.platform) ?? channels[0];
+    channels.find((channel) => channel.id === activeConversation?.source.id) ?? channels[0];
   const selfName = selfChannel?.displayName ?? '我';
   const selfInitial = selfChannel?.initials.slice(0, 1) ?? '我';
 
@@ -369,7 +543,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                   <X className="size-3.5" />
                 </button>
               ) : (
-                <span className="font-mono text-[0.5rem] uppercase tracking-[0.14em] text-mist-600">
+                <span className="shrink-0 whitespace-nowrap font-mono text-[0.5rem] uppercase tracking-[0.14em] text-mist-600">
                   {filtered.length} 会话
                 </span>
               )
@@ -388,9 +562,16 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
           </InputShell>
         </div>
 
-        <div className="flex items-center justify-between px-4 py-2 font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
-          <span>{kind === 'private' ? 'Direct Messages' : 'Group Chats'}</span>
-          <span>全平台</span>
+        <div className="flex items-center justify-between gap-2 px-3 pb-1.5 pt-1">
+          <span className="font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
+            {kind === 'private' ? 'Direct Messages' : 'Group Chats'}
+          </span>
+          <SourceFilter
+            sources={sources}
+            value={sourceId}
+            total={conversations.length}
+            onChange={setSourceId}
+          />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -405,9 +586,22 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
           ))}
 
           {filtered.length === 0 && (
-            <p className="px-3 py-10 text-center text-[0.7rem] leading-6 text-mist-600">
-              没有匹配的{kind === 'private' ? '联系人' : '群聊'}。
-            </p>
+            <div className="px-3 py-10 text-center">
+              <p className="text-[0.7rem] leading-6 text-mist-600">
+                {query.trim()
+                  ? `没有匹配的${kind === 'private' ? '联系人' : '群聊'}。`
+                  : `该来源暂时没有${kind === 'private' ? '私聊' : '群聊'}。`}
+              </p>
+              {sourceId && (
+                <button
+                  type="button"
+                  onClick={() => setSourceId(null)}
+                  className="mt-2 rounded-full border border-mist-100/[0.08] px-2.5 py-1 font-mono text-[0.52rem] text-mist-500 transition hover:border-brass-400/30 hover:text-brass-300"
+                >
+                  查看全部来源
+                </button>
+              )}
+            </div>
           )}
         </div>
       </aside>
@@ -449,10 +643,27 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                   )}
                 </div>
                 <p className="mt-0.5 flex flex-wrap items-center gap-2">
-                  <PlatformChip platform={activeConversation.platform} connector className="px-1.5 py-0" />
+                  <PlatformChip
+                    platform={activeConversation.platform}
+                    connector
+                    className="px-1.5 py-0"
+                  />
                   <span className="font-mono text-[0.55rem] text-mist-600">
                     {activeConversation.handle}
                   </span>
+                  {sources.length > 1 && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-mist-100/[0.08] bg-ink-950/25 px-1.5 py-0 font-mono text-[0.5rem] tracking-[0.06em] text-mist-500">
+                      <span
+                        className={cn(
+                          'size-1 rounded-full',
+                          activeConversation.source.accent === 'jade'
+                            ? 'bg-jade-400/80'
+                            : 'bg-brass-400/80',
+                        )}
+                      />
+                      来自 {activeConversation.source.displayName}
+                    </span>
+                  )}
                 </p>
               </div>
 

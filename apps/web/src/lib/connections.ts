@@ -92,6 +92,23 @@ export interface Conversation {
   messages: ChatMessage[];
 }
 
+export interface ConversationSource {
+  id: string;
+  platform: PlatformId;
+  displayName: string;
+  accountId: string;
+  initials: string;
+  accent: ChannelAccent;
+}
+
+export interface ConversationSourceSummary extends ConversationSource {
+  count: number;
+}
+
+export interface SourcedConversation extends Conversation {
+  source: ConversationSource;
+}
+
 export interface NapCatAccount {
   displayName: string;
   accountId: string;
@@ -140,7 +157,13 @@ export const CONVERSATIONS: readonly Conversation[] = [
     lastMessage: '发过去了，别笑我。',
     lastTime: '20:46',
     messages: [
-      { id: 'm1', self: false, author: '周叙', text: '沈砚，你那儿还能修民国时候的信笺吗？边角全碎了。', time: '20:41' },
+      {
+        id: 'm1',
+        self: false,
+        author: '周叙',
+        text: '沈砚，你那儿还能修民国时候的信笺吗？边角全碎了。',
+        time: '20:41',
+      },
       { id: 'm2', self: true, author: '沈砚', text: '能。别自己拿胶带粘。', time: '20:44' },
       { id: 'm3', self: false, author: '周叙', text: '已经……粘了。', time: '20:44' },
       { id: 'm4', self: true, author: '沈砚', text: '……拍给我看。', time: '20:45' },
@@ -166,8 +189,20 @@ export const CONVERSATIONS: readonly Conversation[] = [
     lastMessage: '明天带给你。',
     lastTime: '18:25',
     messages: [
-      { id: 'm1', self: true, author: '沈砚', text: '书到了，扉页有前任主人的批注。', time: '18:20' },
-      { id: 'm2', self: false, author: '夏然', text: '真的？拍来看看，我最喜欢这种意外的痕迹。', time: '18:22' },
+      {
+        id: 'm1',
+        self: true,
+        author: '沈砚',
+        text: '书到了，扉页有前任主人的批注。',
+        time: '18:20',
+      },
+      {
+        id: 'm2',
+        self: false,
+        author: '夏然',
+        text: '真的？拍来看看，我最喜欢这种意外的痕迹。',
+        time: '18:22',
+      },
       { id: 'm3', self: true, author: '沈砚', text: '明天带给你。', time: '18:25' },
     ],
   },
@@ -183,7 +218,13 @@ export const CONVERSATIONS: readonly Conversation[] = [
     lastMessage: '那我六点前到，麻烦你了。',
     lastTime: '16:06',
     messages: [
-      { id: 'm1', self: false, author: '陈屿', text: '店今天开吗？想送一本旧诗集去修。', time: '16:02' },
+      {
+        id: 'm1',
+        self: false,
+        author: '陈屿',
+        text: '店今天开吗？想送一本旧诗集去修。',
+        time: '16:02',
+      },
       { id: 'm2', self: true, author: '沈砚', text: '开。六点前。', time: '16:05' },
       { id: 'm3', self: false, author: '陈屿', text: '那我六点前到，麻烦你了。', time: '16:06' },
     ],
@@ -200,7 +241,13 @@ export const CONVERSATIONS: readonly Conversation[] = [
     lastMessage: '很薄，对着灯能看见纤维。',
     lastTime: '14:14',
     messages: [
-      { id: 'm1', self: false, author: '阿岚', text: '我找到一叠你之前说的那种竹纸。', time: '14:11' },
+      {
+        id: 'm1',
+        self: false,
+        author: '阿岚',
+        text: '我找到一叠你之前说的那种竹纸。',
+        time: '14:11',
+      },
       { id: 'm2', self: true, author: '沈砚', text: '薄吗？', time: '14:13' },
       { id: 'm3', self: false, author: '阿岚', text: '很薄，对着灯能看见纤维。', time: '14:14' },
     ],
@@ -257,7 +304,13 @@ export const CONVERSATIONS: readonly Conversation[] = [
     lastTime: '11:29',
     messages: [
       { id: 'm1', self: false, author: '鱼丸', text: '有人试过用柿染做书衣吗？', time: '11:20' },
-      { id: 'm2', self: true, author: '沈砚', text: '颜色会随时间变深，很适合旧书。', time: '11:28' },
+      {
+        id: 'm2',
+        self: true,
+        author: '沈砚',
+        text: '颜色会随时间变深，很适合旧书。',
+        time: '11:28',
+      },
       { id: 'm3', self: false, author: '鱼丸', text: '求教程！', time: '11:29' },
     ],
   },
@@ -417,19 +470,87 @@ function createChannelId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function orderedChannels(channels: readonly Channel[]): Channel[] {
+  return [...channels].sort(
+    (left, right) =>
+      left.connectedAt.localeCompare(right.connectedAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function toConversationSource(channel: Channel): ConversationSource {
+  return {
+    id: channel.id,
+    platform: channel.platform,
+    displayName: channel.displayName,
+    accountId: channel.accountId,
+    initials: channel.initials,
+    accent: channel.accent,
+  };
+}
+
+/**
+ * Conversations are mock, platform-level data; newer connected accounts take turns
+ * owning them so a multi-account setup still has something to filter through.
+ */
 export function conversationsFor(
   channels: readonly Channel[],
   kind: ConversationKind,
-): readonly Conversation[] {
+  sourceId?: string | null,
+): readonly SourcedConversation[] {
   if (channels.length === 0) {
     return [];
   }
 
-  const platforms = new Set(channels.map((channel) => channel.platform));
+  const byPlatform = new Map<PlatformId, Channel[]>();
+  orderedChannels(channels).forEach((channel) => {
+    const pool = byPlatform.get(channel.platform);
+    if (pool) {
+      pool.push(channel);
+    } else {
+      byPlatform.set(channel.platform, [channel]);
+    }
+  });
 
-  return CONVERSATIONS.filter(
-    (conversation) => conversation.kind === kind && platforms.has(conversation.platform),
-  );
+  const cursors = new Map<PlatformId, number>();
+  const result: SourcedConversation[] = [];
+
+  CONVERSATIONS.forEach((conversation) => {
+    if (conversation.kind !== kind) {
+      return;
+    }
+
+    const pool = byPlatform.get(conversation.platform);
+    if (!pool || pool.length === 0) {
+      return;
+    }
+
+    const cursor = cursors.get(conversation.platform) ?? 0;
+    cursors.set(conversation.platform, cursor + 1);
+
+    const channel = pool[cursor % pool.length];
+    if (!channel || (sourceId && channel.id !== sourceId)) {
+      return;
+    }
+
+    result.push({ ...conversation, source: toConversationSource(channel) });
+  });
+
+  return result;
+}
+
+export function conversationSources(
+  channels: readonly Channel[],
+  kind: ConversationKind,
+): readonly ConversationSourceSummary[] {
+  const counts = new Map<string, number>();
+  conversationsFor(channels, kind).forEach((conversation) => {
+    counts.set(conversation.source.id, (counts.get(conversation.source.id) ?? 0) + 1);
+  });
+
+  return orderedChannels(channels).flatMap((channel) => {
+    const count = counts.get(channel.id) ?? 0;
+    return count > 0 ? [{ ...toConversationSource(channel), count }] : [];
+  });
 }
 
 export function channelConversationStats(platform: PlatformId): {
