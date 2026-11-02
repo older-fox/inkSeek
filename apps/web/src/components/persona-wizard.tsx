@@ -261,6 +261,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
   const handleStart = () => {
     setDirection(1);
     setErrors({});
+    setConfirmDiscard(false);
     setView('step');
   };
 
@@ -1017,17 +1018,26 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                     <span className="font-mono text-[0.58rem] uppercase tracking-[0.3em] text-brass-400/75">
                       Persona Creation
                     </span>
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      aria-label="取消并保存草稿"
-                      className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
-                    >
-                      <X className="size-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        className="rounded-lg px-2.5 py-1.5 text-[0.66rem] text-mist-500 transition hover:bg-mist-100/5 hover:text-mist-200"
+                      >
+                        稍后再填
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        aria-label="取消并保存草稿"
+                        className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-6 py-10 sm:px-10">
+                  <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-6 py-7 sm:px-10">
                     <span className="grid size-14 place-items-center rounded-2xl border border-brass-400/25 bg-brass-400/10 text-brass-300">
                       <Sparkles className="size-6" strokeWidth={1.5} />
                     </span>
@@ -1064,23 +1074,80 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                     </div>
 
                     {resume && (
-                      <div className="mt-5 flex items-start gap-3 rounded-xl border border-jade-400/20 bg-jade-400/[0.06] px-4 py-3">
-                        <span className="mt-1 size-1.5 shrink-0 rounded-full bg-jade-400" />
-                        <div className="min-w-0">
-                          <p className="text-[0.72rem] text-jade-300">
-                            发现一份未完成的草稿 · 上次停在第 {resume.step} 步
-                          </p>
-                          <p className="mt-0.5 text-[0.6rem] text-mist-600">
-                            {resumePhase?.name ?? '填写中'}
-                            {formatMoment(resume.updatedAt)
-                              ? ` · 保存于 ${formatMoment(resume.updatedAt)}`
-                              : ''}
-                          </p>
-                        </div>
+                      <div className="mt-5 rounded-xl border border-jade-400/20 bg-jade-400/[0.06] px-4 py-3">
+                        <AnimatePresence mode="wait" initial={false}>
+                          {confirmDiscard ? (
+                            <motion.div
+                              key="discard-confirm"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.16 }}
+                              className="flex flex-wrap items-center gap-x-3 gap-y-2"
+                            >
+                              <div className="flex min-w-0 flex-1 items-start gap-2">
+                                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-signal-400" />
+                                <p className="text-[0.68rem] leading-5 text-signal-400">
+                                  丢弃草稿并重新开始？
+                                  <span className="text-mist-500">
+                                    {' '}
+                                    当前填写的内容会从本机移除。
+                                  </span>
+                                </p>
+                              </div>
+                              <div className="flex shrink-0 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleDiscardAndStart}
+                                  className="h-7 rounded-md bg-signal-400/90 px-2.5 text-[0.64rem] font-medium text-ink-950 transition hover:bg-signal-400"
+                                >
+                                  丢弃并重填
+                                </button>
+                                <GhostButton
+                                  type="button"
+                                  onClick={() => setConfirmDiscard(false)}
+                                  className="h-7 px-2.5 text-[0.64rem]"
+                                >
+                                  保留草稿
+                                </GhostButton>
+                              </div>
+                            </motion.div>
+                          ) : (
+                            <motion.div
+                              key="discard-info"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.16 }}
+                              className="flex items-start gap-3"
+                            >
+                              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-jade-400" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[0.72rem] text-jade-300">
+                                  发现一份未完成的草稿 · 上次停在第 {resume.step} 步
+                                </p>
+                                <p className="mt-0.5 text-[0.6rem] text-mist-600">
+                                  {resumePhase?.name ?? '填写中'}
+                                  {formatMoment(resume.updatedAt)
+                                    ? ` · 保存于 ${formatMoment(resume.updatedAt)}`
+                                    : ''}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDiscard(true)}
+                                className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[0.62rem] text-mist-500 transition hover:bg-signal-400/10 hover:text-signal-400"
+                              >
+                                <Trash2 className="size-3" />
+                                重新填写
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     )}
 
-                    <div className="mt-8 flex flex-col gap-2.5 sm:flex-row">
+                    <div className="mt-7 flex flex-col gap-2.5 sm:flex-row">
                       <PrimaryButton
                         type="button"
                         onClick={handleStart}
@@ -1106,70 +1173,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       也可以让 AI 根据一段描述先生成全部属性，再逐项修改。
                     </p>
 
-                    <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.7rem]">
-                      {resume && (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDiscard(true)}
-                          className="flex items-center gap-1.5 text-mist-500 transition hover:text-signal-400"
-                        >
-                          <Trash2 className="size-3.5" />
-                          重新填写
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        className="text-mist-500 transition hover:text-mist-200"
-                      >
-                        稍后再填
-                      </button>
-                    </div>
-
-                    <AnimatePresence initial={false}>
-                      {confirmDiscard && (
-                        <motion.div
-                          key="discard-confirm"
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.24, ease: EASE }}
-                          className="overflow-hidden"
-                        >
-                          <div className="mt-4 rounded-xl border border-signal-400/25 bg-signal-400/[0.06] p-4">
-                            <div className="flex items-start gap-2.5">
-                              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-signal-400" />
-                              <div className="min-w-0">
-                                <p className="text-[0.74rem] text-signal-400">
-                                  丢弃草稿并从第 1 步重新开始？
-                                </p>
-                                <p className="mt-1 text-[0.64rem] leading-5 text-mist-500">
-                                  当前填写的内容会从本机移除，无法恢复。
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                              <button
-                                type="button"
-                                onClick={handleDiscardAndStart}
-                                className="h-9 rounded-lg bg-signal-400/90 px-4 text-[0.72rem] font-medium text-ink-950 transition hover:bg-signal-400"
-                              >
-                                丢弃并重新填写
-                              </button>
-                              <GhostButton
-                                type="button"
-                                onClick={() => setConfirmDiscard(false)}
-                                className="h-9 px-4 text-[0.72rem]"
-                              >
-                                保留草稿
-                              </GhostButton>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <p className="mt-5 text-[0.6rem] leading-5 text-mist-600">
+                    <p className="mt-4 text-[0.6rem] leading-5 text-mist-600">
                       带 * 的信息为必填；其余可以留空。所有字数均按中文字符计算。
                     </p>
                   </div>
