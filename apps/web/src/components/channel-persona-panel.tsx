@@ -8,20 +8,23 @@ import {
   Layers,
   MessageSquareQuote,
   MoonStar,
+  Pencil,
   ShieldCheck,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
+import { PersonaRevisionList } from '@/components/persona-revision-list';
 import { cn } from '@/lib/cn';
 import {
   PERSONA_ATTRIBUTE_COUNT,
   PERSONA_GROUPS,
   personaForChannel,
-  type ChannelPersona,
+  readChannelPersonaOverrides,
+  writeChannelPersonaOverride,
   type PersonaField,
   type PersonaGroup,
   type PersonaValue,
@@ -29,6 +32,9 @@ import {
 import type { Channel } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+
+const EDITOR_INPUT =
+  'w-full rounded-lg border border-brass-400/25 bg-ink-950/40 px-2.5 py-1.5 text-[0.8rem] leading-6 text-mist-100 outline-none transition placeholder:text-mist-600 focus:border-brass-400/50';
 
 const GROUP_ICONS: Record<string, LucideIcon> = {
   identity: Fingerprint,
@@ -66,6 +72,247 @@ function formatDuration(seconds: number): string {
   return `${seconds} 秒`;
 }
 
+function textValue(
+  values: Record<string, PersonaValue> | null,
+  key: string,
+  fallback: string,
+): string {
+  const value = values?.[key];
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function EditorActions({
+  disabled = false,
+  onCancel,
+  onCommit,
+}: {
+  disabled?: boolean;
+  onCancel: () => void;
+  onCommit: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-md px-2 py-1 text-[0.7rem] text-mist-500 transition hover:bg-mist-100/[0.06] hover:text-mist-300"
+      >
+        取消
+      </button>
+      <button
+        type="button"
+        onClick={onCommit}
+        disabled={disabled}
+        className="rounded-md border border-brass-400/30 bg-brass-400/10 px-2.5 py-1 text-[0.7rem] text-brass-300 transition hover:bg-brass-400/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        保存
+      </button>
+    </div>
+  );
+}
+
+function PersonaFieldEditor({
+  field,
+  value,
+  onCancel,
+  onCommit,
+}: {
+  field: PersonaField;
+  value: PersonaValue | undefined;
+  onCancel: () => void;
+  onCommit: (value: PersonaValue) => void;
+}) {
+  const [text, setText] = useState(() => {
+    if (Array.isArray(value)) {
+      return value.join('，');
+    }
+    if (typeof value === 'boolean') {
+      return value ? '是' : '否';
+    }
+    return value === undefined ? '' : String(value);
+  });
+
+  const numeric = Number(text);
+  const numericValid = text.trim() !== '' && Number.isFinite(numeric);
+
+  const commit = () => {
+    switch (field.kind) {
+      case 'tags':
+        onCommit(
+          text
+            .split(/[,，]/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+        );
+        return;
+      case 'score':
+        if (!numericValid) {
+          return;
+        }
+        onCommit(Math.max(0, Math.min(100, Math.round(numeric))));
+        return;
+      case 'duration':
+        if (!numericValid || numeric < 0) {
+          return;
+        }
+        onCommit(Math.round(numeric));
+        return;
+      case 'number':
+        if (!numericValid) {
+          return;
+        }
+        onCommit(numeric);
+        return;
+      default:
+        onCommit(text);
+    }
+  };
+
+  const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+    }
+  };
+
+  const handleTextareaKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      commit();
+    }
+  };
+
+  if (field.kind === 'boolean') {
+    const active = value === true || value === 'true';
+
+    return (
+      <div className="mt-2 flex items-center gap-1.5">
+        {[true, false].map((flag) => (
+          <button
+            key={flag ? 'yes' : 'no'}
+            type="button"
+            onClick={() => onCommit(flag)}
+            className={cn(
+              'flex-1 rounded-lg border px-2 py-1.5 text-[0.74rem] transition',
+              active === flag
+                ? 'border-jade-400/30 bg-jade-400/10 text-jade-200'
+                : 'border-mist-100/[0.08] text-mist-500 hover:bg-mist-100/[0.04]',
+            )}
+          >
+            {flag ? '是' : '否'}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 px-2 py-1.5 text-[0.7rem] text-mist-500 transition hover:text-mist-300"
+        >
+          取消
+        </button>
+      </div>
+    );
+  }
+
+  if (field.kind === 'score') {
+    const score = numericValid ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
+
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center gap-2.5">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={score}
+            aria-label={`${field.label}数值`}
+            onChange={(event) => setText(event.target.value)}
+            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-brass-400"
+          />
+          <span className="w-8 shrink-0 text-right font-display text-[1.05rem] font-semibold tabular-nums text-mist-100">
+            {score}
+          </span>
+        </div>
+        <EditorActions onCancel={onCancel} onCommit={commit} />
+      </div>
+    );
+  }
+
+  if (field.kind === 'number' || field.kind === 'duration') {
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            step="any"
+            min={field.kind === 'duration' ? 0 : undefined}
+            value={text}
+            autoFocus
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={handleInputKeyDown}
+            className={EDITOR_INPUT}
+          />
+          {field.kind === 'duration' ? (
+            <span className="shrink-0 text-[0.74rem] text-mist-500">秒</span>
+          ) : field.suffix ? (
+            <span className="shrink-0 text-[0.74rem] text-mist-500">{field.suffix}</span>
+          ) : null}
+        </div>
+        <EditorActions
+          disabled={!numericValid || (field.kind === 'duration' && numeric < 0)}
+          onCancel={onCancel}
+          onCommit={commit}
+        />
+      </div>
+    );
+  }
+
+  if (field.kind === 'paragraph' || field.kind === 'code') {
+    return (
+      <div className="mt-2 space-y-2">
+        <textarea
+          rows={3}
+          value={text}
+          autoFocus
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={handleTextareaKeyDown}
+          className={cn(
+            EDITOR_INPUT,
+            'resize-none',
+            field.kind === 'code' && 'font-mono text-[0.78rem]',
+          )}
+        />
+        <EditorActions onCancel={onCancel} onCommit={commit} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2">
+      <input
+        type="text"
+        value={text}
+        autoFocus
+        placeholder={field.kind === 'tags' ? '用逗号分隔' : undefined}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={handleInputKeyDown}
+        className={EDITOR_INPUT}
+      />
+      <EditorActions onCancel={onCancel} onCommit={commit} />
+    </div>
+  );
+}
+
 function PersonaFieldValue({
   field,
   value,
@@ -74,7 +321,7 @@ function PersonaFieldValue({
   value: PersonaValue | undefined;
 }) {
   if (value === undefined) {
-    return <p className="mt-1.5 text-[0.68rem] text-mist-600">未同步</p>;
+    return <p className="mt-1.5 text-[0.76rem] text-mist-600">未同步</p>;
   }
 
   switch (field.kind) {
@@ -85,10 +332,10 @@ function PersonaFieldValue({
       return (
         <div className="mt-2">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-display text-[1.05rem] font-semibold leading-none tabular-nums text-mist-100">
+            <span className="font-display text-[1.15rem] font-semibold leading-none tabular-nums text-mist-100">
               {score}
             </span>
-            <span className="font-mono text-[0.44rem] uppercase tracking-[0.14em] text-mist-600">
+            <span className="font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
               / 100
             </span>
           </div>
@@ -116,7 +363,7 @@ function PersonaFieldValue({
           {items.map((item, index) => (
             <span
               key={`${item}-${index}`}
-              className="rounded-md border border-mist-100/[0.07] bg-ink-950/30 px-1.5 py-0.5 text-[0.62rem] leading-5 text-mist-400"
+              className="rounded-md border border-mist-100/[0.07] bg-ink-950/30 px-1.5 py-0.5 text-[0.7rem] leading-5 text-mist-400"
             >
               {item}
             </span>
@@ -129,10 +376,10 @@ function PersonaFieldValue({
 
       return (
         <div className="mt-1.5 flex items-baseline gap-2">
-          <span className="font-display text-[0.95rem] font-semibold tabular-nums text-mist-100">
+          <span className="font-display text-[1.05rem] font-semibold tabular-nums text-mist-100">
             {formatDuration(numeric)}
           </span>
-          <span className="font-mono text-[0.46rem] text-mist-600">{numeric}s</span>
+          <span className="font-mono text-[0.56rem] text-mist-600">{numeric} 秒</span>
         </div>
       );
     }
@@ -140,14 +387,14 @@ function PersonaFieldValue({
       const numeric = typeof value === 'number' ? value : Number(value);
 
       if (!Number.isFinite(numeric)) {
-        return <p className="mt-1.5 text-[0.72rem] text-mist-300">{String(value)}</p>;
+        return <p className="mt-1.5 text-[0.8rem] text-mist-300">{String(value)}</p>;
       }
 
       return (
-        <p className="mt-1.5 flex items-baseline gap-1 font-display text-[1rem] font-semibold tabular-nums text-mist-100">
+        <p className="mt-1.5 flex items-baseline gap-1 font-display text-[1.08rem] font-semibold tabular-nums text-mist-100">
           {numeric}
           {field.suffix ? (
-            <span className="font-mono text-[0.5rem] font-normal text-mist-600">
+            <span className="font-mono text-[0.6rem] font-normal text-mist-600">
               {field.suffix}
             </span>
           ) : null}
@@ -160,7 +407,7 @@ function PersonaFieldValue({
       return (
         <span
           className={cn(
-            'mt-2 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.1em]',
+            'mt-2 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[0.6rem] uppercase tracking-[0.1em]',
             active
               ? 'border-jade-400/25 bg-jade-400/[0.08] text-jade-300'
               : 'border-mist-100/[0.08] bg-ink-950/30 text-mist-500',
@@ -176,61 +423,99 @@ function PersonaFieldValue({
     }
     case 'quote':
       return (
-        <p className="mt-2 border-l-2 border-brass-400/45 pl-3 text-[0.8rem] leading-6 text-mist-200">
+        <p className="mt-2 border-l-2 border-brass-400/45 pl-3 text-[0.88rem] leading-7 text-mist-200">
           「{String(value)}」
         </p>
       );
     case 'paragraph':
       return (
-        <p className="mt-1.5 whitespace-pre-line text-[0.72rem] leading-6 text-mist-400">
+        <p className="mt-1.5 whitespace-pre-line text-[0.8rem] leading-7 text-mist-400">
           {String(value)}
         </p>
       );
     case 'code':
       return (
-        <p className="mt-1.5 break-words font-mono text-[0.68rem] leading-5 tracking-[0.02em] text-brass-300/90">
+        <p className="mt-1.5 break-words font-mono text-[0.76rem] leading-6 tracking-[0.02em] text-brass-300/90">
           {String(value)}
         </p>
       );
     default:
-      return <p className="mt-1.5 text-[0.72rem] leading-5 text-mist-300">{String(value)}</p>;
+      return <p className="mt-1.5 text-[0.8rem] leading-6 text-mist-300">{String(value)}</p>;
   }
 }
 
 function PersonaFieldCard({
   field,
   value,
+  onChange,
 }: {
   field: PersonaField;
   value: PersonaValue | undefined;
+  onChange: (value: PersonaValue) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+
   return (
     <div
       title={`${field.label} · ${field.hint}`}
       className={cn(
-        'rounded-xl border border-mist-100/[0.06] bg-ink-950/25 px-3.5 py-3 transition hover:border-mist-100/[0.12]',
+        'rounded-xl border border-mist-100/[0.06] bg-ink-950/25 px-4 py-3.5 transition hover:border-mist-100/[0.12]',
         field.wide && 'md:col-span-2',
+        editing && 'border-brass-400/30 bg-ink-950/40',
       )}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="shrink-0 text-[0.66rem] font-medium text-mist-400">{field.label}</span>
-        <code className="min-w-0 break-all text-right font-mono text-[0.44rem] leading-4 text-mist-600">
-          {field.key}
-        </code>
+        <span className="shrink-0 text-[0.74rem] font-medium text-mist-300">{field.label}</span>
+        <div className="flex min-w-0 items-center justify-end gap-1">
+          <code className="min-w-0 break-all text-right font-mono text-[0.54rem] leading-5 text-mist-600">
+            {field.key}
+          </code>
+          {!editing && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              aria-label={`编辑 ${field.label}`}
+              title="编辑"
+              className="shrink-0 rounded-md p-1 text-mist-600 transition hover:bg-brass-400/10 hover:text-brass-300"
+            >
+              <Pencil className="size-3.5" />
+            </button>
+          )}
+        </div>
       </div>
-      <PersonaFieldValue field={field} value={value} />
+      {editing ? (
+        <PersonaFieldEditor
+          field={field}
+          value={value}
+          onCancel={() => setEditing(false)}
+          onCommit={(next) => {
+            onChange(next);
+            setEditing(false);
+          }}
+        />
+      ) : (
+        <PersonaFieldValue field={field} value={value} />
+      )}
     </div>
   );
 }
 
-function GroupSection({ group, persona }: { group: PersonaGroup; persona: ChannelPersona }) {
+function GroupSection({
+  group,
+  values,
+  onChange,
+}: {
+  group: PersonaGroup;
+  values: Record<string, PersonaValue>;
+  onChange: (key: string, value: PersonaValue) => void;
+}) {
   return (
     <div className="space-y-5">
       {group.sections.map((section) => (
         <section key={section.id}>
           {section.title ? (
             <div className="mb-2 flex items-center gap-2">
-              <span className="font-mono text-[0.5rem] uppercase tracking-[0.2em] text-mist-600">
+              <span className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-mist-600">
                 {section.title}
               </span>
               <span className="h-px flex-1 bg-mist-100/[0.06]" />
@@ -238,7 +523,12 @@ function GroupSection({ group, persona }: { group: PersonaGroup; persona: Channe
           ) : null}
           <div className="grid grid-flow-row-dense gap-2 md:grid-cols-2 xl:grid-cols-3">
             {section.fields.map((field) => (
-              <PersonaFieldCard key={field.key} field={field} value={persona.values[field.key]} />
+              <PersonaFieldCard
+                key={field.key}
+                field={field}
+                value={values[field.key]}
+                onChange={(next) => onChange(field.key, next)}
+              />
             ))}
           </div>
         </section>
@@ -255,8 +545,10 @@ export function ChannelPersonaPanel({
   onClose: () => void;
 }) {
   const [activeGroupId, setActiveGroupId] = useState(PERSONA_GROUPS[0]?.id ?? '');
+  const [overrides, setOverrides] = useState<Record<string, PersonaValue>>({});
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
+  const values = persona ? { ...persona.values, ...overrides } : null;
   const activeGroup =
     PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PERSONA_GROUPS[0];
   const activeCount = activeGroup ? (GROUP_FIELD_COUNTS[activeGroup.id] ?? 0) : 0;
@@ -264,6 +556,9 @@ export function ChannelPersonaPanel({
   useEffect(() => {
     if (channel) {
       setActiveGroupId(PERSONA_GROUPS[0]?.id ?? '');
+      setOverrides(readChannelPersonaOverrides(channel.id));
+    } else {
+      setOverrides({});
     }
   }, [channel]);
 
@@ -273,6 +568,10 @@ export function ChannelPersonaPanel({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
       if (event.key === 'Escape') {
         onClose();
       }
@@ -293,9 +592,17 @@ export function ChannelPersonaPanel({
     return null;
   }
 
+  const handleChange = (key: string, value: PersonaValue) => {
+    if (!channel) {
+      return;
+    }
+    setOverrides((current) => ({ ...current, [key]: value }));
+    writeChannelPersonaOverride(channel.id, key, value);
+  };
+
   return createPortal(
     <AnimatePresence>
-      {channel && persona && (
+      {channel && persona && values && (
         <motion.div
           key="channel-persona"
           initial={{ opacity: 0 }}
@@ -338,10 +645,10 @@ export function ChannelPersonaPanel({
 
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[0.52rem] uppercase tracking-[0.26em] text-brass-400/75">
-                    Channel Persona
+                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.26em] text-brass-400/75">
+                    渠道人格
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-jade-400/20 bg-jade-400/[0.07] px-2 py-0.5 font-mono text-[0.48rem] uppercase tracking-[0.12em] text-jade-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-jade-400/20 bg-jade-400/[0.07] px-2 py-0.5 font-mono text-[0.56rem] tracking-[0.12em] text-jade-300">
                     <span className="size-1 rounded-full bg-jade-400" aria-hidden="true" />
                     渠道独立快照
                   </span>
@@ -349,23 +656,24 @@ export function ChannelPersonaPanel({
 
                 <h2
                   id="channel-persona-title"
-                  className="mt-1.5 font-display text-[1.35rem] font-semibold leading-tight tracking-tight text-mist-100"
+                  className="mt-1.5 font-display text-[1.45rem] font-semibold leading-tight tracking-tight text-mist-100"
                 >
-                  {persona.name}
-                  <span className="ml-2 align-middle font-mono text-[0.5rem] font-normal uppercase tracking-[0.14em] text-mist-600">
-                    {persona.id}
-                  </span>
+                  {textValue(values, 'name', persona.name)}
                 </h2>
-                <p className="mt-1 text-[0.74rem] leading-6 text-mist-500">
-                  {persona.identity} · 「{persona.quote}」
+                <p className="mt-1 text-[0.82rem] leading-7 text-mist-500">
+                  {`${textValue(values, 'identity', persona.identity)} · 「${textValue(
+                    values,
+                    'anchors.quote',
+                    persona.quote,
+                  )}」`}
                 </p>
 
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <PlatformChip platform={channel.platform} connector />
-                  <span className="font-mono text-[0.52rem] tracking-[0.04em] text-mist-500">
+                  <span className="font-mono text-[0.6rem] tracking-[0.04em] text-mist-500">
                     {channel.displayName} · {channel.accountId}
                   </span>
-                  <span className="font-mono text-[0.5rem] uppercase tracking-[0.12em] text-mist-600">
+                  <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-600">
                     {PERSONA_ATTRIBUTE_COUNT} 项属性 · {PERSONA_GROUPS.length} 组
                   </span>
                 </div>
@@ -384,7 +692,7 @@ export function ChannelPersonaPanel({
             <div className="relative flex min-h-0 flex-1 flex-col border-t border-mist-100/[0.06] md:flex-row">
               <nav
                 aria-label="人格属性分组"
-                className="flex shrink-0 gap-1 overflow-x-auto border-b border-mist-100/[0.06] px-2.5 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:w-[13.5rem] md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-3"
+                className="flex shrink-0 gap-1 overflow-x-auto border-b border-mist-100/[0.06] px-2.5 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:w-[14.5rem] md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-3"
               >
                 {PERSONA_GROUPS.map((group) => {
                   const Icon = GROUP_ICONS[group.id] ?? Layers;
@@ -414,11 +722,11 @@ export function ChannelPersonaPanel({
                         <Icon className="size-3.5" strokeWidth={1.7} />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block whitespace-nowrap text-[0.7rem] md:truncate">
+                        <span className="block whitespace-nowrap text-[0.78rem] md:truncate">
                           {group.title}
                         </span>
-                        <span className="mt-0.5 hidden font-mono text-[0.46rem] uppercase tracking-[0.12em] text-mist-600 md:block">
-                          {group.code} · {GROUP_FIELD_COUNTS[group.id] ?? 0} 项
+                        <span className="mt-0.5 hidden font-mono text-[0.54rem] tracking-[0.12em] text-mist-600 md:block">
+                          {GROUP_FIELD_COUNTS[group.id] ?? 0} 项
                         </span>
                       </span>
                       <ChevronRight
@@ -447,34 +755,35 @@ export function ChannelPersonaPanel({
                   >
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="font-mono text-[0.52rem] uppercase tracking-[0.24em] text-brass-400/75">
-                          {activeGroup.code} — {activeGroup.eyebrow}
-                        </p>
-                        <h3 className="mt-1.5 font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
+                        <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
                           {activeGroup.title}
                         </h3>
-                        <p className="mt-1 max-w-2xl text-[0.72rem] leading-6 text-mist-500">
+                        <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
                           {activeGroup.description}
                         </p>
                       </div>
-                      <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-mist-500">
+                      <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
                         {activeCount} 项
                       </span>
                     </div>
 
                     <div className="mt-4">
-                      <GroupSection group={activeGroup} persona={persona} />
+                      <GroupSection group={activeGroup} values={values} onChange={handleChange} />
                     </div>
+
+                    {activeGroup.id === 'meta' ? (
+                      <PersonaRevisionList channel={channel} scrollRootRef={contentRef} />
+                    ) : null}
                   </motion.div>
                 </AnimatePresence>
               </div>
             </div>
 
             <footer className="relative flex flex-wrap items-center justify-between gap-2 border-t border-mist-100/[0.06] px-5 py-3 sm:px-7">
-              <p className="font-mono text-[0.47rem] uppercase tracking-[0.16em] text-mist-600">
-                Mock snapshot · A2–A9 · {PERSONA_ATTRIBUTE_COUNT} attributes
+              <p className="font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
+                本地快照 · {PERSONA_ATTRIBUTE_COUNT} 项属性
               </p>
-              <p className="text-[0.6rem] text-mist-600">仅属于该渠道，不与其他渠道共享</p>
+              <p className="text-[0.68rem] text-mist-600">仅属于该渠道 · 编辑即时保存在本地</p>
             </footer>
           </motion.div>
         </motion.div>
