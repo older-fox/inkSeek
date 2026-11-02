@@ -1,9 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import { MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
+import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { GhostButton, PrimaryButton } from '@/components/button';
+import { ChannelPersonaPanel } from '@/components/channel-persona-panel';
 import { ConnectChannelDialog } from '@/components/connect-channel-dialog';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
 import { cn } from '@/lib/cn';
@@ -18,7 +19,15 @@ import {
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-function ChannelCard({ channel, onRemove }: { channel: Channel; onRemove: () => void }) {
+function ChannelCard({
+  channel,
+  onRemove,
+  onOpenPersona,
+}: {
+  channel: Channel;
+  onRemove: () => void;
+  onOpenPersona: () => void;
+}) {
   const [confirming, setConfirming] = useState(false);
   const stats = channelConversationStats(channel.platform);
 
@@ -71,14 +80,25 @@ function ChannelCard({ channel, onRemove }: { channel: Channel; onRemove: () => 
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          aria-label={`移除 ${channel.displayName} 的 ${PLATFORMS[channel.platform].name} 渠道`}
-          className="rounded-lg p-2 text-mist-600 transition hover:bg-signal-400/10 hover:text-signal-400"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onOpenPersona}
+            aria-label={`查看 ${channel.displayName} 的人格数据`}
+            title="人格数据"
+            className="rounded-lg p-2 text-mist-600 transition hover:bg-brass-400/10 hover:text-brass-300"
+          >
+            <Fingerprint className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            aria-label={`移除 ${channel.displayName} 的 ${PLATFORMS[channel.platform].name} 渠道`}
+            className="rounded-lg p-2 text-mist-600 transition hover:bg-signal-400/10 hover:text-signal-400"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
       </div>
 
       <p className="mt-4 border-l-2 border-brass-400/40 pl-3 text-[0.72rem] leading-6 text-mist-400">
@@ -242,8 +262,8 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
             还没有接入消息渠道
           </h2>
           <p className="mt-3 max-w-lg text-[0.84rem] leading-7 text-mist-500">
-            互联中心是 TA
-            与现实世界之间的桥。接入 QQ、微信或 Telegram 后，登录账号会自动同步，收到的私聊与群聊也会在这里归档。
+            互联中心是 TA 与现实世界之间的桥。接入 QQ、微信或 Telegram
+            后，登录账号会自动同步，收到的私聊与群聊也会在这里归档。
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -281,6 +301,7 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
 export function ConnectionsPage() {
   const channels = useChannels();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [personaChannel, setPersonaChannel] = useState<Channel | null>(null);
 
   const handleConnected = (channel: Channel) => {
     addChannel(channel);
@@ -299,7 +320,11 @@ export function ConnectionsPage() {
       {channels.length === 0 ? (
         <EmptyChannels onAdd={() => setDialogOpen(true)} />
       ) : (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[0.72rem] text-mist-600">
               {channels.length} 个渠道 · 消息按私聊与群聊自动归档
@@ -321,6 +346,7 @@ export function ConnectionsPage() {
                   key={channel.id}
                   channel={channel}
                   onRemove={() => handleRemove(channel)}
+                  onOpenPersona={() => setPersonaChannel(channel)}
                 />
               ))}
             </AnimatePresence>
@@ -334,6 +360,8 @@ export function ConnectionsPage() {
         onClose={() => setDialogOpen(false)}
         onConnected={handleConnected}
       />
+
+      <ChannelPersonaPanel channel={personaChannel} onClose={() => setPersonaChannel(null)} />
     </>
   );
 }
