@@ -176,13 +176,17 @@ function PersonaBack({ persona }: { persona: Persona }) {
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.07] bg-ink-950/30 p-3">
-        <Quote className="size-3.5 text-brass-400/70" strokeWidth={1.7} />
+        <span className="grid size-3.5 place-items-center">
+          <Quote className="size-3.5 text-brass-400/70" strokeWidth={1.7} />
+        </span>
         <p className="mt-1.5 text-[0.76rem] leading-6 text-mist-300">{persona.story}</p>
       </div>
 
       <div className="mt-4">
         <div className="flex items-center gap-1.5">
-          <ShieldAlert className="size-3.5 text-signal-400/80" strokeWidth={1.7} />
+          <span className="grid size-3.5 shrink-0 place-items-center">
+            <ShieldAlert className="size-3.5 text-signal-400/80" strokeWidth={1.7} />
+          </span>
           <span className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
             禁忌内容
           </span>
@@ -251,7 +255,7 @@ export function PersonaCard({ persona }: { persona: Persona }) {
       <motion.div
         animate={{ rotateY: flipped ? 180 : 0 }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="relative h-full w-full [transform-style:preserve-3d]"
+        className="relative h-full w-full [transform-style:preserve-3d] [will-change:transform]"
       >
         <div className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] [backface-visibility:hidden]">
           <PersonaFront persona={persona} />

@@ -46,8 +46,8 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
   const sectionLabel = pathname === '/personas' ? '人格中心' : '概览';
 
   return (
-    <div className="relative flex min-h-screen overflow-hidden">
-      <aside className="relative z-20 hidden w-[16.5rem] shrink-0 flex-col border-r border-mist-100/[0.06] bg-ink-900/55 backdrop-blur-2xl lg:flex">
+    <div className="relative flex h-dvh overflow-hidden">
+      <aside className="relative z-20 hidden w-[16.5rem] shrink-0 flex-col overflow-y-auto border-r border-mist-100/[0.06] bg-ink-900/55 backdrop-blur-2xl lg:flex">
         <div className="px-6 pb-5 pt-7">
           <BrandMark />
         </div>
@@ -182,7 +182,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
           </div>
         </header>
 
-        <main className="relative flex-1 overflow-y-auto">
+        <main className="relative min-h-0 flex-1 overflow-y-auto">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 ink-grid opacity-25" />
             <div
