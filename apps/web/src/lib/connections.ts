@@ -63,6 +63,8 @@ export interface Channel {
   accent: ChannelAccent;
   signature: string;
   status: ChannelStatus;
+  serverUrl: string;
+  tokenHint: string;
   connectedAt: string;
 }
 
@@ -72,6 +74,7 @@ export interface ChatMessage {
   author: string;
   text: string;
   time: string;
+  images?: string[];
 }
 
 export interface Conversation {
@@ -89,12 +92,40 @@ export interface Conversation {
   messages: ChatMessage[];
 }
 
-export const NAPCAT_ACCOUNT = {
-  displayName: '沈砚',
-  accountId: '3184226907',
-  initials: '砚',
-  signature: '先把纸修好，再谈旧事。',
-} as const;
+export interface NapCatAccount {
+  displayName: string;
+  accountId: string;
+  initials: string;
+  signature: string;
+}
+
+export const DEFAULT_NAPCAT_SERVER_URL = 'ws://127.0.0.1:3001';
+
+const NAPCAT_ACCOUNTS = [
+  {
+    displayName: '沈砚',
+    accountId: '3184226907',
+    initials: '砚',
+    signature: '先把纸修好，再谈旧事。',
+  },
+  {
+    displayName: '江述',
+    accountId: '2561180432',
+    initials: '述',
+    signature: '替人保管旧信，也替人保守秘密。',
+  },
+  {
+    displayName: '闻舟',
+    accountId: '1749032566',
+    initials: '舟',
+    signature: '夜班电台常驻，专收没处说的话。',
+  },
+] as const;
+
+export interface NapCatConnection {
+  serverUrl: string;
+  accessToken: string;
+}
 
 export const CONVERSATIONS: readonly Conversation[] = [
   {
@@ -113,7 +144,14 @@ export const CONVERSATIONS: readonly Conversation[] = [
       { id: 'm2', self: true, author: '沈砚', text: '能。别自己拿胶带粘。', time: '20:44' },
       { id: 'm3', self: false, author: '周叙', text: '已经……粘了。', time: '20:44' },
       { id: 'm4', self: true, author: '沈砚', text: '……拍给我看。', time: '20:45' },
-      { id: 'm5', self: false, author: '周叙', text: '发过去了，别笑我。', time: '20:46' },
+      {
+        id: 'm5',
+        self: false,
+        author: '周叙',
+        text: '发过去了，别笑我。',
+        time: '20:46',
+        images: ['/media/letter-mending.jpg'],
+      },
     ],
   },
   {
@@ -226,7 +264,7 @@ export const CONVERSATIONS: readonly Conversation[] = [
 ];
 
 const STORAGE_KEY = 'inkseek-message-channels';
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const EMPTY_CHANNELS: Channel[] = [];
 
 let snapshot: Channel[] | null = null;
@@ -253,6 +291,8 @@ function isChannel(value: unknown): value is Channel {
     (record.accent === 'brass' || record.accent === 'jade') &&
     typeof record.signature === 'string' &&
     (record.status === 'online' || record.status === 'offline') &&
+    typeof record.serverUrl === 'string' &&
+    typeof record.tokenHint === 'string' &&
     typeof record.connectedAt === 'string'
   );
 }
@@ -342,16 +382,39 @@ export function removeChannel(id: string): void {
   notify();
 }
 
-export function createNapCatChannel(): Channel {
+export function maskAccessToken(token: string): string {
+  const trimmed = token.trim();
+  return trimmed.length <= 4 ? '••••' : `•••• ${trimmed.slice(-4)}`;
+}
+
+export function previewNapCatAccount(): NapCatAccount {
+  const qqChannels = getSnapshot().filter((channel) => channel.platform === 'qq').length;
+  return NAPCAT_ACCOUNTS[qqChannels % NAPCAT_ACCOUNTS.length] ?? NAPCAT_ACCOUNTS[0];
+}
+
+export function createNapCatChannel(
+  { serverUrl, accessToken }: NapCatConnection,
+  account: NapCatAccount = previewNapCatAccount(),
+): Channel {
   return {
-    id: 'qq-napcat',
+    id: `qq-napcat-${createChannelId()}`,
     platform: 'qq',
     connector: QQ.connector,
-    ...NAPCAT_ACCOUNT,
+    ...account,
     accent: QQ.accent,
     status: 'online',
+    serverUrl,
+    tokenHint: maskAccessToken(accessToken),
     connectedAt: new Date().toISOString(),
   };
+}
+
+function createChannelId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function conversationsFor(

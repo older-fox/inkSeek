@@ -1,16 +1,31 @@
-import { Check, ChevronRight, LoaderCircle, RadioTower, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Link2,
+  LoaderCircle,
+  RadioTower,
+  X,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { GhostButton, PrimaryButton } from '@/components/button';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
+import { Field, InputShell } from '@/components/field';
 import { cn } from '@/lib/cn';
 import {
-  createNapCatChannel,
-  NAPCAT_ACCOUNT,
+  DEFAULT_NAPCAT_SERVER_URL,
   PLATFORMS,
   PLATFORM_LIST,
+  createNapCatChannel,
+  maskAccessToken,
+  previewNapCatAccount,
   type Channel,
+  type NapCatAccount,
   type PlatformDefinition,
   type PlatformId,
 } from '@/lib/connections';
@@ -19,29 +34,54 @@ interface ConnectChannelDialogProps {
   open: boolean;
   onClose: () => void;
   onConnected: (channel: Channel) => void;
-  connectedPlatforms: readonly PlatformId[];
 }
 
-type Phase = 'choose' | 'connecting' | 'ready';
+type Phase = 'choose' | 'configure' | 'connecting' | 'ready';
 
-const CONNECT_STEPS = ['建立与 NapCat 的本地通道', '读取当前登录账号资料', '同步全部私聊与群聊'];
+interface FormErrors {
+  serverUrl?: string;
+  accessToken?: string;
+}
+
+const CONNECT_STEPS = ['通过 WebSocket 连接 NapCat', '读取当前登录账号资料', '同步全部私聊与群聊'];
+
+const EYEBROW: Record<Phase, string> = {
+  choose: 'Connect Channel',
+  configure: 'Connection Setup',
+  connecting: 'Handshake',
+  ready: 'Account Found',
+};
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-export function ConnectChannelDialog({
-  open,
-  onClose,
-  onConnected,
-  connectedPlatforms,
-}: ConnectChannelDialogProps) {
+function isValidWebSocketUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'ws:' || url.protocol === 'wss:';
+  } catch {
+    return false;
+  }
+}
+
+export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChannelDialogProps) {
   const [phase, setPhase] = useState<Phase>('choose');
   const [progress, setProgress] = useState(0);
   const [activePlatform, setActivePlatform] = useState<PlatformId>('qq');
+  const [serverUrl, setServerUrl] = useState(DEFAULT_NAPCAT_SERVER_URL);
+  const [accessToken, setAccessToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [account, setAccount] = useState<NapCatAccount | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
 
   useEffect(() => {
     if (!open) {
       setPhase('choose');
       setProgress(0);
+      setServerUrl(DEFAULT_NAPCAT_SERVER_URL);
+      setAccessToken('');
+      setShowToken(false);
+      setAccount(null);
+      setErrors({});
     }
   }, [open]);
 
@@ -76,20 +116,51 @@ export function ConnectChannelDialog({
   }, [open, onClose]);
 
   const handleSelect = (platform: PlatformDefinition) => {
-    if (!platform.available || connectedPlatforms.includes(platform.id)) {
+    if (!platform.available) {
       return;
     }
 
     setActivePlatform(platform.id);
+    setPhase('configure');
+  };
+
+  const handleConnect = () => {
+    const trimmedServerUrl = serverUrl.trim();
+    const trimmedToken = accessToken.trim();
+    const nextErrors: FormErrors = {};
+
+    if (!isValidWebSocketUrl(trimmedServerUrl)) {
+      nextErrors.serverUrl = '请输入以 ws:// 或 wss:// 开头的有效地址';
+    }
+    if (!trimmedToken) {
+      nextErrors.accessToken = '请输入 NapCat 的授权密钥';
+    }
+
+    setErrors(nextErrors);
+    if (nextErrors.serverUrl || nextErrors.accessToken) {
+      return;
+    }
+
+    setServerUrl(trimmedServerUrl);
+    setAccessToken(trimmedToken);
+    setAccount(previewNapCatAccount());
     setPhase('connecting');
   };
 
   const handleConfirm = () => {
-    onConnected(createNapCatChannel());
+    onConnected(
+      createNapCatChannel({ serverUrl, accessToken }, account ?? previewNapCatAccount()),
+    );
     onClose();
   };
 
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    handleConnect();
+  };
+
   const platform = PLATFORMS[activePlatform];
+  const readyAccount = account ?? previewNapCatAccount();
 
   if (typeof document === 'undefined') {
     return null;
@@ -128,7 +199,7 @@ export function ConnectChannelDialog({
 
             <div className="relative flex items-center justify-between gap-4 px-6 pt-6 sm:px-8">
               <span className="font-mono text-[0.58rem] uppercase tracking-[0.3em] text-brass-400/75">
-                {phase === 'choose' ? 'Connect Channel' : phase === 'connecting' ? 'Handshake' : 'Account Found'}
+                {EYEBROW[phase]}
               </span>
               <button
                 type="button"
@@ -161,68 +232,182 @@ export function ConnectChannelDialog({
                     </p>
 
                     <div className="mt-6 space-y-2.5">
-                      {PLATFORM_LIST.map((item) => {
-                        const connected = connectedPlatforms.includes(item.id);
-                        const selectable = item.available && !connected;
-
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            disabled={!selectable}
-                            onClick={() => handleSelect(item)}
+                      {PLATFORM_LIST.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          disabled={!item.available}
+                          onClick={() => handleSelect(item)}
+                          className={cn(
+                            'group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition',
+                            item.available
+                              ? 'border-mist-100/[0.08] bg-ink-950/25 hover:border-brass-400/35 hover:bg-ink-950/45'
+                              : 'cursor-not-allowed border-mist-100/[0.06] bg-ink-950/20 opacity-55',
+                          )}
+                        >
+                          <span
                             className={cn(
-                              'group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition',
-                              selectable
-                                ? 'border-mist-100/[0.08] bg-ink-950/25 hover:border-brass-400/35 hover:bg-ink-950/45'
-                                : 'cursor-not-allowed border-mist-100/[0.06] bg-ink-950/20 opacity-55',
+                              'grid size-11 shrink-0 place-items-center rounded-xl border font-display text-[0.9rem] font-semibold',
+                              item.accent === 'jade'
+                                ? 'border-jade-400/25 bg-gradient-to-br from-jade-400/25 to-transparent text-jade-300'
+                                : 'border-brass-400/25 bg-gradient-to-br from-brass-400/25 to-transparent text-brass-300',
                             )}
                           >
-                            <span
-                              className={cn(
-                                'grid size-11 shrink-0 place-items-center rounded-xl border font-display text-[0.9rem] font-semibold',
-                                item.accent === 'jade'
-                                  ? 'border-jade-400/25 bg-gradient-to-br from-jade-400/25 to-transparent text-jade-300'
-                                  : 'border-brass-400/25 bg-gradient-to-br from-brass-400/25 to-transparent text-brass-300',
-                              )}
-                            >
-                              {item.short}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="flex flex-wrap items-center gap-2">
-                                <span className="text-[0.86rem] font-medium text-mist-200">
-                                  {item.name}
-                                </span>
-                                <span className="font-mono text-[0.55rem] uppercase tracking-[0.14em] text-mist-600">
-                                  {item.connector}
-                                </span>
+                            {item.short}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="text-[0.86rem] font-medium text-mist-200">
+                                {item.name}
                               </span>
-                              <span className="mt-1 block text-[0.66rem] leading-5 text-mist-600">
-                                {item.description}
+                              <span className="font-mono text-[0.55rem] uppercase tracking-[0.14em] text-mist-600">
+                                {item.connector}
                               </span>
                             </span>
-                            <span
-                              className={cn(
-                                'shrink-0 rounded-full border px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em]',
-                                connected
-                                  ? 'border-jade-400/25 bg-jade-400/10 text-jade-300'
-                                  : item.available
-                                    ? 'border-brass-400/25 bg-brass-400/[0.08] text-brass-300'
-                                    : 'border-mist-100/10 text-mist-600',
-                              )}
-                            >
-                              {connected ? '已接入' : item.available ? '可接入' : '规划中'}
+                            <span className="mt-1 block text-[0.66rem] leading-5 text-mist-600">
+                              {item.description}
                             </span>
-                            <ChevronRight className="size-4 shrink-0 text-mist-600 transition group-hover:text-brass-300" />
-                          </button>
-                        );
-                      })}
+                          </span>
+                          <span
+                            className={cn(
+                              'shrink-0 rounded-full border px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em]',
+                              item.available
+                                ? 'border-brass-400/25 bg-brass-400/[0.08] text-brass-300'
+                                : 'border-mist-100/10 text-mist-600',
+                            )}
+                          >
+                            {item.available ? '可接入' : '规划中'}
+                          </span>
+                          <ChevronRight className="size-4 shrink-0 text-mist-600 transition group-hover:text-brass-300" />
+                        </button>
+                      ))}
                     </div>
 
                     <p className="mt-5 flex items-start gap-2 rounded-xl border border-mist-100/[0.06] bg-ink-950/20 px-3.5 py-2.5 text-[0.64rem] leading-5 text-mist-600">
                       <RadioTower className="mt-0.5 size-3.5 shrink-0 text-brass-400/70" />
-                      当前版本仅演示 QQ · NapCat 的接入流程，账号资料与消息均为模拟数据。
+                      同一平台可以接入多个渠道，例如不同的 QQ 号或 NapCat 实例。账号资料与消息均为模拟数据。
                     </p>
+                  </motion.div>
+                )}
+
+                {phase === 'configure' && (
+                  <motion.div
+                    key="configure"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22, ease: EASE }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-12 place-items-center rounded-2xl border border-brass-400/25 bg-brass-400/10 text-brass-300">
+                        <Link2 className="size-5" strokeWidth={1.8} />
+                      </span>
+                      <div>
+                        <h2
+                          id="connect-channel-title"
+                          className="font-display text-[1.35rem] font-semibold text-mist-100"
+                        >
+                          连接 {platform.connector}
+                        </h2>
+                        <p className="mt-1 text-[0.7rem] leading-5 text-mist-600">
+                          填写 NapCat 的 WebSocket 服务地址与授权密钥，TA 才能收到{' '}
+                          {platform.name} 的消息。
+                        </p>
+                      </div>
+                    </div>
+
+                    <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
+                      <Field
+                        label="WebSocket 地址"
+                        htmlFor="napcat-server-url"
+                        hint="ws:// 或 wss://"
+                        error={errors.serverUrl}
+                      >
+                        <InputShell
+                          icon={<Link2 className="size-4" strokeWidth={1.7} />}
+                          invalid={Boolean(errors.serverUrl)}
+                        >
+                          <input
+                            id="napcat-server-url"
+                            type="text"
+                            inputMode="url"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={serverUrl}
+                            onChange={(event) => {
+                              setServerUrl(event.target.value);
+                              if (errors.serverUrl) {
+                                setErrors((previous) => ({ ...previous, serverUrl: undefined }));
+                              }
+                            }}
+                            placeholder="ws://127.0.0.1:3001"
+                          />
+                        </InputShell>
+                      </Field>
+
+                      <Field
+                        label="授权密钥"
+                        htmlFor="napcat-access-token"
+                        hint="在 NapCat 配置中查看"
+                        error={errors.accessToken}
+                      >
+                        <InputShell
+                          icon={<KeyRound className="size-4" strokeWidth={1.7} />}
+                          invalid={Boolean(errors.accessToken)}
+                          trailing={
+                            <button
+                              type="button"
+                              onClick={() => setShowToken((value) => !value)}
+                              aria-label={showToken ? '隐藏授权密钥' : '显示授权密钥'}
+                              className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
+                            >
+                              {showToken ? (
+                                <EyeOff className="size-4" />
+                              ) : (
+                                <Eye className="size-4" />
+                              )}
+                            </button>
+                          }
+                        >
+                          <input
+                            id="napcat-access-token"
+                            type={showToken ? 'text' : 'password'}
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={accessToken}
+                            onChange={(event) => {
+                              setAccessToken(event.target.value);
+                              if (errors.accessToken) {
+                                setErrors((previous) => ({ ...previous, accessToken: undefined }));
+                              }
+                            }}
+                            placeholder="NapCat WebSocket Token"
+                          />
+                        </InputShell>
+                      </Field>
+
+                      <p className="text-[0.62rem] leading-5 text-mist-600">
+                        NapCat 需先开启 WebSocket 服务，默认端口通常为 3001。当前为前端演示，任意非空密钥均可通过校验。
+                      </p>
+
+                      <div className="flex flex-col-reverse gap-2.5 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                        <GhostButton
+                          type="button"
+                          onClick={() => setPhase('choose')}
+                          className="h-11 px-4 text-[0.75rem]"
+                        >
+                          <ArrowLeft className="size-3.5" />
+                          返回平台
+                        </GhostButton>
+                        <PrimaryButton
+                          type="submit"
+                          icon={<RadioTower className="size-4" strokeWidth={1.9} />}
+                          className="h-11 sm:w-auto sm:px-6"
+                        >
+                          连接并读取账号
+                        </PrimaryButton>
+                      </div>
+                    </form>
                   </motion.div>
                 )}
 
@@ -239,15 +424,15 @@ export function ConnectChannelDialog({
                       <span className="grid size-12 place-items-center rounded-2xl border border-brass-400/25 bg-brass-400/10">
                         <LoaderCircle className="size-5 animate-spin text-brass-300" />
                       </span>
-                      <div>
+                      <div className="min-w-0">
                         <h2
                           id="connect-channel-title"
                           className="font-display text-[1.35rem] font-semibold text-mist-100"
                         >
                           正在连接 {platform.connector}
                         </h2>
-                        <p className="mt-0.5 text-[0.7rem] text-mist-600">
-                          正在读取 {platform.name} 当前登录的账号…
+                        <p className="mt-0.5 truncate text-[0.7rem] text-mist-600">
+                          正在通过 {serverUrl} 读取 {platform.name} 当前登录的账号…
                         </p>
                       </div>
                     </div>
@@ -336,7 +521,7 @@ export function ConnectChannelDialog({
                     <div className="mt-5 rounded-2xl border border-mist-100/[0.08] bg-ink-950/25 p-4">
                       <div className="flex items-start gap-3.5">
                         <ChannelAvatar
-                          initials={NAPCAT_ACCOUNT.initials}
+                          initials={readyAccount.initials}
                           accent={platform.accent}
                           size="lg"
                           online
@@ -344,15 +529,15 @@ export function ConnectChannelDialog({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-display text-[1.05rem] font-semibold text-mist-100">
-                              {NAPCAT_ACCOUNT.displayName}
+                              {readyAccount.displayName}
                             </p>
                             <PlatformChip platform={activePlatform} connector />
                           </div>
                           <p className="mt-1 font-mono text-[0.62rem] tracking-[0.08em] text-mist-500">
-                            QQ {NAPCAT_ACCOUNT.accountId}
+                            QQ {readyAccount.accountId}
                           </p>
                           <p className="mt-2 border-l-2 border-brass-400/40 pl-2.5 text-[0.68rem] leading-5 text-mist-500">
-                            {NAPCAT_ACCOUNT.signature}
+                            {readyAccount.signature}
                           </p>
                         </div>
                       </div>
@@ -361,12 +546,19 @@ export function ConnectChannelDialog({
                         {[
                           { term: '登录状态', value: '在线 · 已授权' },
                           { term: '接入方式', value: `${platform.name} · ${platform.connector}` },
+                          { term: 'WebSocket', value: serverUrl },
+                          { term: '授权密钥', value: maskAccessToken(accessToken) },
                           { term: '消息范围', value: '全部私聊与群聊' },
                           { term: '连接位置', value: '本机控制面' },
                         ].map((item) => (
                           <div key={item.term} className="flex items-center justify-between gap-3">
-                            <dt className="text-[0.6rem] text-mist-600">{item.term}</dt>
-                            <dd className="text-right text-[0.64rem] text-mist-300">{item.value}</dd>
+                            <dt className="shrink-0 text-[0.6rem] text-mist-600">{item.term}</dt>
+                            <dd
+                              className="max-w-[10rem] truncate text-right text-[0.64rem] text-mist-300"
+                              title={item.value}
+                            >
+                              {item.value}
+                            </dd>
                           </div>
                         ))}
                       </dl>
@@ -379,7 +571,10 @@ export function ConnectChannelDialog({
                     <div className="mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
                       <GhostButton
                         type="button"
-                        onClick={() => setPhase('connecting')}
+                        onClick={() => {
+                          setAccount(previewNapCatAccount());
+                          setPhase('connecting');
+                        }}
                         className="h-11 px-4 text-[0.75rem]"
                       >
                         重新检测

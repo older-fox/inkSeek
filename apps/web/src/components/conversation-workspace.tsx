@@ -1,7 +1,24 @@
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, MessagesSquare, Plus, Search, Send, Waypoints, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ImagePlus,
+  MessagesSquare,
+  Plus,
+  Search,
+  Send,
+  Waypoints,
+  X,
+} from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+} from 'react';
+import { toast } from 'sonner';
 import { InputShell } from '@/components/field';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
 import { cn } from '@/lib/cn';
@@ -15,6 +32,8 @@ import {
 } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+const MAX_IMAGE_COUNT = 4;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function MessageBubble({
   message,
@@ -42,16 +61,37 @@ function MessageBubble({
         {!message.self && kind === 'group' && (
           <p className="mb-1 pl-1 text-[0.56rem] text-mist-600">{message.author}</p>
         )}
-        <div
-          className={cn(
-            'rounded-2xl px-3.5 py-2 text-left text-[0.76rem] leading-6',
-            message.self
-              ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12] text-mist-100'
-              : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35 text-mist-200',
-          )}
-        >
-          {message.text}
-        </div>
+        {message.text && (
+          <div
+            className={cn(
+              'rounded-2xl px-3.5 py-2 text-left text-[0.76rem] leading-6',
+              message.self
+                ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12] text-mist-100'
+                : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35 text-mist-200',
+            )}
+          >
+            {message.text}
+          </div>
+        )}
+        {message.images && message.images.length > 0 && (
+          <div
+            className={cn(
+              'flex flex-wrap gap-1.5',
+              message.self ? 'justify-end' : 'justify-start',
+              message.text && 'mt-1.5',
+            )}
+          >
+            {message.images.map((source, index) => (
+              <img
+                key={`${message.id}-image-${index}`}
+                src={source}
+                alt={`图片 ${index + 1}`}
+                loading="lazy"
+                className="max-h-64 max-w-[16rem] rounded-xl border border-mist-100/10 object-cover"
+              />
+            ))}
+          </div>
+        )}
         <p className="mt-1 px-1 font-mono text-[0.48rem] text-mist-600">{message.time}</p>
       </div>
 
@@ -175,6 +215,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<string[]>([]);
   const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -212,11 +253,53 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     }
   }, [selectedId, activeMessages.length]);
 
+  useEffect(() => {
+    setAttachments([]);
+  }, [selectedId]);
+
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    const imageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const available = MAX_IMAGE_COUNT - attachments.length;
+    if (available <= 0) {
+      toast.error(`一次最多附带 ${MAX_IMAGE_COUNT} 张图片`);
+      return;
+    }
+
+    imageFiles.slice(0, available).forEach((file) => {
+      if (file.size > MAX_IMAGE_BYTES) {
+        toast.error('单张图片不能超过 8 MB');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        const result = reader.result;
+        if (typeof result !== 'string') {
+          return;
+        }
+        setAttachments((previous) =>
+          previous.length >= MAX_IMAGE_COUNT ? previous : [...previous, result],
+        );
+      });
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const text = draft.trim();
-    if (!text || !activeConversation) {
+    if ((!text && attachments.length === 0) || !activeConversation) {
       return;
     }
 
@@ -227,6 +310,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       author: selfName,
       text,
       time: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      images: attachments.length > 0 ? attachments : undefined,
     };
 
     setLocalMessages((previous) => ({
@@ -234,6 +318,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       [activeConversation.id]: [...(previous[activeConversation.id] ?? []), message],
     }));
     setDraft('');
+    setAttachments([]);
   };
 
   if (channels.length === 0) {
@@ -398,27 +483,56 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
             </div>
 
             <div className="border-t border-mist-100/[0.06] px-3.5 py-3">
-              <form onSubmit={handleSubmit} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={`以 ${selfName} 的身份回复…`}
-                  aria-label="消息输入"
-                  autoComplete="off"
-                  className="wizard-input h-10 text-[0.78rem]"
-                />
-                <button
-                  type="submit"
-                  disabled={!draft.trim()}
-                  aria-label="发送消息"
-                  className="grid size-10 shrink-0 place-items-center rounded-xl border border-brass-400/30 bg-brass-400/10 text-brass-300 transition hover:bg-brass-400/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Send className="size-4" strokeWidth={1.8} />
-                </button>
+              <form onSubmit={handleSubmit} className="space-y-2">
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((source, index) => (
+                      <div key={`${source.slice(0, 32)}-${index}`} className="relative">
+                        <img
+                          src={source}
+                          alt={`待发送图片 ${index + 1}`}
+                          className="size-16 rounded-xl border border-mist-100/10 object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAttachments((previous) =>
+                              previous.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                          aria-label={`移除第 ${index + 1} 张图片`}
+                          className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-ink-900 bg-ink-800 text-mist-300 transition hover:bg-signal-400/20 hover:text-signal-400"
+                        >
+                          <X className="size-3" strokeWidth={2} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onPaste={handlePaste}
+                    placeholder={`以 ${selfName} 的身份回复…`}
+                    aria-label="消息输入"
+                    autoComplete="off"
+                    className="wizard-input h-10 text-[0.78rem]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!draft.trim() && attachments.length === 0}
+                    aria-label="发送消息"
+                    className="grid size-10 shrink-0 place-items-center rounded-xl border border-brass-400/30 bg-brass-400/10 text-brass-300 transition hover:bg-brass-400/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Send className="size-4" strokeWidth={1.8} />
+                  </button>
+                </div>
               </form>
-              <p className="mt-2 text-center font-mono text-[0.48rem] uppercase tracking-[0.14em] text-mist-600">
-                仅前端演示 · 消息不会真正发送
+              <p className="mt-2 flex items-center justify-center gap-1 font-mono text-[0.48rem] uppercase tracking-[0.14em] text-mist-600">
+                <ImagePlus className="size-3" strokeWidth={1.8} />
+                支持粘贴图片 · 仅前端演示，消息不会真正发送
               </p>
             </div>
           </>

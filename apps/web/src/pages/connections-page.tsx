@@ -59,6 +59,11 @@ function ChannelCard({ channel, onRemove }: { channel: Channel; onRemove: () => 
           <p className="mt-1 font-mono text-[0.62rem] tracking-[0.06em] text-mist-500">
             {PLATFORMS[channel.platform].name} {channel.accountId}
           </p>
+          <p className="mt-1 flex min-w-0 items-center gap-1.5 font-mono text-[0.52rem] tracking-[0.04em] text-mist-600">
+            <span className="truncate">{channel.serverUrl}</span>
+            <span aria-hidden="true">·</span>
+            <span className="shrink-0">密钥 {channel.tokenHint}</span>
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <PlatformChip platform={channel.platform} connector />
             <span className="font-mono text-[0.52rem] uppercase tracking-[0.12em] text-mist-600">
@@ -328,7 +333,6 @@ export function ConnectionsPage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onConnected={handleConnected}
-        connectedPlatforms={channels.map((channel) => channel.platform)}
       />
     </>
   );
