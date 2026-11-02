@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test:dialogue": "node scripts/generate-test-dialogue.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
