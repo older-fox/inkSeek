@@ -4,8 +4,13 @@ import type {
   BootstrapResult,
   BootstrapStatus,
   LoginInput,
+  ModelProviderInput,
+  ModelProviderSaveResult,
   RedisConnectionInput,
   RedisProbeResult,
+  RedisSettingsInput,
+  RedisSettingsResult,
+  SettingsOverview,
 } from '@inkseek/shared';
 
 const API_BASE = '/api/v1';
@@ -76,4 +81,21 @@ export const api = {
     }),
   me: () => request<BootstrapResult>('/auth/me'),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  settings: () => request<SettingsOverview>('/settings'),
+  updateRedisSettings: (input: RedisSettingsInput) =>
+    request<RedisSettingsResult>('/settings/redis', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  createModelProvider: (input: ModelProviderInput) =>
+    request<ModelProviderSaveResult>('/settings/providers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  retestModelProvider: (id: string) =>
+    request<ModelProviderSaveResult>(`/settings/providers/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+    }),
+  deleteModelProvider: (id: string) =>
+    request<void>(`/settings/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

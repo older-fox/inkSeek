@@ -5,36 +5,21 @@ import {
   Link,
   Outlet,
   redirect,
-  useRouterState,
   type ErrorComponentProps,
 } from '@tanstack/react-router';
-import { AnimatePresence, motion } from 'motion/react';
+import { AppLayout } from '@/components/app-layout';
 import { AuthShell } from '@/components/auth-shell';
 import { PrimaryButton } from '@/components/button';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
 import { PersonasPage } from '@/pages/personas-page';
+import { SettingsPage } from '@/pages/settings-page';
 import { SetupPage } from '@/pages/setup-page';
 import { queryClient } from '@/lib/query-client';
 import { bootstrapStatusQuery, meQuery } from '@/lib/queries';
 
 function RootLayout() {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={pathname}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-        className="min-h-screen"
-      >
-        <Outlet />
-      </motion.div>
-    </AnimatePresence>
-  );
+  return <Outlet />;
 }
 
 function RootErrorComponent({ error }: ErrorComponentProps) {
@@ -107,18 +92,29 @@ async function requireSession() {
   }
 }
 
-const indexRoute = createRoute({
+const appRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/',
+  id: 'app',
   beforeLoad: requireSession,
+  component: AppLayout,
+});
+
+const indexRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/',
   component: HomePage,
 });
 
 const personasRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: '/personas',
-  beforeLoad: requireSession,
   component: PersonasPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/settings',
+  component: SettingsPage,
 });
 
 const loginRoute = createRoute({
@@ -153,7 +149,11 @@ const setupRoute = createRoute({
   component: SetupPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, personasRoute, loginRoute, setupRoute]);
+const routeTree = rootRoute.addChildren([
+  appRoute.addChildren([indexRoute, personasRoute, settingsRoute]),
+  loginRoute,
+  setupRoute,
+]);
 
 export const router = createRouter({
   routeTree,

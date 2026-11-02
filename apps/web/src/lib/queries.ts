@@ -13,3 +13,9 @@ export const meQuery = queryOptions({
   retry: false,
   staleTime: 60_000,
 });
+
+export const settingsQuery = queryOptions({
+  queryKey: ['settings'],
+  queryFn: api.settings,
+  staleTime: 30_000,
+});

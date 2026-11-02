@@ -1,17 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import {
   ArrowUpRight,
   BarChart3,
   Bot,
   CalendarClock,
-  LoaderCircle,
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { AppShell } from '@/components/app-shell';
-import { api } from '@/lib/api';
 import { meQuery } from '@/lib/queries';
 
 const modules = [
@@ -39,36 +35,13 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 });
 
 export function HomePage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { data: user } = useQuery(meQuery);
-
-  const logoutMutation = useMutation({
-    mutationFn: api.logout,
-    onSettled: () => {
-      queryClient.removeQueries({ queryKey: ['auth'] });
-      void navigate({ to: '/login' });
-    },
-  });
-
-  if (!user) {
-    return (
-      <div className="grid min-h-screen place-items-center">
-        <LoaderCircle className="size-5 animate-spin text-brass-400" />
-      </div>
-    );
-  }
 
   const hour = new Date().getHours();
   const greeting = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
 
   return (
-    <AppShell
-      user={user}
-      onLogout={() => logoutMutation.mutate()}
-      loggingOut={logoutMutation.isPending}
-    >
-      <div className="relative mx-auto w-full max-w-5xl px-6 py-14 sm:px-8 lg:py-16">
+    <div className="relative mx-auto w-full max-w-5xl px-6 py-14 sm:px-8 lg:py-16">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
@@ -83,7 +56,7 @@ export function HomePage() {
           </div>
 
           <h1 className="mt-5 font-display text-[clamp(2rem,3.6vw,3.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-mist-100">
-            {greeting}，{user.displayName}
+            {greeting}，{user?.displayName ?? ''}
           </h1>
           <p className="mt-4 max-w-2xl text-[0.95rem] leading-7 text-mist-500">
             控制台已经就绪。账户与 Redis 配置均已写入数据库，接下来可以接入第一个智能体，
@@ -155,7 +128,6 @@ export function HomePage() {
             Agent ready
           </div>
         </motion.div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

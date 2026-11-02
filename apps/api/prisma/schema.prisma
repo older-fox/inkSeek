@@ -45,3 +45,22 @@ model SystemConfig {
   isSecret  Boolean  @default(false)
   updatedAt DateTime @updatedAt
 }
+
+enum ProviderProtocol {
+  openai
+  anthropic
+  gemini
+}
+
+model ModelProvider {
+  id           String           @id @default(cuid())
+  name         String           @unique
+  protocol     ProviderProtocol
+  baseUrl      String
+  apiKey       String
+  models       Json
+  modelCount   Int              @default(0)
+  lastTestedAt DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}

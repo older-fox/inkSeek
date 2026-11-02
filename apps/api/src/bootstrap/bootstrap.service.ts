@@ -12,7 +12,7 @@ import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { toAuthUser } from '../auth/auth-user.mapper.js';
 import { SessionService, type IssuedSession, type SessionMeta } from '../auth/session.service.js';
-import { RedisProbeService } from './redis-probe.service.js';
+import { RedisProbeService } from '../redis/redis-probe.service.js';
 
 export interface InitializeResult extends IssuedSession {
   user: ReturnType<typeof toAuthUser>;

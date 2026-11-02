@@ -1,30 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import { LoaderCircle, Search, UserRoundSearch, X } from 'lucide-react';
+import { Search, UserRoundSearch, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useMemo, useState } from 'react';
-import { AppShell } from '@/components/app-shell';
 import { InputShell } from '@/components/field';
 import { NewPersonaCard, PersonaCard } from '@/components/persona-card';
 import { PersonaWizard } from '@/components/persona-wizard';
-import { api } from '@/lib/api';
 import { matchesPersona, PERSONAS } from '@/lib/personas';
-import { meQuery } from '@/lib/queries';
 
 export function PersonasPage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { data: user } = useQuery(meQuery);
   const [query, setQuery] = useState('');
   const [wizardOpen, setWizardOpen] = useState(false);
-
-  const logoutMutation = useMutation({
-    mutationFn: api.logout,
-    onSettled: () => {
-      queryClient.removeQueries({ queryKey: ['auth'] });
-      void navigate({ to: '/login' });
-    },
-  });
 
   const personas = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -32,22 +16,10 @@ export function PersonasPage() {
     return PERSONAS.filter((persona) => matchesPersona(persona, normalized));
   }, [query]);
 
-  if (!user) {
-    return (
-      <div className="grid min-h-screen place-items-center">
-        <LoaderCircle className="size-5 animate-spin text-brass-400" />
-      </div>
-    );
-  }
-
   const searching = query.trim().length > 0;
 
   return (
-    <AppShell
-      user={user}
-      onLogout={() => logoutMutation.mutate()}
-      loggingOut={logoutMutation.isPending}
-    >
+    <>
       <div className="relative mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-12">
         <motion.header
           initial={{ opacity: 0, y: 16 }}
@@ -164,6 +136,6 @@ export function PersonasPage() {
       </div>
 
       <PersonaWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
-    </AppShell>
+    </>
   );
 }

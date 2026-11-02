@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { RedisModule } from '../redis/redis.module.js';
 import { BootstrapController } from './bootstrap.controller.js';
 import { BootstrapService } from './bootstrap.service.js';
-import { RedisProbeService } from './redis-probe.service.js';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, RedisModule],
   controllers: [BootstrapController],
-  providers: [BootstrapService, RedisProbeService],
+  providers: [BootstrapService],
 })
 export class BootstrapModule {}

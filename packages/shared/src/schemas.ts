@@ -39,7 +39,39 @@ export const loginSchema = z.object({
   password: z.string().min(1, '请输入密码'),
 });
 
+export const redisSettingsSchema = redisConnectionSchema.extend({
+  clearPassword: z.boolean().optional().default(false),
+});
+
+export const modelProviderProtocols = ['openai', 'anthropic', 'gemini'] as const;
+
+export const modelProviderProtocolSchema = z.enum(modelProviderProtocols);
+
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .min(1, '请填写 Base URL')
+  .max(300, 'Base URL 过长')
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, '请输入有效的 http(s) 地址');
+
+export const modelProviderSchema = z.object({
+  name: z.string().trim().min(1, '请填写提供商名称').max(48, '名称最多 48 个字符'),
+  protocol: modelProviderProtocolSchema,
+  baseUrl: httpUrlSchema,
+  apiKey: z.string().trim().min(1, '请填写 API Key').max(512, 'API Key 过长'),
+});
+
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
+export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
 export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
+export type ModelProviderInput = z.infer<typeof modelProviderSchema>;

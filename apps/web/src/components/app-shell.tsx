@@ -10,9 +10,10 @@ import {
   LoaderCircle,
   LogOut,
   MessageSquare,
+  Settings2,
   UsersRound,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { BrandMark } from '@/components/brand-mark';
 import { ThemeSwitcher } from '@/components/theme-switcher';
 import { cn } from '@/lib/cn';
@@ -43,7 +44,13 @@ const navItems: NavItem[] = [
 export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps) {
   const initial = (user.displayName || user.username).slice(0, 1).toUpperCase();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const sectionLabel = pathname === '/personas' ? '人格中心' : '概览';
+  const mainRef = useRef<HTMLElement>(null);
+  const sectionLabel =
+    pathname === '/personas' ? '人格中心' : pathname === '/settings' ? '系统设置' : '概览';
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [pathname]);
 
   return (
     <div className="relative flex h-dvh overflow-hidden">
@@ -123,6 +130,14 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
                 {user.role === 'ADMIN' ? 'Administrator' : 'Member'}
               </p>
             </div>
+            <Link
+              to="/settings"
+              title="系统设置"
+              aria-label="系统设置"
+              className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-brass-300"
+            >
+              <Settings2 className="size-4" strokeWidth={1.7} />
+            </Link>
             <button
               type="button"
               onClick={onLogout}
@@ -170,6 +185,15 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
               {initial}
             </div>
 
+            <Link
+              to="/settings"
+              title="系统设置"
+              aria-label="系统设置"
+              className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-brass-300 lg:hidden"
+            >
+              <Settings2 className="size-4" strokeWidth={1.7} />
+            </Link>
+
             <button
               type="button"
               onClick={onLogout}
@@ -182,7 +206,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
           </div>
         </header>
 
-        <main className="relative min-h-0 flex-1 overflow-y-auto">
+        <main ref={mainRef} className="relative min-h-0 flex-1 overflow-y-auto">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 ink-grid opacity-25" />
             <div

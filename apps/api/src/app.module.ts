@@ -6,6 +6,7 @@ import { BootstrapModule } from './bootstrap/bootstrap.module.js';
 import { SystemConfigModule } from './config/system-config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { SettingsModule } from './settings/settings.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { HealthModule } from './health/health.module.js';
     SystemConfigModule,
     AuthModule,
     BootstrapModule,
+    SettingsModule,
     HealthModule,
   ],
 })

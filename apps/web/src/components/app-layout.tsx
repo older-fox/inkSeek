@@ -1,0 +1,47 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { LoaderCircle } from 'lucide-react';
+import { motion } from 'motion/react';
+import { AppShell } from '@/components/app-shell';
+import { api } from '@/lib/api';
+import { meQuery } from '@/lib/queries';
+
+export function AppLayout() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { data: user } = useQuery(meQuery);
+
+  const logoutMutation = useMutation({
+    mutationFn: api.logout,
+    onSettled: () => {
+      queryClient.removeQueries({ queryKey: ['auth'] });
+      void navigate({ to: '/login' });
+    },
+  });
+
+  if (!user) {
+    return (
+      <div className="grid min-h-screen place-items-center">
+        <LoaderCircle className="size-5 animate-spin text-brass-400" />
+      </div>
+    );
+  }
+
+  return (
+    <AppShell
+      user={user}
+      onLogout={() => logoutMutation.mutate()}
+      loggingOut={logoutMutation.isPending}
+    >
+      <motion.div
+        key={pathname}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <Outlet />
+      </motion.div>
+    </AppShell>
+  );
+}
