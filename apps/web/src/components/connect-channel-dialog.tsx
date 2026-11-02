@@ -258,7 +258,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
               </button>
             </div>
 
-            <div className="relative min-h-0 flex-1 overflow-y-auto">
+            <div className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <div ref={contentRef} className="relative px-6 pb-7 pt-4 sm:px-8 sm:pb-8">
                 <AnimatePresence mode="popLayout" initial={false}>
                   {phase === 'choose' && (
