@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { BrandMark } from '@/components/brand-mark';
 import { InkBackdrop } from '@/components/ink-backdrop';
+import { ThemeSwitcher } from '@/components/theme-switcher';
 
 interface AuthShellProps {
   eyebrow: string;
@@ -83,6 +84,10 @@ export function AuthShell({
         </aside>
 
         <main className="relative flex min-h-screen flex-col px-5 py-8 sm:px-10 lg:px-12 lg:py-12">
+          <div className="absolute right-5 top-6 z-20 sm:right-10 lg:right-12 lg:top-11">
+            <ThemeSwitcher />
+          </div>
+
           <div className="lg:hidden">
             <BrandMark />
           </div>

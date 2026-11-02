@@ -25,7 +25,7 @@ export function BrandMark({ className, compact = false }: BrandMarkProps) {
           />
           <circle cx="16" cy="19" r="2.4" fill="#0B1118" opacity="0.5" />
         </svg>
-        <span className="pointer-events-none absolute inset-0 rounded-[0.9rem] ring-1 ring-inset ring-white/5" />
+        <span className="pointer-events-none absolute inset-0 rounded-[0.9rem] ring-1 ring-inset ring-mist-100/5" />
       </span>
       {!compact && (
         <span className="font-display text-[1.05rem] font-semibold tracking-[0.18em] text-mist-100">

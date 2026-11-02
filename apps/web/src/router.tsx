@@ -13,6 +13,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { PrimaryButton } from '@/components/button';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
+import { PersonasPage } from '@/pages/personas-page';
 import { SetupPage } from '@/pages/setup-page';
 import { queryClient } from '@/lib/query-client';
 import { bootstrapStatusQuery, meQuery } from '@/lib/queries';
@@ -92,23 +93,32 @@ const rootRoute = createRootRoute({
   notFoundComponent: NotFoundComponent,
 });
 
+async function requireSession() {
+  const status = await queryClient.ensureQueryData(bootstrapStatusQuery);
+
+  if (!status.initialized) {
+    throw redirect({ to: '/setup' });
+  }
+
+  try {
+    await queryClient.ensureQueryData(meQuery);
+  } catch {
+    throw redirect({ to: '/login' });
+  }
+}
+
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: async () => {
-    const status = await queryClient.ensureQueryData(bootstrapStatusQuery);
-
-    if (!status.initialized) {
-      throw redirect({ to: '/setup' });
-    }
-
-    try {
-      await queryClient.ensureQueryData(meQuery);
-    } catch {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: requireSession,
   component: HomePage,
+});
+
+const personasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/personas',
+  beforeLoad: requireSession,
+  component: PersonasPage,
 });
 
 const loginRoute = createRoute({
@@ -143,7 +153,7 @@ const setupRoute = createRoute({
   component: SetupPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute, setupRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, personasRoute, loginRoute, setupRoute]);
 
 export const router = createRouter({
   routeTree,

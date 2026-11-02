@@ -1,4 +1,5 @@
 import type { AuthUser } from '@inkseek/shared';
+import { Link, useRouterState } from '@tanstack/react-router';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
@@ -9,9 +10,11 @@ import {
   LoaderCircle,
   LogOut,
   MessageSquare,
+  UsersRound,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BrandMark } from '@/components/brand-mark';
+import { ThemeSwitcher } from '@/components/theme-switcher';
 import { cn } from '@/lib/cn';
 
 interface AppShellProps {
@@ -24,12 +27,13 @@ interface AppShellProps {
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  active?: boolean;
+  to?: '/' | '/personas';
   soon?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { label: '概览', icon: Compass, active: true },
+  { label: '概览', icon: Compass, to: '/' },
+  { label: '人格中心', icon: UsersRound, to: '/personas' },
   { label: '对话', icon: MessageSquare, soon: true },
   { label: '智能体', icon: Bot, soon: true },
   { label: '定时任务', icon: CalendarClock, soon: true },
@@ -38,6 +42,8 @@ const navItems: NavItem[] = [
 
 export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps) {
   const initial = (user.displayName || user.username).slice(0, 1).toUpperCase();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const sectionLabel = pathname === '/personas' ? '人格中心' : '概览';
 
   return (
     <div className="relative flex min-h-screen overflow-hidden">
@@ -70,28 +76,45 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
           <p className="px-3 pb-2 font-mono text-[0.6rem] uppercase tracking-[0.26em] text-mist-600">
             Control
           </p>
-          {navItems.map(({ label, icon: Icon, active, soon }) => (
-            <button
-              key={label}
-              type="button"
-              disabled={soon}
-              data-active={active ? 'true' : 'false'}
-              className={cn('nav-item w-full text-left', soon && 'cursor-not-allowed')}
-            >
-              <Icon className="size-[1.05rem]" strokeWidth={1.6} />
-              <span className="flex-1">{label}</span>
-              {soon && (
-                <span className="rounded border border-mist-100/[0.07] px-1.5 py-0.5 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-mist-600">
-                  soon
-                </span>
-              )}
-            </button>
-          ))}
+          {navItems.map(({ label, icon: Icon, to, soon }) => {
+            const content = (
+              <>
+                <Icon className="size-[1.05rem]" strokeWidth={1.6} />
+                <span className="flex-1">{label}</span>
+                {soon && (
+                  <span className="rounded border border-mist-100/[0.07] px-1.5 py-0.5 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-mist-600">
+                    soon
+                  </span>
+                )}
+              </>
+            );
+
+            return to ? (
+              <Link
+                key={label}
+                to={to}
+                data-active={pathname === to ? 'true' : 'false'}
+                className="nav-item w-full text-left"
+              >
+                {content}
+              </Link>
+            ) : (
+              <button
+                key={label}
+                type="button"
+                disabled={soon}
+                data-active="false"
+                className={cn('nav-item w-full text-left', soon && 'cursor-not-allowed')}
+              >
+                {content}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="border-t border-mist-100/[0.06] p-3">
           <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brass-300 to-brass-600 font-display text-sm font-semibold text-ink-950">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brass-soft to-brass-deep font-display text-sm font-semibold text-on-brass">
               {initial}
             </span>
             <div className="min-w-0 flex-1">
@@ -118,7 +141,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
       </aside>
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-mist-100/[0.06] bg-ink-950/40 px-5 backdrop-blur-xl sm:px-8">
+        <header className="relative z-30 flex h-16 shrink-0 items-center justify-between border-b border-mist-100/[0.06] bg-ink-950/40 px-5 backdrop-blur-xl sm:px-8">
           <div className="flex items-center gap-4">
             <div className="lg:hidden">
               <BrandMark compact />
@@ -126,11 +149,13 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
             <div className="hidden items-center gap-2 text-[0.72rem] text-mist-600 sm:flex">
               <span className="font-mono uppercase tracking-[0.22em]">Console</span>
               <ChevronRight className="size-3" />
-              <span className="text-mist-300">概览</span>
+              <span className="text-mist-300">{sectionLabel}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            <ThemeSwitcher />
+
             <div className="hidden items-center gap-2 rounded-full border border-jade-400/15 bg-jade-400/[0.06] px-3 py-1.5 sm:flex">
               <span className="relative flex size-1.5">
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-jade-400 opacity-60" />
@@ -141,7 +166,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
               </span>
             </div>
 
-            <div className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-brass-300 to-brass-600 font-display text-xs font-semibold text-ink-950 lg:hidden">
+            <div className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-brass-soft to-brass-deep font-display text-xs font-semibold text-on-brass lg:hidden">
               {initial}
             </div>
 
@@ -157,15 +182,17 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
           </div>
         </header>
 
-        <main className="relative flex-1 overflow-x-hidden overflow-y-auto">
-          <div className="pointer-events-none absolute inset-0 ink-grid opacity-25" />
-          <div
-            className="pointer-events-none absolute -right-40 -top-48 size-[34rem] rounded-full blur-3xl"
-            style={{
-              background:
-                'radial-gradient(circle at center, rgba(230, 189, 122, 0.09), transparent 66%)',
-            }}
-          />
+        <main className="relative flex-1 overflow-y-auto">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute inset-0 ink-grid opacity-25" />
+            <div
+              className="absolute -right-40 -top-48 size-[34rem] rounded-full blur-3xl"
+              style={{
+                background:
+                  'radial-gradient(circle at center, var(--panel-accent-glow), transparent 66%)',
+              }}
+            />
+          </div>
           {children}
         </main>
       </div>

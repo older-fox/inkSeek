@@ -8,25 +8,36 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Toaster } from 'sonner';
 import { queryClient } from '@/lib/query-client';
+import { ThemeProvider, getThemeDefinition, useTheme } from '@/lib/theme';
 import { router } from '@/router';
 import './styles.css';
 
+function ThemedToaster() {
+  const { theme } = useTheme();
+
+  return (
+    <Toaster
+      position="top-right"
+      theme={getThemeDefinition(theme).scheme}
+      toastOptions={{
+        style: {
+          background: 'var(--color-ink-850)',
+          border: '1px solid var(--glass-border)',
+          color: 'var(--color-mist-100)',
+          fontFamily: 'Manrope Variable, Noto Sans SC Variable, sans-serif',
+        },
+      }}
+    />
+  );
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster
-        position="top-right"
-        theme="dark"
-        toastOptions={{
-          style: {
-            background: '#0e1620',
-            border: '1px solid rgba(230, 189, 122, 0.18)',
-            color: '#f4efe6',
-            fontFamily: 'Manrope Variable, Noto Sans SC Variable, sans-serif',
-          },
-        }}
-      />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+        <ThemedToaster />
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

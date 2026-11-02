@@ -21,8 +21,8 @@ export function PrimaryButton({
       disabled={disabled || loading}
       className={cn(
         'group relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl',
-        'bg-gradient-to-r from-brass-300 via-brass-400 to-brass-500',
-        'font-display text-sm font-semibold tracking-wide text-ink-950',
+        'bg-gradient-to-r from-brass-soft via-brass-mid to-brass-deep',
+        'font-display text-sm font-semibold tracking-wide text-on-brass',
         'shadow-[0_18px_38px_-18px_rgba(230,189,122,0.65)] transition',
         'hover:brightness-105 active:translate-y-px',
         'disabled:cursor-not-allowed disabled:opacity-60 disabled:active:translate-y-0',

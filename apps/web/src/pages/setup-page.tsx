@@ -312,7 +312,7 @@ export function SetupPage() {
                         >
                           <span
                             className={[
-                              'absolute top-0.5 size-[1.1rem] rounded-full bg-mist-100 shadow transition-all',
+                              'absolute top-0.5 size-[1.1rem] rounded-full bg-switch-knob shadow transition-all',
                               field.value ? 'left-[1.4rem]' : 'left-0.5',
                             ].join(' ')}
                           />

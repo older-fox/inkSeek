@@ -1,10 +1,32 @@
 <!doctype html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#070b10" />
+    <meta name="theme-color" content="#151c26" />
+    <script>
+      (function () {
+        var schemes = { snow: 'light', paper: 'light', dusk: 'dark', moss: 'dark' };
+        var colors = { snow: '#f7f8fa', paper: '#f3eee3', dusk: '#151c26', moss: '#131b16' };
+        var legacy = { light: 'snow', dark: 'dusk' };
+        var stored = null;
+        try {
+          stored = localStorage.getItem('inkseek-theme');
+        } catch (error) {
+          stored = null;
+        }
+        stored = legacy[stored] || (schemes[stored] ? stored : null);
+        var prefersDark =
+          window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = stored || (prefersDark ? 'dusk' : 'snow');
+        var root = document.documentElement;
+        root.dataset.theme = theme;
+        root.style.colorScheme = schemes[theme];
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', colors[theme]);
+      })();
+    </script>
     <meta
       name="description"
       content="inkSeek — 面向智能体的聊天、调度与洞察控制平台"

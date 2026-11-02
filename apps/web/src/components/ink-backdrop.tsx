@@ -17,7 +17,7 @@ export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
         )}
         style={{
           background:
-            'radial-gradient(circle at center, rgba(230, 189, 122, 0.16), rgba(230, 189, 122, 0.03) 46%, transparent 68%)',
+            'radial-gradient(circle at center, var(--orb-brass), var(--orb-brass-inner) 46%, transparent 68%)',
         }}
       />
 
@@ -28,7 +28,7 @@ export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
         )}
         style={{
           background:
-            'radial-gradient(circle at center, rgba(79, 163, 145, 0.14), rgba(79, 163, 145, 0.02) 48%, transparent 68%)',
+            'radial-gradient(circle at center, var(--orb-jade), var(--orb-jade-inner) 48%, transparent 68%)',
         }}
       />
 
@@ -36,7 +36,7 @@ export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
         className="absolute bottom-[-18rem] left-[30%] size-[34rem] rounded-full blur-3xl animate-drift-a"
         style={{
           background:
-            'radial-gradient(circle at center, rgba(212, 164, 95, 0.1), transparent 66%)',
+            'radial-gradient(circle at center, var(--orb-amber), transparent 66%)',
           animationDelay: '-7s',
         }}
       />
