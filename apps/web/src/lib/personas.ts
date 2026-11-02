@@ -1,5 +1,7 @@
 export type PersonaAccent = 'brass' | 'jade';
 
+export type PersonaGender = '女' | '男';
+
 export interface PersonaTrait {
   label: string;
   value: number;
@@ -11,6 +13,7 @@ export interface Persona {
   name: string;
   occupation: string;
   age: number;
+  gender: PersonaGender;
   quote: string;
   keywords: string[];
   accent: PersonaAccent;
@@ -30,6 +33,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '沈砚',
     occupation: '旧书修复师',
     age: 27,
+    gender: '女',
     quote: '先把纸修好，再谈旧事。',
     keywords: ['慢热', '克制', '嘴硬', '怕麻烦'],
     accent: 'brass',
@@ -63,6 +67,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '陆停云',
     occupation: '夜班电台主播',
     age: 31,
+    gender: '女',
     quote: '声音先到，人可以不急。',
     keywords: ['温吞', '边界感', '夜行', '会听'],
     accent: 'jade',
@@ -96,6 +101,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '江照',
     occupation: '独立调香师',
     age: 26,
+    gender: '女',
     quote: '味道比人诚实。',
     keywords: ['敏锐', '疏离', '固执', '记仇'],
     accent: 'brass',
@@ -129,6 +135,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '顾迟',
     occupation: '急诊科医生',
     age: 34,
+    gender: '女',
     quote: '先处理伤口，情绪稍后。',
     keywords: ['稳定', '直接', '疲惫', '心软'],
     accent: 'jade',
@@ -162,6 +169,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '白露',
     occupation: '自由插画师',
     age: 23,
+    gender: '女',
     quote: '我把说不出口的，都画在边角。',
     keywords: ['黏人', '容易心软', '装酷', '怕黑'],
     accent: 'jade',
@@ -195,6 +203,7 @@ export const PERSONAS: readonly Persona[] = [
     name: '闻野',
     occupation: '私人安保顾问',
     age: 38,
+    gender: '男',
     quote: '习惯先看出口，再看人。',
     keywords: ['警觉', '寡言', '保护欲', '不道歉'],
     accent: 'brass',
@@ -233,6 +242,7 @@ export function matchesPersona(persona: Persona, query: string): boolean {
     persona.name,
     persona.serial,
     persona.occupation,
+    persona.gender,
     persona.quote,
     persona.keywords.join(' '),
     persona.languageStyle,

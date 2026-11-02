@@ -90,6 +90,8 @@ function PersonaFront({ persona }: { persona: Persona }) {
             {persona.occupation}
             <span className="mx-1.5 text-mist-600">·</span>
             {persona.age} 岁
+            <span className="mx-1.5 text-mist-600">·</span>
+            {persona.gender}
           </p>
         </div>
       </div>
@@ -173,6 +175,8 @@ function PersonaBack({ persona }: { persona: Persona }) {
             {persona.occupation}
             <span className="mx-1.5 text-mist-600">·</span>
             {persona.age} 岁
+            <span className="mx-1.5 text-mist-600">·</span>
+            {persona.gender}
           </p>
         </div>
         <span className="shrink-0 font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
