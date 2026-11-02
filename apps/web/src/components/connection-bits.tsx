@@ -1,5 +1,10 @@
 import { cn } from '@/lib/cn';
-import { PLATFORMS, type ChannelAccent, type PlatformId } from '@/lib/connections';
+import {
+  PLATFORMS,
+  type ChannelAccent,
+  type ChannelStatus,
+  type PlatformId,
+} from '@/lib/connections';
 
 const ACCENT_SURFACE: Record<ChannelAccent, string> = {
   brass:
@@ -17,7 +22,8 @@ interface ChannelAvatarProps {
   initials: string;
   accent: ChannelAccent;
   size?: keyof typeof AVATAR_SIZE;
-  online?: boolean;
+  src?: string | null;
+  title?: string;
   className?: string;
 }
 
@@ -25,24 +31,31 @@ export function ChannelAvatar({
   initials,
   accent,
   size = 'md',
-  online = false,
+  src,
+  title,
   className,
 }: ChannelAvatarProps) {
   return (
     <span
       className={cn(
-        'relative grid shrink-0 place-items-center border font-display font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
+        'relative grid shrink-0 place-items-center overflow-hidden border font-display font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
         AVATAR_SIZE[size],
         ACCENT_SURFACE[accent],
         className,
       )}
+      title={title}
       aria-hidden="true"
     >
-      {initials.slice(0, 1)}
-      {online && (
-        <span className="absolute -bottom-0.5 -right-0.5 grid size-3.5 place-items-center rounded-full border-2 border-ink-900 bg-jade-400">
-          <span className="size-1 rounded-full bg-ink-950/70" />
-        </span>
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="size-full object-cover"
+        />
+      ) : (
+        initials.slice(0, 1)
       )}
     </span>
   );
@@ -95,6 +108,57 @@ export function SyncPill({ label = '同步中', className }: { label?: string; c
         <span className="relative inline-flex size-1.5 rounded-full bg-jade-400" />
       </span>
       {label}
+    </span>
+  );
+}
+
+const STATUS_SURFACE: Record<ChannelStatus, { label: string; className: string }> = {
+  online: {
+    label: '在线',
+    className: 'border-jade-400/20 bg-jade-400/[0.07] text-jade-300',
+  },
+  connecting: {
+    label: '连接中',
+    className: 'border-brass-400/25 bg-brass-400/[0.08] text-brass-300',
+  },
+  offline: {
+    label: '离线',
+    className: 'border-mist-100/10 bg-ink-950/30 text-mist-500',
+  },
+  error: {
+    label: '连接异常',
+    className: 'border-signal-400/25 bg-signal-400/[0.08] text-signal-400',
+  },
+};
+
+export function ConnectionStatusPill({
+  status,
+  className,
+}: {
+  status: ChannelStatus;
+  className?: string;
+}) {
+  const tone = STATUS_SURFACE[status];
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5',
+        'font-mono text-[0.52rem] uppercase tracking-[0.14em]',
+        tone.className,
+        className,
+      )}
+    >
+      <span
+        className={cn(
+          'size-1.5 rounded-full',
+          status === 'online' && 'animate-pulse bg-jade-400',
+          status === 'connecting' && 'animate-pulse bg-brass-400',
+          status === 'offline' && 'bg-mist-600',
+          status === 'error' && 'bg-signal-400',
+        )}
+      />
+      {tone.label}
     </span>
   );
 }

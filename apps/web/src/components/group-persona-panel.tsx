@@ -64,21 +64,24 @@ export function GroupPersonaPanel({
   const [meta, setMeta] = useState<PersonaMetadata | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
-  const values = conversation ? { ...groupPersonaDefaults(conversation.id), ...overrides } : null;
+  // 人格记忆按渠道命名空间隔离：渠道 id + 群号，避免不同渠道的同号群串数据。
+  const personaKey =
+    conversation && channel ? `${channel.id}:${conversation.externalId}` : (conversation?.id ?? '');
+  const values = conversation ? { ...groupPersonaDefaults(), ...overrides } : null;
   const metadataActive = activeGroupId === META_TAB_ID;
   const activeGroup =
     GROUP_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? GROUP_PERSONA_GROUPS[0];
 
   useEffect(() => {
-    if (conversation) {
+    if (conversation && personaKey) {
       setActiveGroupId(GROUP_PERSONA_GROUPS[0]?.id ?? '');
-      setOverrides(readGroupPersonaOverrides(conversation.id));
-      setMeta(readGroupPersonaMeta(conversation.id) ?? groupPersonaMetadata(conversation.id));
+      setOverrides(readGroupPersonaOverrides(personaKey));
+      setMeta(readGroupPersonaMeta(personaKey) ?? groupPersonaMetadata());
     } else {
       setOverrides({});
       setMeta(null);
     }
-  }, [conversation]);
+  }, [conversation, personaKey]);
 
   useEffect(() => {
     if (!conversation) {
@@ -111,12 +114,12 @@ export function GroupPersonaPanel({
   }
 
   const handleChange = (key: string, label: string, value: PersonaValue) => {
-    if (!conversation) {
+    if (!conversation || !personaKey) {
       return;
     }
     const previous = values?.[key];
     setOverrides((current) => ({ ...current, [key]: value }));
-    writeGroupPersonaOverride(conversation.id, key, value);
+    writeGroupPersonaOverride(personaKey, key, value);
 
     if (meta) {
       const nextMeta = appendPersonaHistory(meta, {
@@ -125,7 +128,7 @@ export function GroupPersonaPanel({
         to: formatPersonaValue(value),
       });
       setMeta(nextMeta);
-      writeGroupPersonaMeta(conversation.id, nextMeta);
+      writeGroupPersonaMeta(personaKey, nextMeta);
     }
   };
 
@@ -168,7 +171,6 @@ export function GroupPersonaPanel({
                 initials={conversation.initials}
                 accent={conversation.accent}
                 size="lg"
-                online
                 className="hidden sm:grid"
               />
 

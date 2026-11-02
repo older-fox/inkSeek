@@ -65,21 +65,24 @@ export function PrivatePersonaPanel({
   const [meta, setMeta] = useState<PersonaMetadata | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
-  const values = conversation ? { ...privatePersonaDefaults(conversation.id), ...overrides } : null;
+  // 人格记忆按渠道命名空间隔离：渠道 id + QQ 号，避免不同渠道的同号联系人串数据。
+  const personaKey =
+    conversation && channel ? `${channel.id}:${conversation.externalId}` : (conversation?.id ?? '');
+  const values = conversation ? { ...privatePersonaDefaults(), ...overrides } : null;
   const metadataActive = activeGroupId === META_TAB_ID;
   const activeGroup =
     PRIVATE_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PRIVATE_PERSONA_GROUPS[0];
 
   useEffect(() => {
-    if (conversation) {
+    if (conversation && personaKey) {
       setActiveGroupId(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
-      setOverrides(readPrivatePersonaOverrides(conversation.id));
-      setMeta(readPrivatePersonaMeta(conversation.id) ?? privatePersonaMetadata(conversation.id));
+      setOverrides(readPrivatePersonaOverrides(personaKey));
+      setMeta(readPrivatePersonaMeta(personaKey) ?? privatePersonaMetadata());
     } else {
       setOverrides({});
       setMeta(null);
     }
-  }, [conversation]);
+  }, [conversation, personaKey]);
 
   useEffect(() => {
     if (!conversation) {
@@ -112,12 +115,12 @@ export function PrivatePersonaPanel({
   }
 
   const handleChange = (key: string, label: string, value: PersonaValue) => {
-    if (!conversation) {
+    if (!conversation || !personaKey) {
       return;
     }
     const previous = values?.[key];
     setOverrides((current) => ({ ...current, [key]: value }));
-    writePrivatePersonaOverride(conversation.id, key, value);
+    writePrivatePersonaOverride(personaKey, key, value);
 
     if (meta) {
       const nextMeta = appendPersonaHistory(meta, {
@@ -126,7 +129,7 @@ export function PrivatePersonaPanel({
         to: formatPersonaValue(value),
       });
       setMeta(nextMeta);
-      writePrivatePersonaMeta(conversation.id, nextMeta);
+      writePrivatePersonaMeta(personaKey, nextMeta);
     }
   };
 
@@ -169,7 +172,6 @@ export function PrivatePersonaPanel({
                 initials={conversation.initials}
                 accent={conversation.accent}
                 size="lg"
-                online
                 className="hidden sm:grid"
               />
 

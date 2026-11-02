@@ -1,8 +1,11 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { MessageCircle, PlugZap, UsersRound } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useChatEvents } from '@/lib/chat-events';
 import { cn } from '@/lib/cn';
-import { conversationsFor, useChannels } from '@/lib/connections';
+import { useChannels } from '@/lib/connections';
+import { chatConversationsQuery } from '@/lib/queries';
 
 const TABS = [
   { to: '/connections', label: '渠道管理', icon: PlugZap },
@@ -13,8 +16,13 @@ const TABS = [
 export function ConnectionsLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const channels = useChannels();
-  const privateCount = conversationsFor(channels, 'private').length;
-  const groupCount = conversationsFor(channels, 'group').length;
+  const { data: privateConversations } = useQuery(chatConversationsQuery('PRIVATE'));
+  const { data: groupConversations } = useQuery(chatConversationsQuery('GROUP'));
+  const privateCount = privateConversations?.length ?? 0;
+  const groupCount = groupConversations?.length ?? 0;
+  const onlineCount = channels.filter((channel) => channel.status === 'online').length;
+
+  useChatEvents();
 
   const counts: Record<(typeof TABS)[number]['to'], number> = {
     '/connections': channels.length,
@@ -56,7 +64,7 @@ export function ConnectionsLayout() {
           </p>
           <div className="mt-1.5 flex items-center gap-2">
             <span className="relative flex size-1.5">
-              {channels.length > 0 ? (
+              {onlineCount > 0 ? (
                 <>
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-jade-400 opacity-60" />
                   <span className="relative inline-flex size-1.5 rounded-full bg-jade-400" />
@@ -66,10 +74,10 @@ export function ConnectionsLayout() {
               )}
             </span>
             <span className="text-[0.78rem] text-mist-200">
-              {channels.length > 0 ? `${channels.length} 个渠道在线` : '等待首个渠道接入'}
+              {onlineCount > 0 ? `${onlineCount} 个渠道在线` : '等待首个渠道接入'}
             </span>
           </div>
-          <p className="mt-1 text-[0.6rem] text-mist-600">QQ · NapCat 已就绪</p>
+          <p className="mt-1 text-[0.6rem] text-mist-600">QQ · NapCat 实时桥接</p>
         </div>
       </motion.header>
 

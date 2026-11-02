@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -6,16 +7,15 @@ import { toast } from 'sonner';
 import { GhostButton, PrimaryButton } from '@/components/button';
 import { ChannelPersonaPanel } from '@/components/channel-persona-panel';
 import { ConnectChannelDialog } from '@/components/connect-channel-dialog';
-import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
-import { cn } from '@/lib/cn';
 import {
-  addChannel,
-  channelConversationStats,
-  PLATFORMS,
-  removeChannel,
-  useChannels,
-  type Channel,
-} from '@/lib/connections';
+  ChannelAvatar,
+  ConnectionStatusPill,
+  PlatformChip,
+} from '@/components/connection-bits';
+import { api, ApiError } from '@/lib/api';
+import { clearChannelPersonaOverrides } from '@/lib/channel-persona';
+import { cn } from '@/lib/cn';
+import { PLATFORMS, useChannels, type Channel } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -29,7 +29,7 @@ function ChannelCard({
   onOpenPersona: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const stats = channelConversationStats(channel.platform);
+  const stats = channel.stats;
 
   return (
     <motion.article
@@ -55,15 +55,15 @@ function ChannelCard({
         <ChannelAvatar
           initials={channel.initials}
           accent={channel.accent}
+          src={channel.avatarUrl}
           size="lg"
-          online={channel.status === 'online'}
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate font-display text-[1.05rem] font-semibold tracking-tight text-mist-100">
               {channel.displayName}
             </h2>
-            <SyncPill label="在线" />
+            <ConnectionStatusPill status={channel.status} />
           </div>
           <p className="mt-1 font-mono text-[0.62rem] tracking-[0.06em] text-mist-500">
             {PLATFORMS[channel.platform].name} {channel.accountId}
@@ -71,8 +71,13 @@ function ChannelCard({
           <p className="mt-1 flex min-w-0 items-center gap-1.5 font-mono text-[0.52rem] tracking-[0.04em] text-mist-600">
             <span className="truncate">{channel.serverUrl}</span>
             <span aria-hidden="true">·</span>
-            <span className="shrink-0">密钥 {channel.tokenHint}</span>
+            <span className="shrink-0">密钥 {channel.tokenHint ?? '未设置'}</span>
           </p>
+          {channel.lastError && (
+            <p className="mt-1.5 line-clamp-2 text-[0.6rem] leading-4 text-signal-400/90">
+              {channel.lastError}
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <PlatformChip platform={channel.platform} connector />
             <span className="font-mono text-[0.52rem] uppercase tracking-[0.12em] text-mist-600">
@@ -84,7 +89,7 @@ function ChannelCard({
           <button
             type="button"
             onClick={onOpenPersona}
-            aria-label={`查看 ${channel.displayName} 的人格数据`}
+            aria-label={`查看 ${channel.persona?.name ?? channel.displayName} 的人格数据`}
             title="人格数据"
             className="rounded-lg p-2 text-mist-600 transition hover:bg-brass-400/10 hover:text-brass-300"
           >
@@ -101,8 +106,11 @@ function ChannelCard({
         </div>
       </div>
 
-      <p className="mt-4 border-l-2 border-brass-400/40 pl-3 text-[0.72rem] leading-6 text-mist-400">
-        「{channel.signature}」
+      <p className="mt-4 flex items-center gap-1.5 font-mono text-[0.56rem] tracking-[0.06em] text-mist-500">
+        <Fingerprint className="size-3 shrink-0 text-brass-400/70" strokeWidth={1.8} />
+        {channel.persona
+          ? `人格副本 ${channel.persona.name} · ${channel.persona.cardSerial}`
+          : '人格副本尚未导入'}
       </p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
@@ -300,19 +308,34 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
 
 export function ConnectionsPage() {
   const channels = useChannels();
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [personaChannel, setPersonaChannel] = useState<Channel | null>(null);
+  const [personaChannelId, setPersonaChannelId] = useState<string | null>(null);
+  const personaChannel = channels.find((channel) => channel.id === personaChannelId) ?? null;
+
+  const deleteMutation = useMutation({
+    mutationFn: (channel: Channel) => api.deleteChatChannel(channel.id),
+    onSuccess: (_data, channel) => {
+      clearChannelPersonaOverrides(channel.id);
+      void queryClient.invalidateQueries({ queryKey: ['chat'] });
+      toast.success(`已移除 ${channel.displayName} 的 ${PLATFORMS[channel.platform].name} 渠道`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : '移除渠道失败，请稍后重试');
+    },
+  });
 
   const handleConnected = (channel: Channel) => {
-    addChannel(channel);
+    void queryClient.invalidateQueries({ queryKey: ['chat'] });
     toast.success(`已接入 ${PLATFORMS[channel.platform].name} · ${channel.displayName}`, {
-      description: '账号资料与最近会话已同步到互联中心。',
+      description: channel.persona
+        ? `「${channel.persona.name}」的角色卡已复制到渠道命名空间，源卡保持不变。`
+        : '账号资料与最近会话已同步到互联中心。',
     });
   };
 
   const handleRemove = (channel: Channel) => {
-    removeChannel(channel.id);
-    toast.success(`已移除 ${channel.displayName} 的 ${PLATFORMS[channel.platform].name} 渠道`);
+    deleteMutation.mutate(channel);
   };
 
   return (
@@ -346,7 +369,7 @@ export function ConnectionsPage() {
                   key={channel.id}
                   channel={channel}
                   onRemove={() => handleRemove(channel)}
-                  onOpenPersona={() => setPersonaChannel(channel)}
+                  onOpenPersona={() => setPersonaChannelId(channel.id)}
                 />
               ))}
             </AnimatePresence>
@@ -361,7 +384,7 @@ export function ConnectionsPage() {
         onConnected={handleConnected}
       />
 
-      <ChannelPersonaPanel channel={personaChannel} onClose={() => setPersonaChannel(null)} />
+      <ChannelPersonaPanel channel={personaChannel} onClose={() => setPersonaChannelId(null)} />
     </>
   );
 }

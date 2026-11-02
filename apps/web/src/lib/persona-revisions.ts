@@ -57,7 +57,7 @@ function formatTime(index: number, offsetMinutes: number): string {
 }
 
 export function revisionHistoryForChannel(channel: Channel): readonly PersonaRevision[] {
-  const seedSource = channel.accountId || channel.id;
+  const seedSource = channel.id;
   const seed = Array.from(seedSource).reduce(
     (total, character) => total + character.charCodeAt(0),
     0,

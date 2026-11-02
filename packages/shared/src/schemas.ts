@@ -68,6 +68,67 @@ export const modelProviderSchema = z.object({
   apiKey: z.string().trim().min(1, '请填写 API Key').max(512, 'API Key 过长'),
 });
 
+const webSocketUrlSchema = z
+  .string()
+  .trim()
+  .min(1, '请填写 WebSocket 地址')
+  .max(300, 'WebSocket 地址过长')
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'ws:' || url.protocol === 'wss:';
+    } catch {
+      return false;
+    }
+  }, '请输入以 ws:// 或 wss:// 开头的有效地址');
+
+const chatPersonaValueSchema = z.union([
+  z.string().max(4000, '人格字段过长'),
+  z.number(),
+  z.boolean(),
+  z.array(z.string().max(400)).max(100, '人格列表过长'),
+]);
+
+export const chatChannelPersonaSchema = z.object({
+  cardId: z.string().trim().min(1, '请选择角色卡').max(64),
+  cardSerial: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1, '角色卡缺少名称').max(64),
+  identity: z.string().trim().max(160).default(''),
+  quote: z.string().trim().max(400).default(''),
+  accent: z.enum(['brass', 'jade']).default('brass'),
+  values: z.record(z.string().min(1).max(80), chatPersonaValueSchema),
+});
+
+export const connectChatChannelSchema = z.object({
+  serverUrl: webSocketUrlSchema,
+  accessToken: z.string().trim().max(512, '授权密钥过长').optional().default(''),
+  persona: chatChannelPersonaSchema,
+});
+
+const chatImageDataUrlSchema = z
+  .string()
+  .max(12_000_000, '单张图片过大')
+  .regex(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '图片格式不受支持');
+
+export const sendChatMessageSchema = z
+  .object({
+    text: z.string().max(4000, '消息最多 4000 个字符').default(''),
+    images: z.array(chatImageDataUrlSchema).max(4, '一次最多发送 4 张图片').optional().default([]),
+  })
+  .refine((value) => value.text.trim().length > 0 || value.images.length > 0, {
+    message: '请输入消息内容',
+    path: ['text'],
+  });
+
+export const chatConversationQuerySchema = z.object({
+  kind: z.enum(['PRIVATE', 'GROUP']),
+});
+
+export const chatMessageQuerySchema = z.object({
+  cursor: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int('数量必须是整数').min(1).max(200).default(50),
+});
+
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
@@ -75,3 +136,6 @@ export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
+export type ChatChannelPersonaInput = z.infer<typeof chatChannelPersonaSchema>;
+export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
+export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;

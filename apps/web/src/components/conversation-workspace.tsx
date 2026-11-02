@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
@@ -6,7 +7,10 @@ import {
   ImagePlus,
   Layers,
   ListFilter,
+  LoaderCircle,
   MessagesSquare,
+  Pause,
+  Play,
   Plus,
   Search,
   Send,
@@ -22,31 +26,184 @@ import { InputShell } from '@/components/field';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
 import { GroupPersonaPanel } from '@/components/group-persona-panel';
 import { PrivatePersonaPanel } from '@/components/private-persona-panel';
+import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
   PLATFORMS,
   conversationSources,
-  conversationsFor,
-  useChannels,
+  toChatMessage,
+  toSourcedConversation,
+  useChannelsState,
   type ChatMessage,
-  type Conversation,
   type ConversationKind,
   type ConversationSourceSummary,
+  type SourcedConversation,
 } from '@/lib/connections';
+import { chatConversationsQuery, chatMessagesQuery } from '@/lib/queries';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const MAX_IMAGE_COUNT = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const WAVE_BARS = [
+  0.34, 0.58, 0.82, 0.46, 0.96, 0.68, 0.42, 0.88, 0.52, 0.74, 0.38, 0.62, 0.9, 0.48, 0.78, 0.56,
+  0.32, 0.7,
+];
+
+function initialsOf(name: string): string {
+  return Array.from(name.trim())[0] ?? '我';
+}
+
+function formatClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function VoiceBar({
+  voice,
+  self,
+}: {
+  voice: ChatMessage['voices'][number];
+  self: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(voice.duration ?? 0);
+  const progress = duration > 0 ? Math.min(position / duration, 1) : 0;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setPosition(audio.currentTime);
+    const onMeta = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration);
+    };
+    const onEnd = () => {
+      setPlaying(false);
+      setPosition(0);
+      audio.currentTime = 0;
+    };
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('loadedmetadata', onMeta);
+    audio.addEventListener('ended', onEnd);
+    return () => {
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('loadedmetadata', onMeta);
+      audio.removeEventListener('ended', onEnd);
+    };
+  }, []);
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio || failed) return;
+    if (audio.paused) {
+      void audio
+        .play()
+        .then(() => setPlaying(true))
+        .catch(() => setFailed(true));
+    } else {
+      audio.pause();
+      setPlaying(false);
+    }
+  };
+
+  const seekTo = (ratio: number) => {
+    const audio = audioRef.current;
+    if (!audio || !(audio.duration > 0)) return;
+    audio.currentTime = ratio * audio.duration;
+    setPosition(audio.currentTime);
+  };
+
+  return (
+    <div
+      className={cn(
+        'flex w-[13.5rem] items-center gap-2.5 rounded-2xl px-3 py-2',
+        self
+          ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
+          : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
+      )}
+    >
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={failed}
+        aria-label={failed ? '语音加载失败' : playing ? '暂停语音' : '播放语音'}
+        className={cn(
+          'grid size-8 shrink-0 place-items-center rounded-full border transition disabled:opacity-40',
+          self
+            ? 'border-brass-400/30 bg-brass-400/15 text-brass-200 hover:bg-brass-400/25'
+            : 'border-mist-100/10 bg-mist-100/5 text-mist-200 hover:bg-mist-100/10',
+        )}
+      >
+        {playing ? (
+          <Pause className="size-3.5" fill="currentColor" />
+        ) : (
+          <Play className="ml-0.5 size-3.5" fill="currentColor" />
+        )}
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (rect.width > 0) seekTo((event.clientX - rect.left) / rect.width);
+          }}
+          aria-label="跳转播放位置"
+          className="flex h-6 w-full items-end gap-[2px]"
+        >
+          {WAVE_BARS.map((height, index) => {
+            const active = (index + 0.5) / WAVE_BARS.length <= progress;
+            return (
+              <span
+                key={index}
+                style={{ height: `${Math.round(height * 100)}%` }}
+                className={cn(
+                  'flex-1 rounded-full transition-colors duration-150',
+                  active
+                    ? self
+                      ? 'bg-brass-300'
+                      : 'bg-jade-300'
+                    : 'bg-mist-100/20',
+                )}
+              />
+            );
+          })}
+        </button>
+        <p className="mt-1 flex items-center justify-between font-mono text-[0.48rem] text-mist-500">
+          <span>{formatClock(playing ? position : duration)}</span>
+          <span className="uppercase tracking-[0.14em]">
+            {failed ? '加载失败' : '语音'}
+          </span>
+        </p>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={voice.url}
+        preload="metadata"
+        className="hidden"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
 
 function MessageBubble({
   message,
   kind,
+  selfAvatar,
   selfInitial,
 }: {
   message: ChatMessage;
   kind: ConversationKind;
+  selfAvatar: string | null;
   selfInitial: string;
 }) {
+  const avatarAccent = message.self ? 'brass' : kind === 'group' ? 'jade' : 'brass';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -55,53 +212,78 @@ function MessageBubble({
       className={cn('flex items-end gap-2', message.self ? 'justify-end' : 'justify-start')}
     >
       {!message.self && (
-        <span className="grid size-7 shrink-0 place-items-center rounded-full border border-jade-400/20 bg-jade-400/10 font-display text-[0.58rem] text-jade-300">
-          {message.author.slice(0, 1)}
-        </span>
+        <ChannelAvatar
+          src={message.avatarUrl}
+          initials={initialsOf(message.author)}
+          accent={avatarAccent}
+          size="sm"
+          title={`QQ ${message.authorId}`}
+          className="size-7 rounded-full text-[0.58rem]"
+        />
       )}
 
       <div className={cn('max-w-[78%]', message.self && 'flex flex-col items-end')}>
         {!message.self && kind === 'group' && (
-          <p className="mb-1 pl-1 text-[0.56rem] text-mist-600">{message.author}</p>
+          <p className="mb-1 flex flex-wrap items-center gap-1.5 pl-1 text-[0.56rem] text-mist-600">
+            <span className="text-mist-400">{message.authorCard || message.author}</span>
+            {message.authorCard && <span>{message.author}</span>}
+            <span className="font-mono text-[0.48rem] text-mist-600">QQ {message.authorId}</span>
+          </p>
         )}
-        {message.text && (
+        {message.parts.length > 0 && (
           <div
             className={cn(
-              'rounded-2xl px-3.5 py-2 text-left text-[0.76rem] leading-6',
-              message.self
-                ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12] text-mist-100'
-                : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35 text-mist-200',
+              'flex flex-col gap-1.5',
+              message.self ? 'items-end' : 'items-start',
             )}
           >
-            {message.text}
+            {message.parts.map((part, index) => {
+              const key = `${message.id}-part-${index}`;
+              if (part.type === 'text') {
+                return (
+                  <div
+                    key={key}
+                    className={cn(
+                      'rounded-2xl px-3.5 py-2 text-left text-[0.76rem] leading-6',
+                      message.self
+                        ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12] text-mist-100'
+                        : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35 text-mist-200',
+                    )}
+                  >
+                    {part.text}
+                  </div>
+                );
+              }
+              if (part.type === 'voice') {
+                return <VoiceBar key={key} voice={part.voice} self={message.self} />;
+              }
+              return (
+                <a key={key} href={part.image.url} target="_blank" rel="noreferrer" className="block">
+                  <img
+                    src={part.image.url}
+                    alt={`图片 ${part.image.position + 1}`}
+                    loading="lazy"
+                    className="max-h-64 max-w-[16rem] rounded-xl border border-mist-100/10 object-cover"
+                  />
+                </a>
+              );
+            })}
           </div>
         )}
-        {message.images && message.images.length > 0 && (
-          <div
-            className={cn(
-              'flex flex-wrap gap-1.5',
-              message.self ? 'justify-end' : 'justify-start',
-              message.text && 'mt-1.5',
-            )}
-          >
-            {message.images.map((source, index) => (
-              <img
-                key={`${message.id}-image-${index}`}
-                src={source}
-                alt={`图片 ${index + 1}`}
-                loading="lazy"
-                className="max-h-64 max-w-[16rem] rounded-xl border border-mist-100/10 object-cover"
-              />
-            ))}
-          </div>
-        )}
-        <p className="mt-1 px-1 font-mono text-[0.48rem] text-mist-600">{message.time}</p>
+        <p className="mt-1 px-1 font-mono text-[0.48rem] text-mist-600" title={`QQ ${message.authorId}`}>
+          {message.time}
+        </p>
       </div>
 
       {message.self && (
-        <span className="grid size-7 shrink-0 place-items-center rounded-full border border-brass-400/20 bg-brass-400/10 font-display text-[0.58rem] text-brass-300">
-          {selfInitial}
-        </span>
+        <ChannelAvatar
+          src={message.avatarUrl ?? selfAvatar}
+          initials={selfInitial}
+          accent="brass"
+          size="sm"
+          title={`QQ ${message.authorId}`}
+          className="size-7 rounded-full text-[0.58rem]"
+        />
       )}
     </motion.div>
   );
@@ -113,7 +295,7 @@ function ConversationRow({
   kind,
   onSelect,
 }: {
-  conversation: Conversation;
+  conversation: SourcedConversation;
   active: boolean;
   kind: ConversationKind;
   onSelect: () => void;
@@ -128,7 +310,13 @@ function ConversationRow({
         active ? 'bg-brass-400/[0.09]' : 'hover:bg-mist-100/[0.04]',
       )}
     >
-      <ChannelAvatar initials={conversation.initials} accent={conversation.accent} size="sm" />
+      <ChannelAvatar
+        src={conversation.avatarUrl}
+        initials={conversation.initials}
+        accent={conversation.accent}
+        size="sm"
+        title={kind === 'group' ? `群号 ${conversation.externalId}` : `QQ ${conversation.externalId}`}
+      />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
           <span
@@ -157,17 +345,17 @@ function ConversationRow({
             {PLATFORMS[conversation.platform].name}
           </span>
           {kind === 'group' && conversation.members !== undefined && (
-            <span className="font-mono text-[0.5rem] text-mist-600">{conversation.members} 人</span>
-          )}
-          {conversation.unread > 0 && (
-            <span className="ml-auto grid h-4 min-w-4 place-items-center rounded-full bg-brass-400/20 px-1 font-mono text-[0.48rem] text-brass-300">
-              {conversation.unread}
+            <span className="font-mono text-[0.5rem] text-mist-600">
+              {conversation.members} 人
             </span>
           )}
+          <span className="ml-auto font-mono text-[0.48rem] text-mist-600">
+            {kind === 'group' ? `群 ${conversation.externalId}` : `QQ ${conversation.externalId}`}
+          </span>
         </span>
 
         <span className="mt-1 block truncate text-[0.64rem] leading-5 text-mist-600">
-          {conversation.lastMessage}
+          {conversation.lastMessage || '暂无消息'}
         </span>
       </span>
     </button>
@@ -275,7 +463,7 @@ function SourceFilter({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[0.72rem] text-mist-200">全部来源</span>
                 <span className="mt-0.5 block truncate font-mono text-[0.5rem] tracking-[0.08em] text-mist-600">
-                  {sources.length} 个账号汇总
+                  {sources.length} 个渠道汇总
                 </span>
               </span>
               <span className="shrink-0 rounded-full border border-mist-100/[0.06] bg-ink-950/40 px-1.5 py-0.5 font-mono text-[0.5rem] text-mist-500">
@@ -300,6 +488,7 @@ function SourceFilter({
                   )}
                 >
                   <ChannelAvatar
+                    src={source.avatarUrl}
                     initials={source.initials}
                     accent={source.accent}
                     size="sm"
@@ -351,8 +540,8 @@ function ChannelRequired({ kind }: { kind: ConversationKind }) {
           {kind === 'private' ? '还没有可查看的私聊' : '还没有可查看的群聊'}
         </h2>
         <p className="mt-3 text-[0.82rem] leading-7 text-mist-500">
-          接入消息渠道后，来自各平台的{kind === 'private' ? '私聊' : '群聊'}
-          会自动汇入这里，并按平台归档对话记录。
+          接入消息渠道后，来自各渠道的{kind === 'private' ? '私聊' : '群聊'}
+          会自动汇入这里，并按渠道命名空间归档对话记录。
         </p>
         <Link
           to="/connections"
@@ -366,19 +555,35 @@ function ChannelRequired({ kind }: { kind: ConversationKind }) {
   );
 }
 
+function LoadingPanel() {
+  return (
+    <div className="glass-panel grid min-h-[18rem] place-items-center rounded-[1.6rem] p-8">
+      <div className="flex items-center gap-2 text-[0.72rem] text-mist-500">
+        <LoaderCircle className="size-4 animate-spin text-brass-300" />
+        正在读取渠道数据…
+      </div>
+    </div>
+  );
+}
+
 export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
-  const channels = useChannels();
+  const { channels, isLoading: channelsLoading } = useChannelsState();
+  const queryClient = useQueryClient();
+  const apiKind = kind === 'group' ? 'GROUP' : 'PRIVATE';
+  const conversationsQuery = useQuery(chatConversationsQuery(apiKind));
   const [query, setQuery] = useState('');
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
-  const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
   const [personaOpen, setPersonaOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const conversations = useMemo(() => conversationsFor(channels, kind), [channels, kind]);
-  const sources = useMemo(() => conversationSources(channels, kind), [channels, kind]);
+  const conversations = useMemo(
+    () => (conversationsQuery.data ?? []).map(toSourcedConversation),
+    [conversationsQuery.data],
+  );
+  const sources = useMemo(() => conversationSources(conversations), [conversations]);
 
   useEffect(() => {
     setSourceId((current) =>
@@ -401,12 +606,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     }
 
     return visibleConversations.filter((conversation) =>
-      [
-        conversation.name,
-        conversation.handle,
-        conversation.lastMessage,
-        conversation.messages.at(-1)?.text ?? '',
-      ]
+      [conversation.name, conversation.handle, conversation.lastMessage, conversation.externalId]
         .join(' ')
         .toLowerCase()
         .includes(normalized),
@@ -415,24 +615,48 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
 
   const activeConversation =
     visibleConversations.find((conversation) => conversation.id === selectedId) ?? null;
+  const activeId = activeConversation?.id ?? null;
 
-  const activeMessages = activeConversation
-    ? [...activeConversation.messages, ...(localMessages[activeConversation.id] ?? [])]
-    : [];
+  const messagesQuery = useQuery({
+    ...chatMessagesQuery(activeId ?? ''),
+    enabled: Boolean(activeId),
+  });
+  const messages = useMemo(
+    () => (messagesQuery.data?.messages ?? []).map(toChatMessage),
+    [messagesQuery.data],
+  );
 
-  const selfChannel =
-    channels.find((channel) => channel.id === activeConversation?.source.id) ?? channels[0];
-  const activeChannel =
-    channels.find((channel) => channel.id === activeConversation?.source.id) ?? null;
-  const selfName = selfChannel?.displayName ?? '我';
-  const selfInitial = selfChannel?.initials.slice(0, 1) ?? '我';
+  const activeChannel = channels.find((channel) => channel.id === activeConversation?.source.id);
+  const selfName = activeConversation?.source.displayName ?? activeChannel?.displayName ?? '我';
+  const selfInitial = initialsOf(selfName);
+  const selfAvatar = activeConversation?.source.avatarUrl ?? activeChannel?.avatarUrl ?? null;
+  const canSend = Boolean(activeConversation) && activeChannel?.status === 'online';
+
+  const sendMutation = useMutation({
+    mutationFn: (input: { conversationId: string; text: string; images: string[] }) =>
+      api.sendChatMessage(input.conversationId, { text: input.text, images: input.images }),
+    onSuccess: (_message, input) => {
+      setDraft('');
+      setAttachments([]);
+      void queryClient.invalidateQueries({
+        queryKey: ['chat', 'messages', input.conversationId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'channels'] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : '消息发送失败，请稍后重试');
+    },
+  });
+
+  const lastMessageId = messages.at(-1)?.id ?? '';
 
   useEffect(() => {
     const element = scrollRef.current;
     if (element) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [selectedId, activeMessages.length]);
+  }, [selectedId, lastMessageId]);
 
   useEffect(() => {
     setAttachments([]);
@@ -485,26 +709,23 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       return;
     }
 
-    const now = new Date();
-    const message: ChatMessage = {
-      id: `local-${now.getTime()}`,
-      self: true,
-      author: selfName,
+    sendMutation.mutate({
+      conversationId: activeConversation.id,
       text,
-      time: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      images: attachments.length > 0 ? attachments : undefined,
-    };
-
-    setLocalMessages((previous) => ({
-      ...previous,
-      [activeConversation.id]: [...(previous[activeConversation.id] ?? []), message],
-    }));
-    setDraft('');
-    setAttachments([]);
+      images: attachments,
+    });
   };
+
+  if (channelsLoading) {
+    return <LoadingPanel />;
+  }
 
   if (channels.length === 0) {
     return <ChannelRequired kind={kind} />;
+  }
+
+  if (conversationsQuery.isPending) {
+    return <LoadingPanel />;
   }
 
   if (conversations.length === 0) {
@@ -517,7 +738,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
           {kind === 'private' ? '暂时没有同步到私聊' : '暂时没有同步到群聊'}
         </h2>
         <p className="mx-auto mt-2 max-w-md text-[0.76rem] leading-6 text-mist-500">
-          已接入的渠道还没有返回该类型的会话。新的消息到达后，会按平台自动出现在这里。
+          已接入的渠道还没有返回该类型的会话。新的消息到达后，会按渠道命名空间自动出现在这里。
         </p>
         <Link
           to="/connections"
@@ -633,10 +854,15 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
               </button>
 
               <ChannelAvatar
+                src={activeConversation.avatarUrl}
                 initials={activeConversation.initials}
                 accent={activeConversation.accent}
                 size="sm"
-                online
+                title={
+                  kind === 'group'
+                    ? `群号 ${activeConversation.externalId}`
+                    : `QQ ${activeConversation.externalId}`
+                }
               />
 
               <div className="min-w-0 flex-1">
@@ -696,23 +922,41 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
             <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
               <div className="mb-5 text-center">
                 <span className="rounded-full border border-mist-100/[0.07] bg-ink-950/30 px-3 py-1 font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
-                  今天
+                  最近消息
                 </span>
               </div>
 
-              <div className="space-y-4">
-                {activeMessages.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    kind={kind}
-                    selfInitial={selfInitial}
-                  />
-                ))}
-              </div>
+              {messagesQuery.isPending ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-[0.7rem] text-mist-500">
+                  <LoaderCircle className="size-4 animate-spin text-brass-300" />
+                  正在读取消息记录…
+                </div>
+              ) : messagesQuery.isError ? (
+                <p className="py-10 text-center text-[0.7rem] text-signal-400/90">
+                  消息记录读取失败，请稍后重试。
+                </p>
+              ) : messages.length === 0 ? (
+                <p className="py-10 text-center text-[0.7rem] text-mist-600">
+                  这个会话还没有消息记录。
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      kind={kind}
+                      selfAvatar={selfAvatar}
+                      selfInitial={selfInitial}
+                    />
+                  ))}
+                </div>
+              )}
 
               <p className="mt-6 text-center font-mono text-[0.48rem] uppercase tracking-[0.18em] text-mist-600">
-                已同步全部历史消息 · 演示数据
+                {messagesQuery.data?.hasMore
+                  ? '已加载最近 100 条 · 更早消息已归档'
+                  : '已同步该会话的全部消息'}
               </p>
             </div>
 
@@ -749,24 +993,34 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     onPaste={handlePaste}
-                    placeholder={`以 ${selfName} 的身份回复…`}
+                    placeholder={
+                      canSend ? `以 ${selfName} 的身份回复…` : '当前渠道离线，恢复连接后可发送'
+                    }
                     aria-label="消息输入"
                     autoComplete="off"
                     className="wizard-input h-10 text-[0.78rem]"
                   />
                   <button
                     type="submit"
-                    disabled={!draft.trim() && attachments.length === 0}
+                    disabled={
+                      sendMutation.isPending ||
+                      !canSend ||
+                      (!draft.trim() && attachments.length === 0)
+                    }
                     aria-label="发送消息"
                     className="grid size-10 shrink-0 place-items-center rounded-xl border border-brass-400/30 bg-brass-400/10 text-brass-300 transition hover:bg-brass-400/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <Send className="size-4" strokeWidth={1.8} />
+                    {sendMutation.isPending ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Send className="size-4" strokeWidth={1.8} />
+                    )}
                   </button>
                 </div>
               </form>
               <p className="mt-2 flex items-center justify-center gap-1 font-mono text-[0.48rem] uppercase tracking-[0.14em] text-mist-600">
                 <ImagePlus className="size-3" strokeWidth={1.8} />
-                支持粘贴图片 · 仅前端演示，消息不会真正发送
+                支持粘贴图片 · 消息将通过 NapCat 发送并归档
               </p>
             </div>
           </>
@@ -788,13 +1042,13 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       {kind === 'group' ? (
         <GroupPersonaPanel
           conversation={personaOpen ? activeConversation : null}
-          channel={activeChannel}
+          channel={activeChannel ?? null}
           onClose={() => setPersonaOpen(false)}
         />
       ) : (
         <PrivatePersonaPanel
           conversation={personaOpen ? activeConversation : null}
-          channel={activeChannel}
+          channel={activeChannel ?? null}
           onClose={() => setPersonaOpen(false)}
         />
       )}

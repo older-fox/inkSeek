@@ -3,6 +3,13 @@ import type {
   BootstrapInput,
   BootstrapResult,
   BootstrapStatus,
+  ChatChannelConnectInput,
+  ChatChannelSummary,
+  ChatConversationKind,
+  ChatConversationSummary,
+  ChatMessagePage,
+  ChatMessageSummary,
+  ChatSendMessageInput,
   LoginInput,
   ModelProviderInput,
   ModelProviderSaveResult,
@@ -96,4 +103,31 @@ export const api = {
     }),
   deleteModelProvider: (id: string) =>
     request<void>(`/settings/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  chatChannels: () => request<ChatChannelSummary[]>('/chat/channels'),
+  connectChatChannel: (input: ChatChannelConnectInput) =>
+    request<ChatChannelSummary>('/chat/channels', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteChatChannel: (id: string) =>
+    request<void>(`/chat/channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  chatConversations: (kind: ChatConversationKind) =>
+    request<ChatConversationSummary[]>(`/chat/conversations?kind=${kind}`),
+  chatMessages: (conversationId: string, cursor?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+    return request<ChatMessagePage>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`,
+    );
+  },
+  sendChatMessage: (conversationId: string, input: ChatSendMessageInput) =>
+    request<ChatMessageSummary>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
 };

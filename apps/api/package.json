@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
+    "@fastify/static": "10.1.2",
     "@inkseek/shared": "workspace:*",
     "@nestjs/common": "12.3.2",
     "@nestjs/config": "12.0.1",
@@ -29,13 +30,14 @@
     "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "zod": "4.6.7",
-    "@fastify/static": "10.1.2"
+    "ws": "^8.22.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "12.0.11",
     "@types/node": "24.19.2",
     "@types/pg": "8.23.1",
+    "@types/ws": "^8.18.2",
     "prisma": "7.10.1",
     "typescript": "6.0.3"
   }

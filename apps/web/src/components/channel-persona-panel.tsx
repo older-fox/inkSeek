@@ -793,10 +793,9 @@ export function ChannelPersonaPanel({
 
             <header className="relative flex items-start gap-3.5 px-5 pb-4 pt-5 sm:items-center sm:px-7">
               <ChannelAvatar
-                initials={channel.initials}
+                initials={Array.from(persona.name)[0] ?? channel.initials}
                 accent={persona.accent}
                 size="lg"
-                online={channel.status === 'online'}
                 className="hidden sm:grid"
               />
 
@@ -808,6 +807,7 @@ export function ChannelPersonaPanel({
                   <span className="inline-flex items-center gap-1 rounded-full border border-jade-400/20 bg-jade-400/[0.07] px-2 py-0.5 font-mono text-[0.56rem] tracking-[0.12em] text-jade-300">
                     <span className="size-1 rounded-full bg-jade-400" aria-hidden="true" />
                     渠道独立快照
+                    {channel.persona ? ` · ${channel.persona.cardSerial}` : null}
                   </span>
                 </div>
 
@@ -828,7 +828,7 @@ export function ChannelPersonaPanel({
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <PlatformChip platform={channel.platform} connector />
                   <span className="font-mono text-[0.6rem] tracking-[0.04em] text-mist-500">
-                    {channel.displayName} · {channel.accountId}
+                    接入账号 {channel.displayName} · {channel.accountId}
                   </span>
                   <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-600">
                     {PERSONA_ATTRIBUTE_COUNT} 项属性 · {PERSONA_GROUPS.length} 组

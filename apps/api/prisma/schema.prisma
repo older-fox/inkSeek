@@ -64,3 +64,189 @@ model ModelProvider {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 }
+
+enum ChatChannelStatus {
+  CONNECTING
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+enum ChatConversationKind {
+  PRIVATE
+  GROUP
+}
+
+enum ChatMessageKind {
+  TEXT
+  IMAGE
+  VOICE
+  FACE
+  MIXED
+  SYSTEM
+}
+
+/// Namespace root. Every contact, conversation, message and future persona
+/// snapshot belongs to exactly one channel; group/private scopes never create
+/// their own namespace.
+model ChatChannel {
+  id              String            @id @default(cuid())
+  platform        String            @default("qq")
+  connector       String            @default("NapCat")
+  displayName     String
+  accountId       String
+  avatarUrl       String?
+  serverUrl       String
+  accessToken     String
+  status          ChatChannelStatus @default(CONNECTING)
+  lastError       String?
+  lastConnectedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  contacts      ChatContact[]
+  conversations ChatConversation[]
+  messages      ChatMessageRecord[]
+  persona       ChatChannelPersona?
+
+  @@unique([platform, accountId])
+}
+
+/// Frozen copy of a Persona Center card. The source card stays untouched; the
+/// channel owns this snapshot for the lifetime of the namespace.
+model ChatChannelPersona {
+  id         String      @id @default(cuid())
+  channelId  String      @unique
+  channel    ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  cardId     String
+  cardSerial String
+  name       String
+  identity   String      @default("")
+  quote      String      @default("")
+  accent     String      @default("brass")
+  values     Json
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+/// A channel-scoped participant. The same QQ number under another channel is a
+/// separate contact and separate memory namespace.
+model ChatContact {
+  id         String      @id @default(cuid())
+  channelId  String
+  channel    ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  externalId String
+  nickname   String
+  avatarUrl  String?
+  isSelf     Boolean     @default(false)
+  lastSeenAt DateTime    @default(now())
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  messages    ChatMessageRecord[]
+  memberships ChatGroupMember[]
+
+  @@unique([channelId, externalId])
+  @@index([channelId])
+}
+
+model ChatConversation {
+  id                 String               @id @default(cuid())
+  channelId          String
+  channel            ChatChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  kind               ChatConversationKind
+  externalId         String
+  name               String
+  avatarUrl          String?
+  memberCount        Int?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  lastMessageSender  String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  messages ChatMessageRecord[]
+  members  ChatGroupMember[]
+
+  @@unique([channelId, kind, externalId])
+  @@index([channelId, kind, lastMessageAt])
+}
+
+model ChatGroupMember {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        ChatContact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  card           String?
+  role           String?
+  joinedAt       DateTime?
+  lastSeenAt     DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([conversationId, contactId])
+  @@index([conversationId])
+}
+
+model ChatMessageRecord {
+  id             String           @id @default(cuid())
+  channelId      String
+  channel        ChatChannel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  externalId     String?
+  senderId       String
+  sender         ChatContact      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderName     String
+  senderCard     String?
+  isSelf         Boolean          @default(false)
+  kind           ChatMessageKind  @default(TEXT)
+  text           String           @default("")
+  segments       Json
+  sentAt         DateTime
+  receivedAt     DateTime         @default(now())
+
+  images ChatImageAsset[]
+  voices ChatVoiceAsset[]
+
+  @@unique([conversationId, externalId])
+  @@index([conversationId, sentAt])
+  @@index([channelId, sentAt])
+}
+
+model ChatImageAsset {
+  id        String            @id @default(cuid())
+  messageId String
+  message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  url       String
+  fileName  String?
+  mimeType  String?
+  byteSize  Int?
+  width     Int?
+  height    Int?
+  remoteUrl String?
+  /// Zero-based index of the source message segment, preserves render order.
+  position  Int               @default(0)
+  createdAt DateTime          @default(now())
+
+  @@index([messageId, position])
+}
+
+model ChatVoiceAsset {
+  id        String            @id @default(cuid())
+  messageId String
+  message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  url       String
+  fileName  String?
+  mimeType  String?
+  byteSize  Int?
+  /// Duration in seconds when provided by the connector.
+  duration  Int?
+  remoteUrl String?
+  /// Zero-based index of the source message segment, preserves render order.
+  position  Int               @default(0)
+  createdAt DateTime          @default(now())
+
+  @@index([messageId, position])
+}

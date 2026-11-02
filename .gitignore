@@ -17,6 +17,9 @@ coverage/
 apps/api/src/generated/
 apps/api/prisma/*.db
 
+# runtime chat media
+data/
+
 # tooling / editors
 .idea/
 .vscode/*
