@@ -220,7 +220,7 @@ export const STEPS: readonly StepMeta[] = [
     id: 1,
     phase: 0,
     title: '基础档案',
-    caption: '先记下她是谁。带 * 的信息会直接进入卡面。',
+    caption: '先记下 TA 是谁。带 * 的信息会直接进入卡面。',
   },
   {
     id: 2,
@@ -232,7 +232,7 @@ export const STEPS: readonly StepMeta[] = [
     id: 3,
     phase: 0,
     title: '发型与服装',
-    caption: '发型与服装决定她第一眼的样子。',
+    caption: '发型与服装决定 TA 第一眼的样子。',
   },
   {
     id: 4,
@@ -241,63 +241,63 @@ export const STEPS: readonly StepMeta[] = [
     caption: '音高、口音、笑声与语速，这是 TTS 的第一印象。',
     milestone: {
       title: '基本信息完成',
-      description: '名字、样子与声音都已归档。接下来，为她补上世界与来处。',
+      description: '名字、样子与声音都已归档。接下来，为 TA 补上世界与来处。',
     },
   },
   {
     id: 5,
     phase: 1,
     title: '世界观',
-    caption: '她生活在什么时代、什么地方，科技走到了哪一步。',
+    caption: 'TA 生活在什么时代、什么地方，科技走到了哪一步。',
   },
   {
     id: 6,
     phase: 1,
     title: '背景故事',
-    caption: '她的来处，决定她如何回应现在。',
+    caption: 'TA 的来处，决定 TA 如何回应现在。',
   },
   {
     id: 7,
     phase: 1,
     title: '知识边界',
-    caption: '明确她该知道什么，也明确她不该知道什么。',
+    caption: '明确 TA 该知道什么，也明确 TA 不该知道什么。',
     milestone: {
       title: '背景信息完成',
-      description: '世界观、经历与知识边界已归档。接下来进入她的价值内核。',
+      description: '世界观、经历与知识边界已归档。接下来进入 TA 的价值内核。',
     },
   },
   {
     id: 8,
     phase: 2,
     title: '核心价值观',
-    caption: '模糊情境下，她会默认站在哪一边。',
+    caption: '模糊情境下，TA 会默认站在哪一边。',
   },
   {
     id: 9,
     phase: 2,
     title: '禁忌',
-    caption: '被触碰时，她会警觉、回避、冷淡或反驳。',
+    caption: '被触碰时，TA 会警觉、回避、冷淡或反驳。',
   },
   {
     id: 10,
     phase: 2,
     title: '恐惧来源',
-    caption: '越靠近，她越会退到哪里。',
+    caption: '越靠近，TA 越会退到哪里。',
   },
   {
     id: 11,
     phase: 2,
     title: '性格弱点',
-    caption: '什么是她无法拒绝的温柔，也是道歉能生效的依据。',
+    caption: '什么是 TA 无法拒绝的温柔，也是道歉能生效的依据。',
   },
   {
     id: 12,
     phase: 2,
     title: '绝对红线',
-    caption: '她不会让步的事。输出与之冲突时，应当被打回或改写。',
+    caption: 'TA 不会让步的事。输出与之冲突时，应当被打回或改写。',
     milestone: {
       title: '核心价值观完成',
-      description: '底线、恐惧与软肋已经清晰。现在，给她一个方向。',
+      description: '底线、恐惧与软肋已经清晰。现在，给 TA 一个方向。',
     },
   },
   {
@@ -325,30 +325,30 @@ export const STEPS: readonly StepMeta[] = [
     caption: '让烦躁、疲惫与欲言又止有具体来源。',
     milestone: {
       title: '行动方向和基本信息完成',
-      description: '她知道自己要去哪，也知道此刻在做什么。接下来定义她的说话方式。',
+      description: 'TA 知道自己要去哪，也知道此刻在做什么。接下来定义 TA 的说话方式。',
     },
   },
   {
     id: 17,
     phase: 4,
     title: '表达倾向',
-    caption: '她如何冲突、如何幽默、如何记忆，以及如何断句。',
+    caption: 'TA 如何冲突、如何幽默、如何记忆，以及如何断句。',
   },
   {
     id: 18,
     phase: 4,
     title: '口癖与开场',
-    caption: '让她开口的第一秒就像她。',
+    caption: '让 TA 开口的第一秒就像 TA。',
     milestone: {
       title: '语言风格定义完成',
-      description: '语气、口癖与表达偏好都记录在案。接下来是她的在线习惯。',
+      description: '语气、口癖与表达偏好都记录在案。接下来是 TA 的在线习惯。',
     },
   },
   {
     id: 19,
     phase: 5,
     title: '禁用词汇',
-    caption: '这些词，她不会说。',
+    caption: '这些词，TA 不会说。',
   },
   {
     id: 20,
@@ -360,35 +360,35 @@ export const STEPS: readonly StepMeta[] = [
     id: 21,
     phase: 5,
     title: '作息与在线',
-    caption: '她什么时候睡、什么时候醒、什么时候在线。',
+    caption: 'TA 什么时候睡、什么时候醒、什么时候在线。',
     milestone: {
       title: '交互风格定义完成',
-      description: '作息与在线节奏已设定。最后，校准她的性格参数。',
+      description: '作息与在线节奏已设定。最后，校准 TA 的性格参数。',
     },
   },
   {
     id: 22,
     phase: 6,
     title: '自我与信任',
-    caption: '她如何看待自己，也如何看待陌生人。',
+    caption: 'TA 如何看待自己，也如何看待陌生人。',
   },
   {
     id: 23,
     phase: 6,
     title: '依恋与主动',
-    caption: '她如何靠近，如何让位，如何开口。',
+    caption: 'TA 如何靠近，如何让位，如何开口。',
   },
   {
     id: 24,
     phase: 6,
     title: '行动能力',
-    caption: '她能走多远、扛多重、有多灵活。',
+    caption: 'TA 能走多远、扛多重、有多灵活。',
   },
   {
     id: 25,
     phase: 6,
     title: '身体反馈',
-    caption: '疼痛、恢复与感受，决定她的反应强度。',
+    caption: '疼痛、恢复与感受，决定 TA 的反应强度。',
   },
 ];
 
@@ -422,7 +422,7 @@ export const HUMOR_OPTIONS: readonly ChoiceOption<HumorStyle>[] = [
 
 export const MEMORY_OPTIONS: readonly ChoiceOption<MemoryBias>[] = [
   { value: 'balanced', label: '均衡', hint: '记住重要的，也放过琐碎的' },
-  { value: 'detail', label: '记细节', hint: '你说过的小事她都会记得' },
+  { value: 'detail', label: '记细节', hint: '你说过的小事 TA 都会记得' },
   { value: 'grudge', label: '记仇', hint: '被冒犯的事会留很久' },
   { value: 'forgetful', label: '健忘', hint: '需要你提醒，才想得起来' },
 ];
@@ -471,7 +471,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
     {
       key: 'confidence',
       label: '自信',
-      hint: '决定她在压力下是否仍然相信自己。',
+      hint: '决定 TA 在压力下是否仍然相信自己。',
       min: 20,
       max: 80,
       defaultValue: 50,
@@ -505,7 +505,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
     {
       key: 'attachment',
       label: '粘人程度',
-      hint: '一般性依恋倾向，影响她对疏离的敏感度。',
+      hint: '一般性依恋倾向，影响 TA 对疏离的敏感度。',
       min: 20,
       max: 80,
       defaultValue: 50,

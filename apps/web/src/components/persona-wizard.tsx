@@ -1,8 +1,9 @@
-import { ArrowLeft, ArrowRight, Check, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Sparkles, Trash2, TriangleAlert, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { GhostButton, PrimaryButton } from '@/components/button';
+import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
   ChoiceControl,
   LevelControl,
@@ -43,7 +44,7 @@ interface PersonaWizardProps {
   onClose: () => void;
 }
 
-type View = 'intro' | 'step' | 'milestone' | 'success';
+type View = 'intro' | 'step' | 'milestone' | 'ai' | 'success';
 
 interface ResumeState {
   step: number;
@@ -179,6 +180,8 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
   const [errors, setErrors] = useState<StepErrors>({});
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [resume, setResume] = useState<ResumeState | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -195,6 +198,8 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
     setView('intro');
     setDirection(1);
     setErrors({});
+    setConfirmDiscard(false);
+    setAiPrompt('');
 
     const frame = window.requestAnimationFrame(() => panelRef.current?.focus());
 
@@ -257,6 +262,31 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
     setDirection(1);
     setErrors({});
     setView('step');
+  };
+
+  const handleDiscardAndStart = () => {
+    clearDraft();
+    setData(createDefaultDraft());
+    setStep(1);
+    setView('step');
+    setDirection(1);
+    setErrors({});
+    setSavedAt(null);
+    setResume(null);
+    setConfirmDiscard(false);
+  };
+
+  const handleApplyAi = (next: PersonaDraft) => {
+    const snapshot = saveDraft(next, 1);
+
+    setData(next);
+    setSavedAt(snapshot?.updatedAt ?? null);
+    setResume({ step: 1, updatedAt: snapshot?.updatedAt ?? new Date().toISOString() });
+    setStep(1);
+    setView('step');
+    setDirection(1);
+    setErrors({});
+    setConfirmDiscard(false);
   };
 
   const handleNext = () => {
@@ -388,7 +418,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                 max={20}
                 required
                 error={errors.name}
-                placeholder="她真正的名字"
+                placeholder="TA 真正的名字"
               />
               <TextControl
                 id="persona-nickname"
@@ -397,7 +427,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                 onChange={(value) => update('nickname', value)}
                 max={5}
                 error={errors.nickname}
-                placeholder="熟人怎么叫她"
+                placeholder="熟人怎么叫 TA"
               />
               <NumberControl
                 id="persona-age"
@@ -470,7 +500,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
 
             <SwitchControl
               label="时间感知"
-              description="她能感知现实中的当前时间，并据此判断日夜、日期与季节。"
+              description="TA 能感知现实中的当前时间，并据此判断日夜、日期与季节。"
               checked={data.timeAwareness}
               onChange={(checked) => update('timeAwareness', checked)}
             />
@@ -531,7 +561,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               required
               error={errors.outfit}
               placeholder="深色高领针织衫配长裙，出门时加一件旧呢外套。"
-              hint="常服、配饰与季节性外套，最好能一眼认出她。"
+              hint="常服、配饰与季节性外套，最好能一眼认出 TA。"
             />
           </div>
         );
@@ -562,7 +592,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             max={500}
             rows={8}
             error={errors.worldview}
-            placeholder="她生活在什么时代、什么地方，科技与社会规则走到了哪一步。"
+            placeholder="TA 生活在什么时代、什么地方，科技与社会规则走到了哪一步。"
             hint="建议覆盖：时代背景 / 地理位置 / 科技水平。"
           />
         );
@@ -577,8 +607,8 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             max={2000}
             rows={12}
             error={errors.backstory}
-            placeholder="她的来处，塑造她的那几件事，以及她现在为什么在这里。"
-            hint="最多 2000 字。重要的不是完整年表，而是塑造她的那几件事。"
+            placeholder="TA 的来处，塑造 TA 的那几件事，以及 TA 现在为什么在这里。"
+            hint="最多 2000 字。重要的不是完整年表，而是塑造 TA 的那几件事。"
           />
         );
 
@@ -592,8 +622,8 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             max={500}
             rows={8}
             error={errors.knowledgeBoundary}
-            placeholder="她熟悉什么、完全不知道什么，以及面对超出认知的问题会如何反应。"
-            hint="限定 LLM 可以调用的知识范围，避免她突然知道不该知道的事。"
+            placeholder="TA 熟悉什么、完全不知道什么，以及面对超出认知的问题会如何反应。"
+            hint="限定 LLM 可以调用的知识范围，避免 TA 突然知道不该知道的事。"
           />
         );
 
@@ -609,7 +639,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             required
             error={errors.coreValues}
             placeholder="不否定他人劳动"
-            hint="模糊情境下，她默认站在这一边。每行一条，最多 20 字。"
+            hint="模糊情境下，TA 默认站在这一边。每行一条，最多 20 字。"
           />
         );
 
@@ -625,7 +655,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             required
             error={errors.taboos}
             placeholder="当众被起哄"
-            hint="被触碰时，她会警觉、回避、冷淡或反驳。"
+            hint="被触碰时，TA 会警觉、回避、冷淡或反驳。"
           />
         );
 
@@ -640,7 +670,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             perLineMax={20}
             error={errors.fears}
             placeholder="被证明自己毫无价值"
-            hint="越靠近这些事，她越会退回到哪里。"
+            hint="越靠近这些事，TA 越会退回到哪里。"
           />
         );
 
@@ -655,7 +685,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             perLineMax={20}
             error={errors.weaknesses}
             placeholder="被人认真认可手艺"
-            hint="什么是她无法拒绝的温柔，也是道歉能生效的依据。"
+            hint="什么是 TA 无法拒绝的温柔，也是道歉能生效的依据。"
           />
         );
 
@@ -670,7 +700,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             perLineMax={20}
             error={errors.redLines}
             placeholder="不接受当众羞辱"
-            hint="她不会让步的事。输出与之冲突时，应当被打回或改写。"
+            hint="TA 不会让步的事。输出与之冲突时，应当被打回或改写。"
           />
         );
 
@@ -715,7 +745,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             rows={4}
             error={errors.doingNow}
             placeholder="清点刚到的一批旧书，手边放着一杯凉掉的茶。"
-            hint="决定她被打扰时是短回还是多话。"
+            hint="决定 TA 被打扰时是短回还是多话。"
           />
         );
 
@@ -803,7 +833,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               perLineMax={10}
               error={errors.particles}
               placeholder="嗯 / 就是 / 算了"
-              hint="每行一个，最多 10 个。她会在句首或句尾自然带出来。"
+              hint="每行一个，最多 10 个。TA 会在句首或句尾自然带出来。"
             />
             <LinesControl
               id="persona-openers"
@@ -814,7 +844,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               perLineMax={10}
               error={errors.openers}
               placeholder="那个 / 你听我说"
-              hint="每行一个，最多 5 个。让她开口的第一秒就像她。"
+              hint="每行一个，最多 5 个。让 TA 开口的第一秒就像 TA。"
             />
           </div>
         );
@@ -830,7 +860,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
             rows={7}
             error={errors.bannedWords}
             placeholder={'每个词一行\n例如：亲爱的\n例如：宝宝'}
-            hint="每行一个词或短语，最多 200 字。这些词不会从她口中出现。"
+            hint="每行一个词或短语，最多 200 字。这些词不会从 TA 口中出现。"
           />
         );
 
@@ -859,7 +889,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               options={TIME_OFFSET_OPTIONS}
               onChange={(value) => update('timeOffset', Number(value))}
               required
-              hint="她所在时区相对本地时区的偏移，正值表示她那边更晚。"
+              hint="TA 所在时区相对本地时区的偏移，正值表示 TA 那边更晚。"
             />
           </div>
         );
@@ -900,7 +930,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
               options={LEVEL_OPTIONS.sleepDepth}
               onChange={(value) => update('sleepDepth', value)}
               required
-              hint="决定她在睡眠时段被消息吵醒的概率与反应。"
+              hint="决定 TA 在睡眠时段被消息吵醒的概率与反应。"
             />
           </div>
         );
@@ -1006,13 +1036,13 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       id="persona-wizard-title"
                       className="mt-7 font-display text-[clamp(1.9rem,4vw,2.6rem)] font-semibold leading-tight tracking-[-0.02em] text-mist-100"
                     >
-                      一起写下她的一生
+                      一起写下 TA 的一生
                     </h2>
                     <p className="mt-4 text-[0.88rem] leading-7 text-mist-400">
                       这不是一张需要一次填完的问卷，更像是把一个人的轮廓慢慢描出来。共{' '}
                       <span className="text-brass-300">{TOTAL_STEPS} 步</span>，分为{' '}
                       <span className="text-brass-300">{PHASES.length} 个阶段</span>，大约需要 10–15
-                      分钟。中途离开也没关系，草稿会留在这台设备上。慢慢来，她会因此更完整。
+                      分钟。中途离开也没关系，草稿会留在这台设备上。慢慢来，TA 会因此更完整。
                     </p>
 
                     <div className="mt-7 grid gap-2.5 sm:grid-cols-3">
@@ -1059,14 +1089,85 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                         {resume ? '继续填写' : '开始填写'}
                         <ArrowRight className="size-4" />
                       </PrimaryButton>
-                      <GhostButton
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDiscard(false);
+                          setView('ai');
+                        }}
+                        className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
+                      >
+                        <Sparkles className="size-4 text-brass-300 transition group-hover:rotate-12" />
+                        AI 编写
+                      </button>
+                    </div>
+
+                    <p className="mt-3 text-[0.62rem] leading-5 text-mist-600">
+                      也可以让 AI 根据一段描述先生成全部属性，再逐项修改。
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.7rem]">
+                      {resume && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDiscard(true)}
+                          className="flex items-center gap-1.5 text-mist-500 transition hover:text-signal-400"
+                        >
+                          <Trash2 className="size-3.5" />
+                          重新填写
+                        </button>
+                      )}
+                      <button
                         type="button"
                         onClick={handleCancel}
-                        className="h-12 w-full px-5 text-[0.78rem] sm:w-auto"
+                        className="text-mist-500 transition hover:text-mist-200"
                       >
                         稍后再填
-                      </GhostButton>
+                      </button>
                     </div>
+
+                    <AnimatePresence initial={false}>
+                      {confirmDiscard && (
+                        <motion.div
+                          key="discard-confirm"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.24, ease: EASE }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-4 rounded-xl border border-signal-400/25 bg-signal-400/[0.06] p-4">
+                            <div className="flex items-start gap-2.5">
+                              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-signal-400" />
+                              <div className="min-w-0">
+                                <p className="text-[0.74rem] text-signal-400">
+                                  丢弃草稿并从第 1 步重新开始？
+                                </p>
+                                <p className="mt-1 text-[0.64rem] leading-5 text-mist-500">
+                                  当前填写的内容会从本机移除，无法恢复。
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                              <button
+                                type="button"
+                                onClick={handleDiscardAndStart}
+                                className="h-9 rounded-lg bg-signal-400/90 px-4 text-[0.72rem] font-medium text-ink-950 transition hover:bg-signal-400"
+                              >
+                                丢弃并重新填写
+                              </button>
+                              <GhostButton
+                                type="button"
+                                onClick={() => setConfirmDiscard(false)}
+                                className="h-9 px-4 text-[0.72rem]"
+                              >
+                                保留草稿
+                              </GhostButton>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                     <p className="mt-5 text-[0.6rem] leading-5 text-mist-600">
                       带 * 的信息为必填；其余可以留空。所有字数均按中文字符计算。
@@ -1277,6 +1378,26 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                 </motion.div>
               )}
 
+              {view === 'ai' && (
+                <motion.div
+                  key="ai"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={VIEW_TRANSITION}
+                  className="relative flex min-h-0 flex-1 flex-col"
+                >
+                  <PersonaAiWriter
+                    prompt={aiPrompt}
+                    hasDraft={Boolean(resume) || hasDraftContent(data)}
+                    onPromptChange={setAiPrompt}
+                    onBack={() => setView('intro')}
+                    onCancel={handleCancel}
+                    onApply={handleApplyAi}
+                  />
+                </motion.div>
+              )}
+
               {view === 'success' && (
                 <motion.div
                   key="success"
@@ -1317,7 +1438,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       id="persona-wizard-title"
                       className="mt-3 font-display text-[clamp(1.7rem,3.4vw,2.3rem)] font-semibold leading-tight tracking-tight text-mist-100"
                     >
-                      「{data.name.trim() || '她'}」已经写好了
+                      「{data.name.trim() || 'TA'}」已经写好了
                     </h2>
                     <p className="mt-3 max-w-md text-[0.8rem] leading-7 text-mist-500">
                       基础档案、世界与来处、价值内核、表达方式与性格参数都已归档。后端接入后，这张卡就会正式出现在人格中心。
