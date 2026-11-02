@@ -1,5 +1,6 @@
 import {
   ChevronRight,
+  Database,
   Heart,
   MessagesSquare,
   ShieldCheck,
@@ -12,18 +13,28 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
 import { PersonaFieldCard } from '@/components/persona-field-controls';
+import { PersonaMetadataView } from '@/components/persona-metadata-view';
 import { cn } from '@/lib/cn';
 import {
   PRIVATE_ATTRIBUTE_COUNT,
   PRIVATE_PERSONA_GROUPS,
   privatePersonaDefaults,
+  privatePersonaMetadata,
+  readPrivatePersonaMeta,
   readPrivatePersonaOverrides,
+  writePrivatePersonaMeta,
   writePrivatePersonaOverride,
 } from '@/lib/private-persona';
+import {
+  appendPersonaHistory,
+  formatPersonaValue,
+  type PersonaMetadata,
+} from '@/lib/persona-metadata';
 import { personaForChannel, type PersonaValue } from '@/lib/channel-persona';
 import type { Channel, SourcedConversation } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+const META_TAB_ID = 'metadata';
 
 const PRIVATE_ICONS: Record<string, LucideIcon> = {
   numbers: Heart,
@@ -51,9 +62,11 @@ export function PrivatePersonaPanel({
 }) {
   const [activeGroupId, setActiveGroupId] = useState(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
   const [overrides, setOverrides] = useState<Record<string, PersonaValue>>({});
+  const [meta, setMeta] = useState<PersonaMetadata | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
   const values = conversation ? { ...privatePersonaDefaults(conversation.id), ...overrides } : null;
+  const metadataActive = activeGroupId === META_TAB_ID;
   const activeGroup =
     PRIVATE_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PRIVATE_PERSONA_GROUPS[0];
 
@@ -61,8 +74,10 @@ export function PrivatePersonaPanel({
     if (conversation) {
       setActiveGroupId(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
       setOverrides(readPrivatePersonaOverrides(conversation.id));
+      setMeta(readPrivatePersonaMeta(conversation.id) ?? privatePersonaMetadata(conversation.id));
     } else {
       setOverrides({});
+      setMeta(null);
     }
   }, [conversation]);
 
@@ -96,12 +111,23 @@ export function PrivatePersonaPanel({
     return null;
   }
 
-  const handleChange = (key: string, value: PersonaValue) => {
+  const handleChange = (key: string, label: string, value: PersonaValue) => {
     if (!conversation) {
       return;
     }
+    const previous = values?.[key];
     setOverrides((current) => ({ ...current, [key]: value }));
     writePrivatePersonaOverride(conversation.id, key, value);
+
+    if (meta) {
+      const nextMeta = appendPersonaHistory(meta, {
+        field: label,
+        from: formatPersonaValue(previous),
+        to: formatPersonaValue(value),
+      });
+      setMeta(nextMeta);
+      writePrivatePersonaMeta(conversation.id, nextMeta);
+    }
   };
 
   return createPortal(
@@ -239,6 +265,45 @@ export function PrivatePersonaPanel({
                     </button>
                   );
                 })}
+
+                <span aria-hidden="true" className="my-1 hidden h-px bg-mist-100/[0.06] md:block" />
+                <button
+                  type="button"
+                  data-active={metadataActive ? 'true' : 'false'}
+                  onClick={() => setActiveGroupId(META_TAB_ID)}
+                  className={cn(
+                    'group flex shrink-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition md:w-full',
+                    metadataActive
+                      ? 'bg-brass-400/[0.09] text-brass-200'
+                      : 'text-mist-500 hover:bg-mist-100/[0.04] hover:text-mist-300',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-lg border transition',
+                      metadataActive
+                        ? 'border-brass-400/30 bg-brass-400/10 text-brass-300'
+                        : 'border-mist-100/[0.07] bg-ink-950/30 text-mist-600 group-hover:text-mist-400',
+                    )}
+                  >
+                    <Database className="size-3.5" strokeWidth={1.7} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block whitespace-nowrap text-[0.78rem] md:truncate">
+                      元数据
+                    </span>
+                    <span className="mt-0.5 hidden font-mono text-[0.54rem] tracking-[0.12em] text-mist-600 md:block">
+                      快照信息 · {meta ? `${meta.history.length} 条` : '—'}
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className={cn(
+                      'hidden size-3 shrink-0 md:block',
+                      metadataActive ? 'text-brass-300' : 'text-mist-600/60',
+                    )}
+                    strokeWidth={2}
+                  />
+                </button>
               </nav>
 
               <div
@@ -246,43 +311,55 @@ export function PrivatePersonaPanel({
                 className="min-h-0 flex-1 overflow-y-auto px-4 py-5 [scrollbar-width:thin] sm:px-7 sm:py-6"
               >
                 <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={activeGroup.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.2, ease: EASE }}
-                  >
-                    <div className="flex flex-wrap items-end justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
-                            {activeGroup.title}
-                          </h3>
-                          <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
-                            {activeGroup.tagline}
-                          </span>
+                  {metadataActive && meta ? (
+                    <motion.div
+                      key={META_TAB_ID}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2, ease: EASE }}
+                    >
+                      <PersonaMetadataView meta={meta} />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key={activeGroup.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2, ease: EASE }}
+                    >
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
+                              {activeGroup.title}
+                            </h3>
+                            <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
+                              {activeGroup.tagline}
+                            </span>
+                          </div>
+                          <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
+                            {activeGroup.description}
+                          </p>
                         </div>
-                        <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
-                          {activeGroup.description}
-                        </p>
+                        <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
+                          {activeGroup.fields.length} 项
+                        </span>
                       </div>
-                      <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
-                        {activeGroup.fields.length} 项
-                      </span>
-                    </div>
 
-                    <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
-                      {activeGroup.fields.map((field) => (
-                        <PersonaFieldCard
-                          key={field.key}
-                          field={field}
-                          value={values[field.key]}
-                          onChange={(next) => handleChange(field.key, next)}
-                        />
-                      ))}
-                    </div>
-                  </motion.div>
+                      <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
+                        {activeGroup.fields.map((field) => (
+                          <PersonaFieldCard
+                            key={field.key}
+                            field={field}
+                            value={values[field.key]}
+                            onChange={(next) => handleChange(field.key, field.label, next)}
+                          />
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
                 </AnimatePresence>
               </div>
             </div>

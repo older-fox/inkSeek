@@ -1,4 +1,9 @@
 import type { PersonaValue } from '@/lib/channel-persona';
+import {
+  readPersonaMetadata,
+  writePersonaMetadata,
+  type PersonaMetadata,
+} from '@/lib/persona-metadata';
 
 export type PrivateFieldKind = 'text' | 'paragraph' | 'tags' | 'list' | 'score' | 'boolean';
 
@@ -448,6 +453,293 @@ const PRIVATE_PERSONAS: Record<string, Record<string, PersonaValue>> = {
 
 export function privatePersonaDefaults(conversationId: string): Record<string, PersonaValue> {
   return { ...PRIVATE_FALLBACK, ...(PRIVATE_PERSONAS[conversationId] ?? {}) };
+}
+
+const PRIVATE_META_STORAGE_KEY = 'inkseek-private-persona-meta';
+
+const PRIVATE_META_FALLBACK: PersonaMetadata = {
+  createdAt: '2026-08-14T21:06:00+08:00',
+  updatedAt: '2026-11-02T20:44:00+08:00',
+  history: [],
+};
+
+const PRIVATE_METADATA: Record<string, PersonaMetadata> = {
+  'qq-private-zhouxu': {
+    createdAt: '2026-08-14T21:06:00+08:00',
+    updatedAt: '2026-11-02T20:44:00+08:00',
+    history: [
+      {
+        id: 'p-zhouxu-1',
+        time: '2026-11-02T20:44:00+08:00',
+        field: '承诺清单',
+        from: '空',
+        to: '11月5日前留一本旧画册',
+        reason: '对方提到旧画册',
+      },
+      {
+        id: 'p-zhouxu-2',
+        time: '2026-11-01T22:10:00+08:00',
+        field: '好感',
+        from: '71',
+        to: '74',
+        reason: '连续几晚聊到很晚',
+      },
+      {
+        id: 'p-zhouxu-3',
+        time: '2026-10-28T21:35:00+08:00',
+        field: '亲密程度',
+        from: '38',
+        to: '41',
+        reason: '开始聊私事',
+      },
+      {
+        id: 'p-zhouxu-4',
+        time: '2026-10-24T20:02:00+08:00',
+        field: '对该对象的羞耻度',
+        from: '48',
+        to: '45',
+        reason: '被对方调侃后放松',
+      },
+      {
+        id: 'p-zhouxu-5',
+        time: '2026-10-19T19:41:00+08:00',
+        field: '未解决冲突',
+        from: '24',
+        to: '18',
+        reason: '对方主动道歉',
+      },
+      {
+        id: 'p-zhouxu-6',
+        time: '2026-10-14T23:18:00+08:00',
+        field: '信任度',
+        from: '64',
+        to: '68',
+        reason: '交换了旧书来历',
+      },
+      {
+        id: 'p-zhouxu-7',
+        time: '2026-10-08T21:12:00+08:00',
+        field: '各场合称呼',
+        from: '私聊：周叙',
+        to: '私聊：周叙、旧书与雨群：周老板',
+        reason: '在群里改用客套称呼',
+      },
+      {
+        id: 'p-zhouxu-8',
+        time: '2026-10-02T20:30:00+08:00',
+        field: '可公开范围',
+        from: '私聊：全部',
+        to: '私聊：全部、旧书与雨：书与纸张',
+        reason: '对方要求在群里只聊书',
+      },
+      {
+        id: 'p-zhouxu-9',
+        time: '2026-09-21T19:55:00+08:00',
+        field: '关系描述',
+        from: '老同学',
+        to: '老同学、暧昧',
+        reason: '关系阶段推进',
+      },
+      {
+        id: 'p-zhouxu-10',
+        time: '2026-08-14T21:06:00+08:00',
+        field: '关系描述',
+        from: '陌生人',
+        to: '老同学',
+        reason: '首次确认同学关系',
+      },
+    ],
+  },
+  'qq-private-xiaran': {
+    createdAt: '2026-09-03T12:48:00+08:00',
+    updatedAt: '2026-10-31T14:12:00+08:00',
+    history: [
+      {
+        id: 'p-xiaran-1',
+        time: '2026-10-31T14:12:00+08:00',
+        field: '承诺清单',
+        from: '空',
+        to: '下次带一本扉页有批注的旧书',
+        reason: '对方提到想看批注本',
+      },
+      {
+        id: 'p-xiaran-2',
+        time: '2026-10-25T12:52:00+08:00',
+        field: '好感',
+        from: '58',
+        to: '62',
+        reason: '午休常来聊书',
+      },
+      {
+        id: 'p-xiaran-3',
+        time: '2026-10-18T13:20:00+08:00',
+        field: '话题偏好',
+        from: '诗集',
+        to: '诗集、批注、雨天',
+        reason: '对方主动提到雨天',
+      },
+      {
+        id: 'p-xiaran-4',
+        time: '2026-10-09T12:36:00+08:00',
+        field: '各场合称呼',
+        from: '私聊：夏然',
+        to: '私聊：夏然、旧书与雨群：小夏',
+        reason: '在群里跟着大家称呼',
+      },
+      {
+        id: 'p-xiaran-5',
+        time: '2026-09-28T13:05:00+08:00',
+        field: '边界备注',
+        from: '还没有记录触发点。',
+        to: '被问价格会紧张，先聊内容。',
+        reason: '观察到对方回避价格',
+      },
+      {
+        id: 'p-xiaran-6',
+        time: '2026-09-16T12:40:00+08:00',
+        field: '关系描述',
+        from: '书友',
+        to: '书友、常来店里',
+        reason: '到店频率稳定',
+      },
+      {
+        id: 'p-xiaran-7',
+        time: '2026-09-03T12:48:00+08:00',
+        field: '关系描述',
+        from: '陌生人',
+        to: '书友',
+        reason: '首次因旧书搭话',
+      },
+    ],
+  },
+  'qq-private-chenyu': {
+    createdAt: '2026-09-22T10:18:00+08:00',
+    updatedAt: '2026-10-29T16:04:00+08:00',
+    history: [
+      {
+        id: 'p-chenyu-1',
+        time: '2026-10-29T16:04:00+08:00',
+        field: '静默截止',
+        from: '未设置',
+        to: '暂停到明早',
+        reason: '对方临时忙生意',
+      },
+      {
+        id: 'p-chenyu-2',
+        time: '2026-10-20T15:26:00+08:00',
+        field: '已拒行为记录',
+        from: '空',
+        to: '代找绝版书，婉拒',
+        reason: '超出店内范围',
+      },
+      {
+        id: 'p-chenyu-3',
+        time: '2026-10-12T11:08:00+08:00',
+        field: '边界备注',
+        from: '还没有记录触发点。',
+        to: '只在店里谈交易，不闲聊。',
+        reason: '双方默认边界',
+      },
+      {
+        id: 'p-chenyu-4',
+        time: '2026-10-02T16:45:00+08:00',
+        field: '尊重度',
+        from: '67',
+        to: '70',
+        reason: '交易守信',
+      },
+      {
+        id: 'p-chenyu-5',
+        time: '2026-09-28T10:52:00+08:00',
+        field: '关系描述',
+        from: '买家',
+        to: '熟客',
+        reason: '多次到店',
+      },
+      {
+        id: 'p-chenyu-6',
+        time: '2026-09-22T10:18:00+08:00',
+        field: '关系描述',
+        from: '陌生人',
+        to: '买家',
+        reason: '首次询价',
+      },
+    ],
+  },
+  'qq-private-alan': {
+    createdAt: '2026-08-30T19:22:00+08:00',
+    updatedAt: '2026-11-01T21:48:00+08:00',
+    history: [
+      {
+        id: 'p-alan-1',
+        time: '2026-11-01T21:48:00+08:00',
+        field: '承诺清单',
+        from: '空',
+        to: '帮她留一叠竹纸',
+        reason: '对方赶工缺材料',
+      },
+      {
+        id: 'p-alan-2',
+        time: '2026-10-26T20:33:00+08:00',
+        field: '共同经历索引',
+        from: 'm-4401 竹纸',
+        to: 'm-4401 竹纸、m-4415 柿染',
+        reason: '交换柿染样品',
+      },
+      {
+        id: 'p-alan-3',
+        time: '2026-10-17T19:56:00+08:00',
+        field: '信任度',
+        from: '56',
+        to: '60',
+        reason: '寄来样品未催款',
+      },
+      {
+        id: 'p-alan-4',
+        time: '2026-10-06T20:12:00+08:00',
+        field: '话题偏好',
+        from: '柿染',
+        to: '柿染、竹纸、工具',
+        reason: '聊到常用工具',
+      },
+      {
+        id: 'p-alan-5',
+        time: '2026-09-24T21:05:00+08:00',
+        field: '各场合称呼',
+        from: '私聊：阿岚',
+        to: '私聊：阿岚、墨色手作：阿岚',
+        reason: '群里也直接用昵称',
+      },
+      {
+        id: 'p-alan-6',
+        time: '2026-09-10T19:40:00+08:00',
+        field: '关系描述',
+        from: '同行',
+        to: '纸友',
+        reason: '互相寄过材料',
+      },
+      {
+        id: 'p-alan-7',
+        time: '2026-08-30T19:22:00+08:00',
+        field: '关系描述',
+        from: '陌生人',
+        to: '同行',
+        reason: '首次在手作群搭话',
+      },
+    ],
+  },
+};
+
+export function privatePersonaMetadata(conversationId: string): PersonaMetadata {
+  return PRIVATE_METADATA[conversationId] ?? PRIVATE_META_FALLBACK;
+}
+
+export function readPrivatePersonaMeta(conversationId: string): PersonaMetadata | null {
+  return readPersonaMetadata(PRIVATE_META_STORAGE_KEY, conversationId);
+}
+
+export function writePrivatePersonaMeta(conversationId: string, meta: PersonaMetadata): void {
+  writePersonaMetadata(PRIVATE_META_STORAGE_KEY, conversationId, meta);
 }
 
 const PRIVATE_OVERRIDE_STORAGE_KEY = 'inkseek-private-persona-values';
