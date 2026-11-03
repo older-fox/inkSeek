@@ -130,7 +130,7 @@ export class ChatMessagesService {
       const content = extractContent(parsed.segments);
       const text = content.text;
 
-      const message = await this.prisma.$transaction(async (tx) => {
+      const { id } = await this.prisma.$transaction(async (tx) => {
         const created = await tx.chatMessageRecord.create({
           data: {
             channelId: channel.id,
@@ -168,11 +168,7 @@ export class ChatMessagesService {
               })),
             },
           },
-          include: {
-            images: { orderBy: { position: 'asc' } },
-            voices: { orderBy: { position: 'asc' } },
-            sender: { select: { externalId: true, avatarUrl: true } },
-          },
+          select: { id: true },
         });
 
         await tx.chatConversation.update({
@@ -186,6 +182,10 @@ export class ChatMessagesService {
 
         return created;
       });
+
+      // Loading relations inside the transaction issues concurrent SELECTs on one
+      // pg connection; fetch the view from the pool once the write is committed.
+      const message = await this.loadMessageView(id);
 
       this.events.emit({
         type: 'message.created',
@@ -298,7 +298,7 @@ export class ChatMessagesService {
         : 'TEXT';
     const text = input.text;
 
-    const message = await this.prisma.$transaction(async (tx) => {
+    const { id } = await this.prisma.$transaction(async (tx) => {
       const created = await tx.chatMessageRecord.create({
         data: {
           channelId: channel.id,
@@ -325,11 +325,7 @@ export class ChatMessagesService {
             })),
           },
         },
-        include: {
-          images: { orderBy: { position: 'asc' } },
-          voices: { orderBy: { position: 'asc' } },
-          sender: { select: { externalId: true, avatarUrl: true } },
-        },
+        select: { id: true },
       });
 
       await tx.chatConversation.update({
@@ -343,6 +339,8 @@ export class ChatMessagesService {
 
       return created;
     });
+
+    const message = await this.loadMessageView(id);
 
     this.events.emit({
       type: 'message.created',
@@ -377,6 +375,17 @@ export class ChatMessagesService {
     );
 
     return toMessageSummary(message);
+  }
+
+  private loadMessageView(id: string): Promise<MessageView> {
+    return this.prisma.chatMessageRecord.findUniqueOrThrow({
+      where: { id },
+      include: {
+        images: { orderBy: { position: 'asc' } },
+        voices: { orderBy: { position: 'asc' } },
+        sender: { select: { externalId: true, avatarUrl: true } },
+      },
+    });
   }
 
   async ensureSelfContact(channel: ChatChannel): Promise<ChatContact> {
