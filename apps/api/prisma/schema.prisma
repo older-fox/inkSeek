@@ -124,6 +124,21 @@ enum ChatMessageKind {
   FORWARD
 }
 
+enum ChatPipelineRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  INTERRUPTED
+}
+
+enum ChatPipelineNodeStatus {
+  RUNNING
+  SUCCEEDED
+  SKIPPED
+  FAILED
+  CANCELLED
+}
+
 /// Namespace root. Every contact, conversation, message and future persona
 /// snapshot belongs to exactly one channel; group/private scopes never create
 /// their own namespace.
@@ -145,6 +160,7 @@ model ChatChannel {
   contacts        ChatContact[]
   conversations   ChatConversation[]
   messages        ChatMessageRecord[]
+  pipelineRuns    ChatPipelineRun[]
   persona         ChatChannelPersona?
   privatePersonas ChatPrivatePersona[]
 
@@ -206,6 +222,7 @@ model ChatConversation {
   updatedAt          DateTime             @updatedAt
 
   messages     ChatMessageRecord[]
+  pipelineRuns ChatPipelineRun[]
   members      ChatGroupMember[]
   groupPersona ChatGroupPersona?
 
@@ -256,9 +273,10 @@ model ChatMessageRecord {
   /// Rendered quote snapshot so a deleted or out-of-cache target still displays.
   replySnapshot     Json?
 
-  images  ChatImageAsset[]
-  voices  ChatVoiceAsset[]
-  forward ChatForward?
+  images       ChatImageAsset[]
+  voices       ChatVoiceAsset[]
+  forward      ChatForward?
+  pipelineRuns ChatPipelineRun[]
 
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
@@ -424,4 +442,69 @@ model ChatForwardNodeVoice {
   createdAt DateTime        @default(now())
 
   @@index([nodeId, position])
+}
+
+/// One execution of a pipeline graph for a persisted message. Runs pin the
+/// graphId + graphVersion so a later graph edit does not rewrite history.
+model ChatPipelineRun {
+  id             String                @id @default(cuid())
+  graphId        String
+  graphVersion   Int
+  status         ChatPipelineRunStatus @default(RUNNING)
+  channelId      String
+  channel        ChatChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   ChatConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messageId      String?
+  message        ChatMessageRecord?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  startedAt      DateTime              @default(now())
+  finishedAt     DateTime?
+  durationMs     Int?
+  error          String?
+  /// Final namespaced node outputs, kept for debugging and future replay.
+  variables      Json?
+  nodes          ChatPipelineNodeRun[]
+
+  @@index([channelId, startedAt])
+  @@index([conversationId, startedAt])
+  @@index([messageId])
+  @@index([startedAt])
+}
+
+/// Immutable per-node trace. Skipped nodes are recorded too, so branches are
+/// visible without reading the graph definition. A node row is created when the
+/// node starts (RUNNING, no finish time) and updated when it settles, so long
+/// waits are visible while they happen.
+model ChatPipelineNodeRun {
+  id          String                  @id @default(cuid())
+  runId       String
+  run         ChatPipelineRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  nodeId      String
+  nodeType    String
+  nodeVersion Int
+  status      ChatPipelineNodeStatus
+  startedAt   DateTime
+  finishedAt  DateTime?
+  durationMs  Int?
+  input       Json?
+  output      Json?
+  error       String?
+
+  @@index([runId, startedAt])
+}
+
+/// Editable node graph. Single active row keyed by the built-in graph id; the
+/// version bumps only when the structure or configuration changes, not when a
+/// card is merely dragged around the canvas. Revision bumps on every write and
+/// is the optimistic-concurrency token for editors.
+model ChatPipelineGraph {
+  id            String   @id
+  name          String
+  version       Int      @default(1)
+  revision      Int      @default(0)
+  schemaVersion Int      @default(1)
+  nodes         Json
+  edges         Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

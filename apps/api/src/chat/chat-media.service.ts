@@ -1,6 +1,6 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import {
   CHAT_MEDIA_ROOT,
@@ -28,6 +28,8 @@ interface MediaTarget {
 }
 
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+/** Matches the chat send schema: one data URL may not exceed 12,000,000 chars. */
+const MAX_IMAGE_DATA_URL = 12_000_000;
 const REMOTE_TIMEOUT_MS = 20_000;
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -186,6 +188,81 @@ export class ChatMediaService implements OnModuleInit {
     return null;
   }
 
+  /**
+   * Turns a stored media reference (local `/api/v1/media/images/...` path, a
+   * data URL, or a remote http(s) URL) into a data URL that the NapCat send
+   * path accepts. Pipeline image ports carry these references, never bytes.
+   */
+  async toDataUrl(reference: string): Promise<string> {
+    const trimmed = reference.trim();
+    if (trimmed.startsWith('data:image/')) {
+      if (trimmed.length > MAX_IMAGE_DATA_URL) {
+        throw new Error('图片超过发送大小限制');
+      }
+      return trimmed;
+    }
+
+    if (trimmed.startsWith(`${CHAT_MEDIA_URL_PREFIX}/`)) {
+      const encoded = trimmed.slice(CHAT_MEDIA_URL_PREFIX.length + 1).split('?')[0] ?? '';
+      let fileName: string;
+      try {
+        fileName = decodeURIComponent(encoded);
+      } catch {
+        throw new Error(`图片引用无效：${trimmed}`);
+      }
+      if (!fileName || fileName.includes('/') || fileName.includes('\\') || fileName.includes('..')) {
+        throw new Error(`图片引用无效：${trimmed}`);
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = await readFile(`${CHAT_MEDIA_ROOT}${fileName}`);
+      } catch {
+        throw new Error(`图片文件无法读取：${fileName}`);
+      }
+      return this.toImageDataUrl(buffer, fileName);
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      const response = await fetch(trimmed, {
+        signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
+        redirect: 'follow',
+      });
+      if (!response.ok) {
+        throw new Error(`图片下载失败：HTTP ${response.status}`);
+      }
+      const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? null;
+      if (mimeType && !mimeType.startsWith('image/')) {
+        throw new Error(`图片地址返回了 ${mimeType}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      return this.toImageDataUrl(buffer, null, mimeType);
+    }
+
+    throw new Error(`不支持的图片引用：${trimmed.slice(0, 120)}`);
+  }
+
+  private toImageDataUrl(
+    buffer: Buffer,
+    fileName: string | null,
+    mimeTypeHint?: string | null,
+  ): string {
+    if (buffer.byteLength === 0) {
+      throw new Error('图片内容为空');
+    }
+    if (buffer.byteLength > MAX_MEDIA_BYTES) {
+      throw new Error('图片超过发送大小限制');
+    }
+
+    const mimeType =
+      mimeTypeHint ?? sniffMimeType(buffer) ?? mimeTypeOfFile(fileName) ?? 'image/jpeg';
+    const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+    if (dataUrl.length > MAX_IMAGE_DATA_URL) {
+      throw new Error('图片超过发送大小限制');
+    }
+    return dataUrl;
+  }
+
   async saveDataUrl(dataUrl: string): Promise<StoredMedia | null> {
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
     if (!match || !match[1] || !match[2]) {
@@ -306,6 +383,20 @@ export class ChatMediaService implements OnModuleInit {
     const extension = sanitizeExtension(fromMime ?? fromUrl) ?? target.defaultExtension;
     return `${Date.now().toString(36)}-${randomUUID()}.${extension}`;
   }
+}
+
+function mimeTypeOfFile(fileName: string | null): string | null {
+  if (!fileName) {
+    return null;
+  }
+  const extension = extname(fileName).replace('.', '').toLowerCase();
+  if (!extension) {
+    return null;
+  }
+  const match = Object.entries(MIME_EXTENSIONS).find(
+    ([mime, mapped]) => mapped === extension && mime.startsWith('image/'),
+  );
+  return match?.[0] ?? null;
 }
 
 function sanitizeExtension(value: string | undefined): string | null {

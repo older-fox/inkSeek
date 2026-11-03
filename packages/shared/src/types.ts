@@ -207,6 +207,8 @@ export interface ChatQuoteSummary {
   sentAt: string | null;
   kind: ChatMessageKind;
   text: string;
+  /** Stored media references of the quoted message, in order. */
+  images: string[];
   status: 'RESOLVED' | 'UNAVAILABLE';
 }
 
@@ -258,6 +260,221 @@ export interface ChatMessageSummary {
 export interface ChatMessagePage {
   messages: ChatMessageSummary[];
   hasMore: boolean;
+}
+
+export type ChatPipelineRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
+export type ChatPipelineNodeStatus =
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'SKIPPED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface ChatPipelineNodeRunSummary {
+  id: string;
+  nodeId: string;
+  nodeType: string;
+  nodeVersion: number;
+  status: ChatPipelineNodeStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  /** Resolved node configuration or message reference used for this run. */
+  input: unknown;
+  output: unknown;
+  error: string | null;
+}
+
+export interface ChatPipelineRunSummary {
+  id: string;
+  graphId: string;
+  graphVersion: number;
+  status: ChatPipelineRunStatus;
+  channelName: string;
+  conversationName: string;
+  senderName: string | null;
+  /** Truncated message text so the list is readable without another request. */
+  messagePreview: string;
+  messageKind: ChatMessageKind | null;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface ChatPipelineRunDetail extends ChatPipelineRunSummary {
+  /** Final namespaced node outputs: `{ [nodeId]: output }`. */
+  variables: Record<string, unknown> | null;
+  nodes: ChatPipelineNodeRunSummary[];
+}
+
+export type ChatPipelineNodeCategory = 'system' | 'text' | 'logic' | 'data' | 'flow';
+export type ChatPipelineJoin = 'all' | 'any';
+
+/**
+ * Structured message object emitted by the `message.input` card. Downstream
+ * cards read fields from it by path (`object.get`) instead of every field
+ * getting its own port.
+ */
+export interface ChatPipelineMessageValue {
+  /** Local message id. */
+  id: string;
+  externalId: string | null;
+  channelId: string;
+  conversationId: string;
+  conversationKind: ChatConversationKind;
+  isSelf: boolean;
+  sender: { id: string; name: string };
+  text: string;
+  kind: ChatMessageKind;
+  /** Convenience flag so branches can test it without descending into quote. */
+  hasQuote: boolean;
+  quote: ChatPipelineQuoteValue | null;
+  images: string[];
+  imageCount: number;
+  voiceCount: number;
+  isForward: boolean;
+  sentAt: string;
+}
+
+export interface ChatPipelineQuoteValue {
+  messageId: string | null;
+  externalId: string | null;
+  author: { id: string | null; name: string };
+  text: string;
+  kind: ChatMessageKind;
+  sentAt: string | null;
+  /** Stored media references of the quoted message, in order. */
+  images: string[];
+  imageCount: number;
+}
+
+export interface ChatPipelineNodePosition {
+  x: number;
+  y: number;
+}
+
+export interface ChatPipelineGraphNode {
+  id: string;
+  type: string;
+  config: Record<string, unknown> | null;
+  join: ChatPipelineJoin;
+  /** Canvas coordinates; layout only, never affects execution. */
+  position: ChatPipelineNodePosition;
+}
+
+export interface ChatPipelineEdgeCondition {
+  /** Output field on the source node, e.g. `matched`. */
+  field: string;
+  equals: unknown;
+}
+
+export interface ChatPipelineGraphEdge {
+  from: string;
+  to: string;
+  /** Output port on the source node that carries the payload. */
+  fromPort: string;
+  /** Input port on the target node that receives the payload. */
+  toPort: string;
+  /** null means the edge always activates. */
+  when: ChatPipelineEdgeCondition | null;
+}
+
+export interface ChatPipelineGraph {
+  id: string;
+  name: string;
+  /** Structural version: bumps when nodes, edges or config change. */
+  version: number;
+  /** Write token: bumps on every successful save, including position-only edits. */
+  revision: number;
+  /** Stored graph schema version, used to gate migrations. */
+  schemaVersion: number;
+  updatedAt: string;
+  nodes: ChatPipelineGraphNode[];
+  edges: ChatPipelineGraphEdge[];
+}
+
+export type ChatPipelineConfigFieldKind =
+  | 'text'
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'json';
+
+export interface ChatPipelineConfigField {
+  key: string;
+  label: string;
+  kind: ChatPipelineConfigFieldKind;
+  placeholder?: string;
+  hint?: string;
+  options?: Array<{ value: string; label: string }>;
+}
+
+/**
+ * `image` values are image references (stored media URLs) or data URLs; the
+ * message output card resolves them to sendable images.
+ */
+export type ChatPipelineIoKind = 'text' | 'number' | 'boolean' | 'json' | 'image' | 'any';
+
+/** One input port or one emitted output field of a node type. */
+export interface ChatPipelineIoField {
+  /** Output field name, or the input port key that edges connect to. */
+  key: string;
+  label: string;
+  kind: ChatPipelineIoKind;
+  description?: string;
+  /** Input ports only: the node still runs when this port has no active edge. */
+  optional?: boolean;
+  /** Input ports only: the port accepts several incoming edges (aggregated as an array). */
+  multiple?: boolean;
+}
+
+export interface ChatPipelineNodeType {
+  type: string;
+  label: string;
+  category: ChatPipelineNodeCategory;
+  description: string;
+  version: number;
+  /** Locked system cards: always present, never deletable or addable. */
+  system?: boolean;
+  /** Join mode a freshly added node starts with. */
+  defaultJoin?: ChatPipelineJoin;
+  defaultConfig: Record<string, unknown>;
+  fields: ChatPipelineConfigField[];
+  inputs: ChatPipelineIoField[];
+  outputs: ChatPipelineIoField[];
+}
+
+/**
+ * Kind compatibility for one edge. `any` matches everything on both sides;
+ * otherwise the kinds must be identical, so a boolean output can never feed a
+ * text-only port.
+ */
+export function canConnectPipelineKinds(
+  from: ChatPipelineIoKind,
+  to: ChatPipelineIoKind,
+): boolean {
+  return from === 'any' || to === 'any' || from === to;
+}
+
+export interface ChatPipelineGraphSnapshot {
+  graph: ChatPipelineGraph;
+  catalog: ChatPipelineNodeType[];
+  /**
+   * The stored graph failed to parse and the default graph is shown instead.
+   * Nothing was written back; saving will replace the stored row.
+   */
+  degraded: boolean;
+  degradedReason: string | null;
+}
+
+export interface SaveChatPipelineGraphInput {
+  name: string;
+  nodes: ChatPipelineGraphNode[];
+  edges: ChatPipelineGraphEdge[];
+  /** Revision the editor loaded; a mismatch means another window saved first. */
+  expectedRevision: number;
 }
 
 export interface ChatPersonaHistoryEntry {

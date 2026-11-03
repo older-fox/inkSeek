@@ -11,6 +11,9 @@ import type {
   ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
+  ChatPipelineGraphSnapshot,
+  ChatPipelineRunDetail,
+  ChatPipelineRunSummary,
   ChatSendMessageInput,
   LoginInput,
   ModelProviderInput,
@@ -26,6 +29,7 @@ import type {
   RedisSettingsInput,
   RedisSettingsResult,
   SaveConversationPersonaInput,
+  SaveChatPipelineGraphInput,
   SavePersonaInput,
   SettingsOverview,
 } from '@inkseek/shared';
@@ -176,4 +180,16 @@ export const api = {
         body: JSON.stringify(input),
       },
     ),
+  pipelineRuns: (limit = 30) =>
+    request<ChatPipelineRunSummary[]>(`/pipeline/runs?limit=${limit}`),
+  pipelineRun: (id: string) =>
+    request<ChatPipelineRunDetail>(`/pipeline/runs/${encodeURIComponent(id)}`),
+  pipelineGraph: () => request<ChatPipelineGraphSnapshot>('/pipeline/graph'),
+  savePipelineGraph: (input: SaveChatPipelineGraphInput) =>
+    request<ChatPipelineGraphSnapshot>('/pipeline/graph', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  resetPipelineGraph: () =>
+    request<ChatPipelineGraphSnapshot>('/pipeline/graph/reset', { method: 'POST' }),
 };

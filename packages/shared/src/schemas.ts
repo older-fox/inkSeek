@@ -119,6 +119,62 @@ export const chatMessageQuerySchema = z.object({
   limit: z.coerce.number().int('数量必须是整数').min(1).max(200).default(50),
 });
 
+export const chatPipelineRunQuerySchema = z.object({
+  limit: z.coerce.number().int('数量必须是整数').min(1).max(100).default(30),
+});
+
+const pipelineNodeIdSchema = z
+  .string()
+  .trim()
+  .min(1, '节点 id 不能为空')
+  .max(48, '节点 id 最多 48 个字符')
+  .regex(/^[A-Za-z0-9_-]+$/, '节点 id 仅支持字母、数字、下划线和连字符');
+
+const pipelinePortSchema = z
+  .string()
+  .trim()
+  .min(1, '端口名不能为空')
+  .max(80, '端口名最多 80 个字符');
+
+const pipelinePositionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+});
+
+export const saveChatPipelineGraphSchema = z.object({
+  name: z.string().trim().min(1, '请填写图名称').max(80, '图名称最多 80 个字符'),
+  expectedRevision: z.number().int().min(0, '缺少保存版本，请刷新后重试'),
+  nodes: z
+    .array(
+      z.object({
+        id: pipelineNodeIdSchema,
+        type: z.string().trim().min(1, '请选择节点类型').max(80),
+        config: z.record(z.string(), z.unknown()).nullable().default(null),
+        join: z.enum(['all', 'any']).default('all'),
+        position: pipelinePositionSchema,
+      }),
+    )
+    .min(1, '至少保留一个节点')
+    .max(80, '节点数量过多'),
+  edges: z
+    .array(
+      z.object({
+        from: pipelineNodeIdSchema,
+        to: pipelineNodeIdSchema,
+        fromPort: pipelinePortSchema,
+        toPort: pipelinePortSchema,
+        when: z
+          .object({
+            field: z.string().trim().min(1, '条件字段不能为空').max(80),
+            equals: z.unknown(),
+          })
+          .nullable()
+          .default(null),
+      }),
+    )
+    .max(200, '连线数量过多'),
+});
+
 export const chatPersonaHistoryEntrySchema = z.object({
   id: z.string().trim().min(1).max(80),
   time: z.string().trim().min(1).max(40),

@@ -27,7 +27,7 @@ import {
   type ForwardWrite,
 } from './chat-forward.service.js';
 import { ChatMediaService, type StoredMedia } from './chat-media.service.js';
-import { ChatMessageProcessor } from './chat-message-processor.service.js';
+import { ChatMessageProcessor, type PersistedChatMessage } from './chat-message-processor.service.js';
 import { buildParts, extractContent, findForwardSegment } from './message-content.js';
 import {
   externalIdOf,
@@ -878,6 +878,7 @@ export class ChatMessagesService {
         kind: true,
         text: true,
         sender: { select: { externalId: true, avatarUrl: true } },
+        images: { orderBy: { position: 'asc' }, select: { url: true } },
       },
     });
 
@@ -893,6 +894,7 @@ export class ChatMessagesService {
           sentAt: stored.sentAt.toISOString(),
           kind: stored.kind,
           text: stored.text,
+          images: stored.images.map((image) => image.url),
           status: 'RESOLVED',
         },
       };
@@ -917,7 +919,19 @@ export class ChatMessagesService {
         sender?: { user_id?: number | string; nickname?: string; card?: string };
         message?: OneBotSegment[] | string;
       }>('get_msg', { message_id: messageId }, QUOTE_TIMEOUT_MS);
-      const content = extractContent(normalizeSegments(result?.message ?? []));
+      const segments = normalizeSegments(result?.message ?? []);
+      const content = extractContent(segments);
+      // The quoted message may only exist on QQ's side; store its images next
+      // to ours so pipeline runs keep a stable reference after URLs expire.
+      const images = (
+        await Promise.all(
+          segments
+            .filter((segment) => this.media.isMediaSegment(segment))
+            .map((segment) => this.media.saveSegment(segment).catch(() => null)),
+        )
+      )
+        .filter((media): media is StoredMedia => media !== null)
+        .map((media) => media.url);
       const authorId = externalIdOf(result?.sender?.user_id);
       const authorName =
         result?.sender?.card ||
@@ -936,6 +950,7 @@ export class ChatMessagesService {
         sentAt,
         kind: content.kind,
         text: content.text,
+        images,
         status: 'RESOLVED',
       };
     } catch (error) {
@@ -967,6 +982,9 @@ export class ChatMessagesService {
         text: message.text,
         kind: message.kind,
         quote: quoteContextOf(message.replySnapshot),
+        images: [...message.images]
+          .sort((left, right) => left.position - right.position)
+          .map((image) => image.url),
         imageCount,
         voiceCount,
         sentAt: parsed.sentAt,
@@ -1102,6 +1120,7 @@ function unavailableQuote(externalId: string): ChatQuoteSummary {
     sentAt: null,
     kind: 'TEXT',
     text: '',
+    images: [],
     status: 'UNAVAILABLE',
   };
 }
@@ -1131,6 +1150,11 @@ function quoteFromSnapshot(value: Prisma.JsonValue | null): ChatQuoteSummary | n
       ? (kind as ChatMessageKind)
       : 'TEXT',
     text: typeof record['text'] === 'string' ? record['text'] : '',
+    images: Array.isArray(record['images'])
+      ? record['images'].filter(
+          (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0,
+        )
+      : [],
     status,
   };
 }
@@ -1156,16 +1180,27 @@ function quoteFromRecord(record: MessageView): ChatQuoteSummary | null {
 
 function quoteContextOf(
   value: Prisma.JsonValue | null,
-): { authorName: string; text: string } | null {
+): PersistedChatMessage['quote'] {
   const quote = quoteFromSnapshot(value);
 
   if (!quote || quote.status !== 'RESOLVED') {
     return null;
   }
 
-  return quote.authorName || quote.text
-    ? { authorName: quote.authorName, text: quote.text }
-    : null;
+  if (!quote.authorName && !quote.text && quote.images.length === 0) {
+    return null;
+  }
+
+  return {
+    messageId: quote.messageId,
+    externalId: quote.externalId,
+    authorName: quote.authorName,
+    authorId: quote.authorId,
+    text: quote.text,
+    kind: quote.kind,
+    sentAt: quote.sentAt,
+    images: quote.images,
+  };
 }
 
 function toForwardNodeCreate(

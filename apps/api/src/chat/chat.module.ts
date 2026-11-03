@@ -10,10 +10,14 @@ import { ChatMessagesService } from './chat-messages.service.js';
 import { ChatPersonaService } from './chat-persona.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
 import { ChatService } from './chat.service.js';
+import { PipelineController } from './pipeline/pipeline.controller.js';
+import { PipelineEffectsService } from './pipeline/pipeline-effects.service.js';
+import { PipelineGraphService } from './pipeline/pipeline-graph.service.js';
+import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
 
 @Module({
   imports: [AuthModule, PersonasModule],
-  controllers: [ChatController],
+  controllers: [ChatController, PipelineController],
   providers: [
     ChatService,
     ChatRuntimeService,
@@ -22,6 +26,9 @@ import { ChatService } from './chat.service.js';
     ChatPersonaService,
     ChatMediaService,
     ChatMessageProcessor,
+    ChatPipelineRunner,
+    PipelineEffectsService,
+    PipelineGraphService,
     ChatEventsService,
   ],
 })

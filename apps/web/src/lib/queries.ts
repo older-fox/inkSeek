@@ -61,3 +61,23 @@ export const chatConversationPersonaQuery = (conversationId: string) =>
     queryFn: () => api.chatConversationPersona(conversationId),
     staleTime: 30_000,
   });
+
+export const pipelineGraphQuery = queryOptions({
+  queryKey: ['pipeline', 'graph'],
+  queryFn: api.pipelineGraph,
+  staleTime: 30_000,
+});
+
+export const pipelineRunsQuery = queryOptions({
+  queryKey: ['pipeline', 'runs'],
+  queryFn: () => api.pipelineRuns(),
+  staleTime: 3_000,
+});
+
+export const pipelineRunQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['pipeline', 'run', id],
+    queryFn: () => api.pipelineRun(id),
+    enabled: Boolean(id),
+    staleTime: 10_000,
+  });
