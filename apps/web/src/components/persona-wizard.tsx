@@ -19,6 +19,7 @@ import { GhostButton, PrimaryButton } from '@/components/button';
 import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
   ChoiceControl,
+  CommaListControl,
   LevelControl,
   LinesControl,
   NumberControl,
@@ -538,7 +539,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                 error={errors.name}
                 placeholder="TA 真正的名字"
               />
-              <LinesControl
+              <CommaListControl
                 id="persona-aliases"
                 label="化名与绰号"
                 lines={data.aliases}
@@ -546,8 +547,8 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                 max={5}
                 perLineMax={10}
                 error={errors.aliases}
-                placeholder="熟人怎么叫 TA"
-                hint="每行一个称呼，最多 5 个。"
+                placeholder="阿野，小野，Ye"
+                hint="用逗号分隔，失焦后自动识别；最多 5 个，每个 10 字以内。"
               />
               <NumberControl
                 id="persona-age"
@@ -1087,15 +1088,13 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
         return (
           <div className="space-y-8">
             <p className="rounded-xl border border-mist-100/[0.07] bg-ink-950/25 px-4 py-3 text-[0.68rem] leading-5 text-mist-500">
-              滑条始终按 0–100 显示，下方标注的是这一项的允许范围。未调整时使用推荐值。
+              滑条可自由调整 0–100，不再受单项范围限制。未调整时使用推荐值。
             </p>
             {sliders.map((slider) => (
               <SliderControl
                 key={slider.key}
                 label={slider.label}
                 value={data[slider.key]}
-                min={slider.min}
-                max={slider.max}
                 hint={slider.hint}
                 error={errors[slider.key]}
                 onChange={(value) => update(slider.key, value)}

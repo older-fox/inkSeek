@@ -13,6 +13,7 @@ import { cn } from '@/lib/cn';
 import {
   charCount,
   clampChars,
+  filledLines,
   minutesLabel,
   rangeDurationMinutes,
   type ChoiceOption,
@@ -422,8 +423,6 @@ export function LevelControl({
 interface SliderControlProps {
   label: string;
   value: number;
-  min: number;
-  max: number;
   onChange: (value: number) => void;
   hint?: string;
   required?: boolean;
@@ -433,14 +432,12 @@ interface SliderControlProps {
 export function SliderControl({
   label,
   value,
-  min,
-  max,
   onChange,
   hint,
   required = true,
   error,
 }: SliderControlProps) {
-  const clamped = Math.min(max, Math.max(min, value));
+  const clamped = Math.min(100, Math.max(0, value));
 
   return (
     <FieldFrame label={label} required={required} hint={hint} error={error}>
@@ -458,19 +455,16 @@ export function SliderControl({
         max={100}
         step={1}
         value={clamped}
-        onChange={(event) => {
-          const next = Number(event.target.value);
-          onChange(Math.min(max, Math.max(min, next)));
-        }}
+        onChange={(event) => onChange(Number(event.target.value))}
         className="wizard-range mt-2"
-        style={{ '--range-track': sliderTrack(min, max, clamped) } as CSSProperties}
+        style={{ '--range-track': sliderTrack(clamped) } as CSSProperties}
         aria-label={label}
-        aria-valuetext={`${clamped}，可调范围 ${min} 到 ${max}`}
+        aria-valuetext={`${clamped}，可调范围 0 到 100`}
       />
       <div className="mt-1 flex items-center justify-between font-mono text-[0.54rem] text-mist-600">
         <span>0</span>
         <span className="rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5">
-          限制 {min}–{max}
+          可自由调整
         </span>
         <span>100</span>
       </div>
@@ -600,6 +594,122 @@ export function LinesControl({
           </button>
         )}
       </div>
+    </FieldFrame>
+  );
+}
+
+interface CommaListControlProps {
+  id: string;
+  label: string;
+  lines: string[];
+  onChange: (lines: string[]) => void;
+  max?: number;
+  perLineMax: number;
+  required?: boolean;
+  hint?: string;
+  error?: string;
+  placeholder?: string;
+}
+
+function parseCommaList(value: string, perLineMax: number, max?: number): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const part of value.split(/[,，、;；\n]+/)) {
+    const item = clampChars(part.trim(), perLineMax);
+
+    if (!item || seen.has(item)) {
+      continue;
+    }
+
+    seen.add(item);
+    items.push(item);
+
+    if (max !== undefined && items.length >= max) {
+      break;
+    }
+  }
+
+  return items;
+}
+
+export function CommaListControl({
+  id,
+  label,
+  lines,
+  onChange,
+  max,
+  perLineMax,
+  required,
+  hint,
+  error,
+  placeholder,
+}: CommaListControlProps) {
+  const canonical = filledLines(lines).join('，');
+  const [text, setText] = useState(canonical);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) {
+      setText(canonical);
+    }
+  }, [canonical, focused]);
+
+  const recognized = parseCommaList(text, perLineMax, max);
+
+  const commit = () => {
+    const items = parseCommaList(text, perLineMax, max);
+    onChange(items.length > 0 ? items : ['']);
+    setText(items.join('，'));
+  };
+
+  return (
+    <FieldFrame
+      id={id}
+      label={label}
+      required={required}
+      hint={hint ?? '用逗号分隔多个称呼，完成后自动识别为列表。'}
+      counter={max === undefined ? `${recognized.length} 条` : `${recognized.length} / ${max} 条`}
+      error={error}
+    >
+      <input
+        id={id}
+        className="wizard-input"
+        value={text}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          const items = parseCommaList(next, perLineMax, max);
+          onChange(items.length > 0 ? items : ['']);
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          commit();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+            event.currentTarget.blur();
+          }
+        }}
+        placeholder={placeholder}
+        aria-invalid={error ? 'true' : 'false'}
+        autoComplete="off"
+      />
+      {recognized.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {recognized.map((item) => (
+            <span
+              key={item}
+              className="rounded-full border border-mist-100/10 bg-ink-950/30 px-2 py-0.5 text-[0.62rem] text-mist-400"
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
     </FieldFrame>
   );
 }
@@ -1020,13 +1130,6 @@ function levelTrack(percent: number): string {
   return `linear-gradient(to right, var(--color-brass-400) 0%, var(--color-brass-300) ${percent}%, ${baseTrack()} ${percent}%, ${baseTrack()} 100%)`;
 }
 
-function sliderTrack(min: number, max: number, value: number): string {
-  return [
-    `linear-gradient(to right,`,
-    `${baseTrack()} 0%, ${baseTrack()} ${min}%,`,
-    `var(--color-brass-400) ${min}%, var(--color-brass-300) ${value}%,`,
-    `color-mix(in srgb, var(--color-brass-400) 22%, transparent) ${value}%,`,
-    `color-mix(in srgb, var(--color-brass-400) 22%, transparent) ${max}%,`,
-    `${baseTrack()} ${max}%, ${baseTrack()} 100%)`,
-  ].join(' ');
+function sliderTrack(value: number): string {
+  return `linear-gradient(to right, var(--color-brass-400) 0%, var(--color-brass-300) ${value}%, ${baseTrack()} ${value}%, ${baseTrack()} 100%)`;
 }

@@ -332,9 +332,6 @@ export interface SliderMeta {
   key: NumericKey;
   label: string;
   hint: string;
-  min: number;
-  max: number;
-  defaultValue: number;
 }
 
 export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
@@ -343,33 +340,21 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       key: 'confidence',
       label: '自信',
       hint: '决定 TA 在压力下是否仍然相信自己。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'self_control',
       label: '自控力',
       hint: '抵御诱惑与蛊惑、守住分寸的能力。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'shame',
       label: '羞耻感',
       hint: '亲密话题的回避度、措辞谨慎度与脸红。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'trust_bias',
       label: '信任倾向',
       hint: '对陌生对象的初始信任，关系值未设时的回退。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
   ],
   23: [
@@ -377,33 +362,21 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       key: 'attachment_style',
       label: '粘人程度',
       hint: '一般性依恋倾向，影响 TA 对疏离的敏感度。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'possessiveness_base',
       label: '占有欲望',
       hint: '低：不在意关注分配；高：在意优先级。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'agreeableness',
       label: '顺从程度',
       hint: '低：坚持己见、易质疑；高：配合、少反驳。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'proactivity',
       label: '主动性',
       hint: '低：等待与回应；高：主动开场、提问。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
   ],
   24: [
@@ -411,33 +384,21 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       key: 'curiosity',
       label: '好奇程度',
       hint: '低：不问私事；高：爱追问细节。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'stamina_max',
       label: '体力上限',
       hint: '持续行动与抗疲劳的天花板，低：易累、需休息。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'strength',
       label: '力量上限',
       hint: '搬运、推拉、拥抱等物理能力。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'agility',
       label: '灵活度',
       hint: '身体协调与反应速度。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
   ],
   25: [
@@ -445,25 +406,16 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       key: 'pain_tolerance',
       label: '疼痛耐受度',
       hint: '低：反应明显；高：少抱怨。不美化伤害。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'recovery_rate',
       label: '回复速度',
       hint: '体力、情绪与轻伤的恢复快慢。低：需长休。',
-      min: 20,
-      max: 80,
-      defaultValue: 50,
     },
     {
       key: 'sensitivity',
       label: '敏感度',
       hint: '身体刺激的抽象感受倾向。',
-      min: 10,
-      max: 80,
-      defaultValue: 30,
     },
   ],
 };
@@ -804,15 +756,8 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
     }
 
-    default: {
-      const sliders = SLIDER_GROUPS[step] ?? [];
-      sliders.forEach((slider) => {
-        const value = draft[slider.key];
-        if (value < slider.min || value > slider.max) {
-          errors[slider.key] = `${slider.label}需在 ${slider.min}–${slider.max} 之间`;
-        }
-      });
-    }
+    default:
+      break;
   }
 
   return errors;
@@ -1059,7 +1004,7 @@ function hydrateDraft(raw: unknown): PersonaDraft {
 
   Object.values(SLIDER_GROUPS).forEach((sliders) => {
     sliders.forEach((slider) => {
-      draft[slider.key] = clampNumber(Math.round(draft[slider.key]), slider.min, slider.max);
+      draft[slider.key] = clampNumber(Math.round(draft[slider.key]), 0, 100);
     });
   });
 

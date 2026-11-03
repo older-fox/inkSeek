@@ -1,7 +1,6 @@
 import {
   AtSign,
   MessageSquareQuote,
-  Pencil,
   Plus,
   Quote,
   RotateCw,
@@ -56,16 +55,53 @@ function TraitMeter({ trait, tone }: { trait: PersonaTrait; tone: 'brass' | 'jad
   );
 }
 
-function CardFooter({ hint }: { hint: string }) {
+function CardFooter({
+  hint,
+  personaName,
+  active,
+  onEdit,
+}: {
+  hint: string;
+  personaName: string;
+  active: boolean;
+  onEdit?: () => void;
+}) {
   return (
-    <p className="mt-3 flex items-center gap-1.5 font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
-      <RotateCw className="size-3" strokeWidth={1.7} />
-      {hint}
-    </p>
+    <div className="mt-3 flex items-center justify-between gap-3">
+      <p className="flex min-w-0 items-center gap-1.5 font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
+        <RotateCw className="size-3 shrink-0" strokeWidth={1.7} />
+        <span className="truncate">{hint}</span>
+      </p>
+      {onEdit && (
+        <button
+          type="button"
+          tabIndex={active ? 0 : -1}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit();
+          }}
+          aria-label={`编辑 ${personaName} 的角色卡`}
+          className={cn(
+            'shrink-0 rounded-sm text-[0.66rem] tracking-[0.02em] text-brass-300/90 underline decoration-brass-400/40 decoration-1 underline-offset-4 transition hover:text-brass-200 hover:decoration-brass-300 focus-visible:outline-none focus-visible:text-brass-200 focus-visible:ring-2 focus-visible:ring-brass-400/40',
+            active ? 'pointer-events-auto' : 'pointer-events-none',
+          )}
+        >
+          编辑角色卡
+        </button>
+      )}
+    </div>
   );
 }
 
-function PersonaFront({ persona }: { persona: Persona }) {
+function PersonaFront({
+  persona,
+  active,
+  onEdit,
+}: {
+  persona: Persona;
+  active: boolean;
+  onEdit?: () => void;
+}) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5">
       <div
@@ -162,12 +198,23 @@ function PersonaFront({ persona }: { persona: Persona }) {
 
       <CardFooter
         hint={`点击翻面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+        personaName={persona.name}
+        active={active}
+        onEdit={onEdit}
       />
     </div>
   );
 }
 
-function PersonaBack({ persona }: { persona: Persona }) {
+function PersonaBack({
+  persona,
+  active,
+  onEdit,
+}: {
+  persona: Persona;
+  active: boolean;
+  onEdit?: () => void;
+}) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5">
       <div className="absolute inset-x-5 top-0 h-px hairline" />
@@ -254,6 +301,9 @@ function PersonaBack({ persona }: { persona: Persona }) {
 
       <CardFooter
         hint={`点击返回正面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+        personaName={persona.name}
+        active={active}
+        onEdit={onEdit}
       />
     </div>
   );
@@ -263,7 +313,13 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
   const [flipped, setFlipped] = useState(false);
 
   return (
-    <div className="group relative">
+    <div
+      className={cn(
+        'group relative',
+        CARD_HEIGHT,
+        'transition-transform duration-300 hover:-translate-y-1',
+      )}
+    >
       <button
         type="button"
         aria-pressed={flipped}
@@ -273,11 +329,9 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
             : `${persona.name} 的人格档案，点击查看背面`
         }
         onClick={() => setFlipped((value) => !value)}
-        className={cn(
-          CARD_HEIGHT,
-          'block w-full cursor-pointer text-left [perspective:1600px] transition-transform duration-300 hover:-translate-y-1 focus-visible:outline-none',
-        )}
-      >
+        className="absolute inset-0 z-0 cursor-pointer rounded-[1.5rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+      />
+      <div className="pointer-events-none absolute inset-0 z-10 [perspective:1600px]">
         <div className="relative h-full w-full [transform-style:preserve-3d]">
           <motion.div
             initial={false}
@@ -285,7 +339,7 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
             className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
           >
-            <PersonaFront persona={persona} />
+            <PersonaFront persona={persona} active={!flipped} onEdit={onEdit} />
           </motion.div>
           <motion.div
             initial={false}
@@ -293,22 +347,10 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
             className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
           >
-            <PersonaBack persona={persona} />
+            <PersonaBack persona={persona} active={flipped} onEdit={onEdit} />
           </motion.div>
         </div>
-      </button>
-
-      {onEdit && (
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={`编辑 ${persona.name} 的人格档案`}
-          title="编辑人格"
-          className="absolute -right-2 -top-2 z-10 grid size-8 place-items-center rounded-full border border-mist-100/10 bg-ink-950/85 text-mist-500 shadow-[0_10px_24px_-12px_rgba(0,0,0,0.9)] backdrop-blur transition hover:border-brass-400/40 hover:text-brass-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
-        >
-          <Pencil className="size-3.5" strokeWidth={1.8} />
-        </button>
-      )}
+      </div>
     </div>
   );
 }
