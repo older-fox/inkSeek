@@ -1,3 +1,4 @@
+import type { ChatMessagePart, ChatQuoteSummary } from '@inkseek/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
@@ -58,6 +59,113 @@ function initialsOf(name: string): string {
   return Array.from(name.trim())[0] ?? '我';
 }
 
+type MessagePartGroup =
+  | { kind: 'bubble'; parts: ChatMessagePart[] }
+  | { kind: 'standalone'; part: ChatMessagePart };
+
+function groupMessageParts(parts: ChatMessagePart[]): MessagePartGroup[] {
+  const groups: MessagePartGroup[] = [];
+
+  parts.forEach((part) => {
+    if (part.type !== 'text' && part.type !== 'image') {
+      groups.push({ kind: 'standalone', part });
+      return;
+    }
+
+    const last = groups[groups.length - 1];
+    if (last?.kind === 'bubble') {
+      last.parts.push(part);
+    } else {
+      groups.push({ kind: 'bubble', parts: [part] });
+    }
+  });
+
+  return groups;
+}
+
+function quotePreviewText(quote: ChatQuoteSummary): string {
+  if (quote.status !== 'RESOLVED') {
+    return '引用的消息已不可用';
+  }
+
+  if (quote.text.trim()) {
+    return quote.text;
+  }
+
+  switch (quote.kind) {
+    case 'IMAGE':
+      return '[图片]';
+    case 'VOICE':
+      return '[语音]';
+    case 'FACE':
+      return '[表情]';
+    case 'FORWARD':
+      return '[聊天记录]';
+    case 'SYSTEM':
+      return '[系统消息]';
+    default:
+      return '[消息]';
+  }
+}
+
+function QuoteStrip({ quote, self }: { quote: ChatQuoteSummary; self: boolean }) {
+  const resolved = quote.status === 'RESOLVED';
+  const content = (
+    <div
+      className={cn(
+        'flex min-w-0 flex-col gap-0.5 rounded-lg border-l-2 px-2.5 py-1.5 text-left',
+        self
+          ? 'border-brass-300/60 bg-ink-950/30'
+          : 'border-jade-300/50 bg-ink-950/35',
+      )}
+    >
+      {resolved && quote.authorName && (
+        <span className="truncate text-[0.58rem] font-medium text-mist-300">
+          {quote.authorName}
+        </span>
+      )}
+      <span
+        className={cn(
+          'truncate text-[0.68rem] leading-5',
+          resolved ? 'text-mist-400' : 'italic text-mist-500',
+        )}
+      >
+        {quotePreviewText(quote)}
+      </span>
+    </div>
+  );
+
+  if (!quote.messageId) {
+    return content;
+  }
+
+  return (
+    <button
+      type="button"
+      title="跳转到引用消息"
+      onClick={() => {
+        const target = document.querySelector<HTMLElement>(
+          `[data-message-id="${quote.messageId}"]`,
+        );
+        if (!target) {
+          return;
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.animate(
+          [
+            { backgroundColor: 'rgba(212, 175, 55, 0.16)' },
+            { backgroundColor: 'transparent' },
+          ],
+          { duration: 1200, easing: 'ease-out' },
+        );
+      }}
+      className="block max-w-full cursor-pointer text-left"
+    >
+      {content}
+    </button>
+  );
+}
+
 function MessageBubble({
   message,
   kind,
@@ -71,6 +179,7 @@ function MessageBubble({
 }) {
   const avatarAccent = message.self ? 'brass' : kind === 'group' ? 'jade' : 'brass';
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
+  const groups = groupMessageParts(message.parts);
 
   return (
     <>
@@ -78,6 +187,7 @@ function MessageBubble({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.24, ease: EASE }}
+      data-message-id={message.id}
       className={cn('flex items-end gap-2', message.self ? 'justify-end' : 'justify-start')}
     >
       {!message.self && (
@@ -99,30 +209,84 @@ function MessageBubble({
             <span className="font-mono text-[0.48rem] text-mist-600">QQ {message.authorId}</span>
           </p>
         )}
-        {message.parts.length > 0 && (
+        {(message.parts.length > 0 || message.quote) && (
           <div
             className={cn(
               'flex flex-col gap-1.5',
               message.self ? 'items-end' : 'items-start',
             )}
           >
-            {message.parts.map((part, index) => {
-              const key = `${message.id}-part-${index}`;
-              if (part.type === 'text') {
+            {message.quote && groups[0]?.kind !== 'bubble' && (
+              <QuoteStrip quote={message.quote} self={message.self} />
+            )}
+            {groups.map((group, groupIndex) => {
+              if (group.kind === 'bubble') {
+                const hasText =
+                  group.parts.some((part) => part.type === 'text') ||
+                  (groupIndex === 0 && Boolean(message.quote));
                 return (
                   <div
-                    key={key}
+                    key={`${message.id}-bubble-${groupIndex}`}
                     className={cn(
-                      'rounded-2xl px-3.5 py-2 text-left text-[0.76rem] leading-6',
+                      'flex max-w-full flex-col gap-1 overflow-hidden',
+                      hasText ? 'px-3.5 py-2' : 'p-1',
                       message.self
-                        ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12] text-mist-100'
-                        : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35 text-mist-200',
+                        ? 'rounded-2xl rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
+                        : 'rounded-2xl rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
                     )}
                   >
-                    {part.text}
+                    {groupIndex === 0 && message.quote && (
+                      <QuoteStrip quote={message.quote} self={message.self} />
+                    )}
+                    {group.parts.map((part, index) => {
+                      const key = `${message.id}-part-${groupIndex}-${index}`;
+                      if (part.type === 'text') {
+                        return (
+                          <p
+                            key={key}
+                            className={cn(
+                              'whitespace-pre-wrap text-left text-[0.76rem] leading-6',
+                              message.self ? 'text-mist-100' : 'text-mist-200',
+                            )}
+                          >
+                            {part.text}
+                          </p>
+                        );
+                      }
+                      if (part.type !== 'image') {
+                        return null;
+                      }
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() =>
+                            setViewer({
+                              src: part.image.url,
+                              alt: `图片 ${part.image.position + 1}`,
+                            })
+                          }
+                          aria-label={`预览图片 ${part.image.position + 1}`}
+                          className={cn(
+                            'block cursor-zoom-in',
+                            message.self ? 'self-end' : 'self-start',
+                          )}
+                        >
+                          <img
+                            src={part.image.url}
+                            alt={`图片 ${part.image.position + 1}`}
+                            loading="lazy"
+                            className="max-h-64 max-w-[16rem] rounded-lg object-cover"
+                          />
+                        </button>
+                      );
+                    })}
                   </div>
                 );
               }
+
+              const part = group.part;
+              const key = `${message.id}-part-${groupIndex}`;
               if (part.type === 'forward') {
                 return (
                   <ForwardMessageCard
@@ -136,24 +300,7 @@ function MessageBubble({
               if (part.type === 'voice') {
                 return <VoiceBar key={key} voice={part.voice} self={message.self} />;
               }
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() =>
-                    setViewer({ src: part.image.url, alt: `图片 ${part.image.position + 1}` })
-                  }
-                  aria-label={`预览图片 ${part.image.position + 1}`}
-                  className="block cursor-zoom-in"
-                >
-                  <img
-                    src={part.image.url}
-                    alt={`图片 ${part.image.position + 1}`}
-                    loading="lazy"
-                    className="max-h-64 max-w-[16rem] rounded-xl border border-mist-100/10 object-cover"
-                  />
-                </button>
-              );
+              return null;
             })}
           </div>
         )}

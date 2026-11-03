@@ -5,6 +5,7 @@ import type {
   ChatForwardSummary,
   ChatMessageKind,
   ChatMessageSummary,
+  ChatQuoteSummary,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
@@ -42,6 +43,7 @@ import {
 
 const MEMBER_SYNC_CHUNK = 50;
 const PREVIEW_LENGTH = 120;
+const QUOTE_TIMEOUT_MS = 8_000;
 
 type MessageView = ChatMessageRecord & {
   images: ChatImageAsset[];
@@ -53,6 +55,12 @@ type MessageView = ChatMessageRecord & {
 type ForwardMeta = Pick<ChatForward, 'id' | 'title' | 'source' | 'status' | 'nodeCount'>;
 
 type PositionedMedia = StoredMedia & { position: number };
+
+interface ResolvedQuote {
+  replyToExternalId: string;
+  replyToMessageId: string | null;
+  snapshot: ChatQuoteSummary;
+}
 
 interface ParsedMessageEvent {
   kind: ChatConversationKind;
@@ -125,6 +133,11 @@ export class ChatMessagesService {
       const voiceSegments = parsed.segments.flatMap((segment, position) =>
         this.media.isVoiceSegment(segment) ? [{ segment, position }] : [],
       );
+      // Resolving a quote may call NapCat; run it alongside media so the ingest
+      // stays bounded by the slowest step instead of adding latency serially.
+      const quotePromise = this.resolveQuote(conversation.id, parsed.segments, client).catch(
+        () => null,
+      );
       const storedImages = await Promise.all(
         imageSegments.map(async ({ segment, position }) => {
           const media = await this.media.saveSegment(segment);
@@ -143,6 +156,7 @@ export class ChatMessagesService {
       const forward = forwardSegment
         ? await this.forwards.expand(client, forwardSegment)
         : null;
+      const quote = await quotePromise;
       const content = forward
         ? { kind: 'FORWARD' as const, text: forwardSummaryText(forward) }
         : extractContent(parsed.segments);
@@ -167,6 +181,11 @@ export class ChatMessagesService {
             text,
             segments: segments as unknown as Prisma.InputJsonValue,
             sentAt: parsed.sentAt,
+            replyToExternalId: quote?.replyToExternalId ?? null,
+            replyToMessageId: quote?.replyToMessageId ?? null,
+            ...(quote
+              ? { replySnapshot: quote.snapshot as unknown as Prisma.InputJsonValue }
+              : {}),
             images: {
               create: imageAssets.map((asset) => ({
                 url: asset.url,
@@ -337,6 +356,16 @@ export class ChatMessagesService {
         }),
       )
     ).filter((item): item is PositionedMedia => item !== null);
+    const assetsByPosition = new Map(imageAssets.map((asset) => [asset.position, asset]));
+    // Keep the archived segment list ordered but swap transport blobs for stored
+    // media URLs so the column never duplicates megabytes of base64.
+    const storedSegments = segments.map((segment, position) => {
+      if (segment.type !== 'image') {
+        return segment;
+      }
+      const asset = assetsByPosition.get(position);
+      return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+    });
     const kind: ChatMessageKind =
       imageAssets.length > 0
         ? input.text.length > 0
@@ -357,7 +386,7 @@ export class ChatMessagesService {
           isSelf: true,
           kind,
           text,
-          segments: segments as unknown as Prisma.InputJsonValue,
+          segments: storedSegments as unknown as Prisma.InputJsonValue,
           sentAt: now,
           images: {
             create: imageAssets.map((asset) => ({
@@ -823,6 +852,100 @@ export class ChatMessagesService {
     });
   }
 
+  /**
+   * NapCat's reply segment only carries the target id. Prefer a local record so
+   * the snapshot costs no API call; otherwise ask `get_msg` once, and fall back
+   * to an UNAVAILABLE snapshot when the target was recalled or is unreachable.
+   */
+  private async resolveQuote(
+    conversationId: string,
+    segments: readonly OneBotSegment[],
+    client: OneBotRequester,
+  ): Promise<ResolvedQuote | null> {
+    const replyId = replyExternalIdOf(segments);
+    if (!replyId) {
+      return null;
+    }
+
+    const stored = await this.prisma.chatMessageRecord.findUnique({
+      where: {
+        conversationId_externalId: { conversationId, externalId: replyId },
+      },
+      select: {
+        id: true,
+        senderName: true,
+        sentAt: true,
+        kind: true,
+        text: true,
+        sender: { select: { externalId: true, avatarUrl: true } },
+      },
+    });
+
+    if (stored) {
+      return {
+        replyToExternalId: replyId,
+        replyToMessageId: stored.id,
+        snapshot: {
+          messageId: stored.id,
+          externalId: replyId,
+          authorName: stored.senderName,
+          authorId: stored.sender.externalId,
+          sentAt: stored.sentAt.toISOString(),
+          kind: stored.kind,
+          text: stored.text,
+          status: 'RESOLVED',
+        },
+      };
+    }
+
+    const fetched = await this.fetchQuotedMessage(client, replyId);
+
+    return {
+      replyToExternalId: replyId,
+      replyToMessageId: null,
+      snapshot: fetched ?? unavailableQuote(replyId),
+    };
+  }
+
+  private async fetchQuotedMessage(
+    client: OneBotRequester,
+    messageId: string,
+  ): Promise<ChatQuoteSummary | null> {
+    try {
+      const result = await client.call<{
+        time?: number;
+        sender?: { user_id?: number | string; nickname?: string; card?: string };
+        message?: OneBotSegment[] | string;
+      }>('get_msg', { message_id: messageId }, QUOTE_TIMEOUT_MS);
+      const content = extractContent(normalizeSegments(result?.message ?? []));
+      const authorId = externalIdOf(result?.sender?.user_id);
+      const authorName =
+        result?.sender?.card ||
+        result?.sender?.nickname ||
+        (authorId ? `QQ ${authorId}` : '');
+      const sentAt =
+        typeof result?.time === 'number' && Number.isFinite(result.time)
+          ? new Date(result.time * 1000).toISOString()
+          : null;
+
+      return {
+        messageId: null,
+        externalId: messageId,
+        authorName,
+        authorId,
+        sentAt,
+        kind: content.kind,
+        text: content.text,
+        status: 'RESOLVED',
+      };
+    } catch (error) {
+      this.logger.warn(
+        `get_msg 获取引用消息失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   private async triggerProcessing(
     channel: ChatChannel,
     conversation: ChatConversation,
@@ -843,6 +966,7 @@ export class ChatMessagesService {
         senderName: parsed.senderName,
         text: message.text,
         kind: message.kind,
+        quote: quoteContextOf(message.replySnapshot),
         imageCount,
         voiceCount,
         sentAt: parsed.sentAt,
@@ -894,6 +1018,7 @@ export function toMessageSummary(record: MessageView): ChatMessageSummary {
     images,
     voices,
     forward: card,
+    quote: quoteFromRecord(record),
     parts: card
       ? [{ type: 'forward', forward: card }]
       : buildParts(record.segments, images, voices, record.text),
@@ -940,6 +1065,107 @@ function toForwardSummary(record: ForwardMeta | null): ChatForwardSummary | null
           : 'COMPLETE',
     nodeCount: record.nodeCount,
   };
+}
+
+const QUOTE_KINDS = new Set<ChatMessageKind>([
+  'TEXT',
+  'IMAGE',
+  'VOICE',
+  'FACE',
+  'MIXED',
+  'SYSTEM',
+  'FORWARD',
+]);
+
+function replyExternalIdOf(segments: readonly OneBotSegment[]): string | null {
+  const reply = segments.find((segment) => segment.type === 'reply');
+  const data = reply?.data;
+
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const id = (data as Record<string, unknown>)['id'];
+  if (typeof id === 'number') {
+    return String(id);
+  }
+
+  return typeof id === 'string' && id.trim().length > 0 ? id.trim() : null;
+}
+
+function unavailableQuote(externalId: string): ChatQuoteSummary {
+  return {
+    messageId: null,
+    externalId,
+    authorName: '',
+    authorId: null,
+    sentAt: null,
+    kind: 'TEXT',
+    text: '',
+    status: 'UNAVAILABLE',
+  };
+}
+
+function quoteFromSnapshot(value: Prisma.JsonValue | null): ChatQuoteSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const status = record['status'];
+
+  if (status !== 'RESOLVED' && status !== 'UNAVAILABLE') {
+    return null;
+  }
+
+  const kind = record['kind'];
+  const externalId = record['externalId'];
+
+  return {
+    messageId: typeof record['messageId'] === 'string' ? record['messageId'] : null,
+    externalId: typeof externalId === 'string' ? externalId : null,
+    authorName: typeof record['authorName'] === 'string' ? record['authorName'] : '',
+    authorId: typeof record['authorId'] === 'string' ? record['authorId'] : null,
+    sentAt: typeof record['sentAt'] === 'string' ? record['sentAt'] : null,
+    kind: typeof kind === 'string' && QUOTE_KINDS.has(kind as ChatMessageKind)
+      ? (kind as ChatMessageKind)
+      : 'TEXT',
+    text: typeof record['text'] === 'string' ? record['text'] : '',
+    status,
+  };
+}
+
+/**
+ * Snapshot wins; messages stored before quote support only kept the reply
+ * segment, so surface those as unavailable instead of dropping the quote.
+ */
+function quoteFromRecord(record: MessageView): ChatQuoteSummary | null {
+  const snapshot = quoteFromSnapshot(record.replySnapshot);
+
+  if (snapshot) {
+    return { ...snapshot, messageId: record.replyToMessageId };
+  }
+
+  const segments = Array.isArray(record.segments)
+    ? (record.segments as unknown as OneBotSegment[])
+    : [];
+  const externalId = replyExternalIdOf(segments);
+
+  return externalId ? unavailableQuote(externalId) : null;
+}
+
+function quoteContextOf(
+  value: Prisma.JsonValue | null,
+): { authorName: string; text: string } | null {
+  const quote = quoteFromSnapshot(value);
+
+  if (!quote || quote.status !== 'RESOLVED') {
+    return null;
+  }
+
+  return quote.authorName || quote.text
+    ? { authorName: quote.authorName, text: quote.text }
+    : null;
 }
 
 function toForwardNodeCreate(

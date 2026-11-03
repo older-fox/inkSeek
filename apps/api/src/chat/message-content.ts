@@ -15,7 +15,10 @@ export function findForwardSegment(segments: readonly OneBotSegment[]): OneBotSe
   return segments.find((segment) => segment.type === 'forward') ?? null;
 }
 
-export function extractContent(segments: readonly OneBotSegment[]): ExtractedContent {
+export function extractContent(
+  segments: readonly OneBotSegment[],
+  options: { markReply?: boolean } = {},
+): ExtractedContent {
   const parts: string[] = [];
   let hasFace = false;
   let hasPlainText = false;
@@ -64,6 +67,14 @@ export function extractContent(segments: readonly OneBotSegment[]): ExtractedCon
         hasPlainText = true;
         hasForward = true;
         break;
+      // Main messages render the quote from their snapshot instead of text;
+      // forward nodes have no snapshot and only need a placeholder.
+      case 'reply':
+        if (options.markReply) {
+          parts.push('[引用]');
+          hasPlainText = true;
+        }
+        break;
       case 'video':
         parts.push('[视频]');
         hasPlainText = true;
@@ -109,7 +120,7 @@ export function buildParts(
   images: readonly ChatMessageImageSummary[],
   voices: readonly ChatMessageVoiceSummary[],
   fallbackText: string,
-  options: { skipForward?: boolean } = {},
+  options: { skipForward?: boolean; markReply?: boolean } = {},
 ): ChatMessagePart[] {
   const parts: ChatMessagePart[] = [];
   const imagesByPosition = new Map<number, ChatMessageImageSummary>();
@@ -194,6 +205,11 @@ export function buildParts(
         case 'forward':
           if (!options.skipForward) {
             appendText('[嵌套聊天记录]');
+          }
+          break;
+        case 'reply':
+          if (options.markReply) {
+            appendText('[引用]');
           }
           break;
         case 'video':

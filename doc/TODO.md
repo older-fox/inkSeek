@@ -32,3 +32,38 @@
   - 消息处理：`apps/api/src/chat/chat-message-processor.service.ts`
   - 入库：`apps/api/src/chat/chat-messages.service.ts`
   - 占位页面：`apps/web/src/pages/message-pipeline-page.tsx`
+
+## 图片落盘去重与哈希映射（内容寻址存储）
+
+- 现状：收到的图片一律以 `时间戳-随机 UUID.扩展名` 写盘，没有内容哈希、没有去重查表；
+  `ChatImageAsset` 只做「消息 → 图片」映射，同一张图在多条消息中出现会重复写文件和重复建行。
+  来源无法定位、远程拉取失败或超过 64MB 时只保存远程地址甚至不建映射，因此「所有图片都落盘」
+  并不成立。图片描述字段不存在，视觉模型也尚未接入。接收消息的 `segments` 若含 base64 会原样进库。
+- 目标：对图片字节做内容寻址存储（SHA-256，禁用 MD5），以哈希为唯一键建立全局映射表，
+  同一份字节只落一个文件、只生成一次 LLM 描述；每条消息仍保留自己的位置映射。
+- 要求：
+  1. 对**解码后的原始字节**计算 SHA-256；路径形如 `ab/cd/ef/<完整 hash>.<扩展名>`，扩展名只由
+     字节嗅探决定（不取 URL 后缀或 mime hint），嗅探失败用 `.bin`；补充 AVIF/BMP 嗅探，聊天媒体拒收 SVG。
+  2. 写入原子化：`mkdir -p` → 同目录临时文件 → `rename` 覆盖；目标已存在则跳过写盘；
+     数据库用 `upsert`，唯一冲突（P2002）视为命中。先写文件后写映射，孤儿文件由 GC 回收。
+  3. 新增 `ChatMediaObject`：`sha256 @unique`、`storagePath`、`mimeType`、`byteSize`、`width`、`height`、
+     `description`、`descriptionStatus`（PENDING/RUNNING/READY/FAILED）、`descriptionModel`、
+     `descriptionError`、`describedAt`。`ChatImageAsset` 增加可空 `mediaId`，保留 `url` / `remoteUrl` /
+     `position`，历史行不动。
+  4. 图片描述异步执行：消息入库后按 `mediaId` 投递幂等任务，失败只更新状态与错误信息，不影响入库与投递；
+     模型来源写入 `SystemConfig`（沿用「只有 DATABASE_URL 在 .env」的约定）；送模型前长边缩到约 1024px，
+     并设置独立的体积上限；是否需要渠道级隐私开关待定。
+  5. 描述按图片在消息中的 `position` 进入 LLM 上下文，与上方「表情语义」条目同一思路。
+  6. 接收侧入库时把 `segments` 中的图片段改写为哈希 blob URL，避免原始 base64 进入 JSON 列
+     （发送侧已修复，接收与转发节点还未处理）。
+  7. 删除与回收：消息级联只删映射行，需为「无引用的 blob 与文件」提供 GC；blob 可跨渠道共享，
+     访问鉴权必须经过消息/会话，不能直接暴露 blob 列表。
+- 未定项：
+  - 视觉描述使用哪个 provider/model，是否提供渠道级开关。
+  - 历史图片是否回填到哈希路径（复制 → 校验哈希 → 建映射 → 清理旧文件），或旧数据继续使用扁平路径。
+- 关联位置：
+  - 媒体落盘：`apps/api/src/chat/chat-media.service.ts`
+  - 入库与分段改写：`apps/api/src/chat/chat-messages.service.ts`（接收、发送、转发节点）
+  - 数据模型：`apps/api/prisma/schema.prisma`
+  - 视觉调用：`apps/api/src/ai/ai.service.ts`（目前只支持纯文本补全）
+  - 静态服务：`apps/api/src/main.ts`、`apps/api/src/chat/chat-paths.ts`

@@ -13,11 +13,13 @@ import { CHAT_MEDIA_ROOT, CHAT_VOICE_ROOT } from './chat/chat-paths.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 
 const API_PORT = 3100;
+// Outgoing chat images travel as base64 data URLs: 4 × 12 MB schema cap plus JSON overhead.
+const JSON_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: true }),
+    new FastifyAdapter({ trustProxy: true, bodyLimit: JSON_BODY_LIMIT_BYTES }),
   );
 
   // @fastify/cookie augments FastifyInstance, which conflicts with Nest's copy of the type.

@@ -12,6 +12,8 @@ export interface PersistedChatMessage {
   senderName: string;
   text: string;
   kind: ChatMessageKind;
+  /** Resolved quote snapshot, so the quoted content reaches the model context. */
+  quote: { authorName: string; text: string } | null;
   imageCount: number;
   voiceCount: number;
   sentAt: Date;

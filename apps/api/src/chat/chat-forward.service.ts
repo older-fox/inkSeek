@@ -160,7 +160,7 @@ export class ChatForwardService {
     budget.nodesLeft -= 1;
 
     const node = normalizeNode(raw);
-    const content = extractContent(node.segments);
+    const content = extractContent(node.segments, { markReply: true });
     const { images, voices } = await this.storeNodeMedia(node.segments, client, budget);
     const nested = await this.expandNested(client, node.segments, depth, budget);
 
@@ -470,7 +470,10 @@ function toNodeSummary(
     sentAt: node.sentAt?.toISOString() ?? null,
     kind: node.kind,
     text: node.text,
-    parts: buildParts(node.segments, images, voices, node.text, { skipForward: hasChildren }),
+    parts: buildParts(node.segments, images, voices, node.text, {
+      skipForward: hasChildren,
+      markReply: true,
+    }),
     children: [],
   };
 }

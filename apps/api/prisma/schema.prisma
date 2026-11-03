@@ -247,6 +247,14 @@ model ChatMessageRecord {
   segments       Json
   sentAt         DateTime
   receivedAt     DateTime         @default(now())
+  /// OneBot message_id from the reply segment, kept even when the target is not stored.
+  replyToExternalId String?
+  /// Local target row when the quoted message was already ingested; cleared on delete.
+  replyToMessageId  String?
+  replyTo           ChatMessageRecord?  @relation("ChatMessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies           ChatMessageRecord[] @relation("ChatMessageReply")
+  /// Rendered quote snapshot so a deleted or out-of-cache target still displays.
+  replySnapshot     Json?
 
   images  ChatImageAsset[]
   voices  ChatVoiceAsset[]
@@ -255,6 +263,8 @@ model ChatMessageRecord {
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
   @@index([channelId, sentAt])
+  @@index([replyToMessageId])
+  @@index([replyToExternalId])
 }
 
 model ChatImageAsset {

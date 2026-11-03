@@ -192,6 +192,24 @@ export type ChatMessagePart =
   | { type: 'voice'; voice: ChatMessageVoiceSummary }
   | { type: 'forward'; forward: ChatForwardSummary };
 
+/**
+ * Display snapshot of the message quoted by a reply segment. NapCat only sends
+ * the target id, so the snapshot is resolved at ingest and must stand alone:
+ * the original may be deleted, outside retained history, or unreachable.
+ */
+export interface ChatQuoteSummary {
+  /** Local message id when the quoted message is stored; enables jump-to-original. */
+  messageId: string | null;
+  /** OneBot message_id from the reply segment. */
+  externalId: string | null;
+  authorName: string;
+  authorId: string | null;
+  sentAt: string | null;
+  kind: ChatMessageKind;
+  text: string;
+  status: 'RESOLVED' | 'UNAVAILABLE';
+}
+
 export interface ChatForwardNodeSummary {
   id: string;
   position: number;
@@ -230,6 +248,8 @@ export interface ChatMessageSummary {
   voices: ChatMessageVoiceSummary[];
   /** Card metadata when this message is a merged-forward snapshot. */
   forward: ChatForwardSummary | null;
+  /** Quoted-message snapshot from a NapCat reply segment; null when not a reply. */
+  quote: ChatQuoteSummary | null;
   /** Ordered text/image/voice/forward segments; pure-media messages contain no text parts. */
   parts: ChatMessagePart[];
   sentAt: string;

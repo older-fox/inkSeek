@@ -10,6 +10,7 @@ import type {
   ChatMessagePart,
   ChatMessageSummary,
   ChatMessageVoiceSummary,
+  ChatQuoteSummary,
 } from '@inkseek/shared';
 import { useMemo } from 'react';
 import { chatChannelsQuery } from './queries';
@@ -102,6 +103,7 @@ export interface ChatMessage {
   images: ChatMessageImageSummary[];
   voices: ChatMessageVoiceSummary[];
   forward: ChatForwardSummary | null;
+  quote: ChatQuoteSummary | null;
   parts: ChatMessagePart[];
 }
 
@@ -299,6 +301,7 @@ export function toChatMessage(summary: ChatMessageSummary): ChatMessage {
     images: summary.images,
     voices: summary.voices,
     forward: summary.forward,
+    quote: summary.quote,
     parts: summary.parts,
   };
 }
