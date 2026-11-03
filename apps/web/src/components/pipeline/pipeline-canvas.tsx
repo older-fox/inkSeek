@@ -21,9 +21,11 @@ import { PipelineNodeCard } from './pipeline-node-card';
 import {
   CARD_WIDTH,
   cardHeight,
+  edgeCurvePoint,
   edgeMidpoint,
   edgePath,
   formatConditionValue,
+  formatRuntimePreview,
   inputPoint,
   outputPoint,
   WORLD_HEIGHT,
@@ -41,9 +43,12 @@ interface PipelineCanvasProps {
   catalog: ChatPipelineNodeType[];
   selection: PipelineSelection;
   nodeRuns: Map<string, ChatPipelineNodeRunSummary>;
+  /** Shows the runtime values each edge carried for the overlaid run. */
+  debugMode: boolean;
   onSelect: (selection: PipelineSelection) => void;
   onMoveNode: (id: string, position: ChatPipelineNodePosition) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
+  onCreateVariable: (key: string) => void;
   onConnect: (from: string, fromPort: string, to: string, toPort: string) => void;
   onConnectError: (message: string) => void;
 }
@@ -53,6 +58,31 @@ const MAX_SCALE = 1.6;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function runtimePreview(run: ChatPipelineNodeRunSummary | undefined, value: unknown): string {
+  if (!run) {
+    return '未运行';
+  }
+  if (run.status === 'RUNNING') {
+    return '运行中…';
+  }
+  if (run.status === 'SKIPPED') {
+    return '已跳过';
+  }
+  if (run.status === 'CANCELLED') {
+    return '已取消';
+  }
+  if (run.status === 'FAILED') {
+    return '失败';
+  }
+  return formatRuntimePreview(value);
 }
 
 interface ConnectionDraft {
@@ -70,9 +100,11 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
       catalog,
       selection,
       nodeRuns,
+      debugMode,
       onSelect,
       onMoveNode,
       onUpdateNodeConfig,
+      onCreateVariable,
       onConnect,
       onConnectError,
     },
@@ -384,14 +416,19 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
               const end = inputPoint(target, definitions.get(target.type) ?? null, edge.toPort);
               const path = edgePath(start, end);
               const selected = selection?.kind === 'edge' && selection.index === index;
+              const sourceRun = nodeRuns.get(edge.from);
               const targetRun = nodeRuns.get(edge.to);
-              const tone = targetRun
-                ? targetRun.status === 'SUCCEEDED'
-                  ? 'stroke-jade-400/70'
-                  : targetRun.status === 'FAILED'
-                    ? 'stroke-signal-400/80'
-                    : 'stroke-mist-600/45'
-                : 'stroke-mist-300/25';
+              const flowing =
+                sourceRun?.status === 'RUNNING' || targetRun?.status === 'RUNNING';
+              const tone = flowing
+                ? 'stroke-brass-300/80'
+                : targetRun
+                  ? targetRun.status === 'SUCCEEDED'
+                    ? 'stroke-jade-400/70'
+                    : targetRun.status === 'FAILED'
+                      ? 'stroke-signal-400/80'
+                      : 'stroke-mist-600/45'
+                  : 'stroke-mist-300/25';
 
               return (
                 <g key={`${edge.from}-${edge.fromPort}-${edge.to}-${edge.toPort}-${index}`}>
@@ -413,6 +450,18 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
                       selected ? 'stroke-brass-300' : tone,
                     )}
                   />
+                  {debugMode && flowing && (
+                    <circle r={2.8} className="pointer-events-none fill-brass-200">
+                      <animateMotion
+                        dur="1.15s"
+                        repeatCount="indefinite"
+                        path={path}
+                        keyPoints="0;1"
+                        keyTimes="0;1"
+                        calcMode="linear"
+                      />
+                    </circle>
+                  )}
                 </g>
               );
             })}
@@ -461,6 +510,78 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
             );
           })}
 
+          {debugMode &&
+            graph.edges.map((edge, index) => {
+              const source = nodesById.get(edge.from);
+              const target = nodesById.get(edge.to);
+              if (!source || !target) {
+                return null;
+              }
+              const sourceRun = nodeRuns.get(edge.from);
+              const targetRun = nodeRuns.get(edge.to);
+              if (!sourceRun && !targetRun) {
+                return null;
+              }
+              const start = outputPoint(
+                source,
+                definitions.get(source.type) ?? null,
+                edge.fromPort,
+              );
+              const end = inputPoint(
+                target,
+                definitions.get(target.type) ?? null,
+                edge.toPort,
+              );
+              const point = edgeCurvePoint(start, end, 0.34);
+              const outputValue = recordOf(sourceRun?.output)?.[edge.fromPort];
+              const inputValue = recordOf(recordOf(targetRun?.input)?.ports)?.[edge.toPort];
+              const selected = selection?.kind === 'edge' && selection.index === index;
+
+              return (
+                <div
+                  key={`runtime-${edge.from}-${edge.fromPort}-${edge.to}-${edge.toPort}-${index}`}
+                  className={cn(
+                    'absolute z-10 flex w-[11.5rem] cursor-pointer flex-col gap-0.5 rounded-md border px-1.5 py-1 font-mono text-[0.46rem] leading-3.5 shadow-[0_10px_28px_-14px_rgba(0,0,0,0.95)] backdrop-blur-sm transition',
+                    selected
+                      ? 'border-brass-400/50 bg-ink-950/[0.97]'
+                      : 'border-mist-100/[0.14] bg-ink-950/92 hover:border-brass-400/35',
+                  )}
+                  style={{
+                    left: point.x,
+                    top: point.y,
+                    transform: 'translate(-50%, calc(-100% - 7px))',
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => onSelect({ kind: 'edge', index })}
+                >
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="size-1 shrink-0 rounded-full bg-brass-400" />
+                    <span className="shrink-0 text-brass-300/85">{edge.fromPort}</span>
+                    <span
+                      className={cn(
+                        'truncate',
+                        sourceRun?.status === 'SUCCEEDED' ? 'text-mist-100' : 'text-mist-500',
+                      )}
+                    >
+                      {runtimePreview(sourceRun, outputValue)}
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="size-1 shrink-0 rounded-full bg-jade-400" />
+                    <span className="shrink-0 text-jade-300/85">{edge.toPort}</span>
+                    <span
+                      className={cn(
+                        'truncate',
+                        targetRun?.status === 'SUCCEEDED' ? 'text-mist-100' : 'text-mist-500',
+                      )}
+                    >
+                      {runtimePreview(targetRun, inputValue)}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+
           {graph.nodes.map((node) => (
             <PipelineNodeCard
               key={node.id}
@@ -469,9 +590,11 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
               selected={selection?.kind === 'node' && selection.id === node.id}
               run={nodeRuns.get(node.id)}
               dragKind={connecting?.kind ?? null}
+              variables={graph.variables}
               onPointerDown={(event) => beginNodeDrag(event, node)}
               onStartConnect={(event, portKey) => beginConnect(event, node, portKey)}
               onUpdateNodeConfig={onUpdateNodeConfig}
+              onCreateVariable={onCreateVariable}
             />
           ))}
         </div>

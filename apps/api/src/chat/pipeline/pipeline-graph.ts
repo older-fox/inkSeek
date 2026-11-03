@@ -1,3 +1,5 @@
+import type { ChatPipelineVariable } from '@inkseek/shared';
+
 export interface PipelineEdgeCondition {
   /** Output field on the source node, e.g. `matched`. */
   field: string;
@@ -41,6 +43,8 @@ export interface PipelineGraph {
   name: string;
   nodes: PipelineNode[];
   edges: PipelineEdge[];
+  /** Declared variables; every run starts from these values. */
+  variables: ChatPipelineVariable[];
 }
 
 /** Bump when the stored graph shape changes; gates startup migrations. */
@@ -71,10 +75,18 @@ export const DEFAULT_PIPELINE_GRAPH: PipelineGraph = {
     { from: 'input', to: 'output', fromPort: 'text', toPort: 'text' },
     { from: 'input', to: 'output', fromPort: 'images', toPort: 'images' },
   ],
+  variables: [],
 };
+
+const VARIABLE_KEY = /^[A-Za-z0-9_-]+$/;
+const MAX_VARIABLES = 32;
+const MAX_VARIABLE_KEY_LENGTH = 32;
+const MAX_VARIABLE_TEXT = 4000;
 
 export function validateGraph(graph: PipelineGraph): void {
   const ids = new Set<string>();
+
+  validateVariables(graph.variables);
 
   for (const node of graph.nodes) {
     if (ids.has(node.id)) {
@@ -93,6 +105,41 @@ export function validateGraph(graph: PipelineGraph): void {
   }
 
   topologicalOrder(graph);
+}
+
+function validateVariables(variables: ChatPipelineVariable[]): void {
+  if (!Array.isArray(variables)) {
+    throw new Error('管线变量必须是数组');
+  }
+  if (variables.length > MAX_VARIABLES) {
+    throw new Error(`管线变量最多 ${MAX_VARIABLES} 个`);
+  }
+
+  const keys = new Set<string>();
+  for (const variable of variables) {
+    if (typeof variable.key !== 'string' || !VARIABLE_KEY.test(variable.key)) {
+      throw new Error(`管线变量名无效：${String(variable.key)}`);
+    }
+    if (variable.key.length > MAX_VARIABLE_KEY_LENGTH) {
+      throw new Error(`管线变量名最多 ${MAX_VARIABLE_KEY_LENGTH} 个字符：${variable.key}`);
+    }
+    if (keys.has(variable.key)) {
+      throw new Error(`管线变量名重复：${variable.key}`);
+    }
+    keys.add(variable.key);
+
+    const value = variable.value;
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      throw new Error(`管线变量 ${variable.key} 的值必须是文本、数字或布尔`);
+    }
+    if (typeof value === 'string' && value.length > MAX_VARIABLE_TEXT) {
+      throw new Error(`管线变量 ${variable.key} 的文本不能超过 ${MAX_VARIABLE_TEXT} 个字符`);
+    }
+  }
 }
 
 /** Kahn's algorithm; also rejects cycles because a push-based DAG cannot loop. */

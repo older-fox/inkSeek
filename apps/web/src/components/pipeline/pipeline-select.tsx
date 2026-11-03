@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Plus } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,6 +7,17 @@ import { cn } from '@/lib/cn';
 export interface PipelineSelectOption {
   value: string;
   label: string;
+}
+
+export interface PipelineSelectCreate {
+  /** Section label above the input, e.g. 新建变量. */
+  label?: string;
+  placeholder?: string;
+  maxLength?: number;
+  /** Returns an error message, or `null` when the value is acceptable. */
+  validate?: (value: string) => string | null;
+  /** Persist the option here; the dropdown selects it right after. */
+  onCreate: (value: string) => void;
 }
 
 interface PipelineSelectProps {
@@ -19,6 +30,8 @@ interface PipelineSelectProps {
   menuTitle?: string;
   menuWidth?: number;
   className?: string;
+  /** Renders an inline create row at the bottom of the menu. */
+  create?: PipelineSelectCreate;
 }
 
 interface MenuPlacement {
@@ -44,6 +57,7 @@ export function PipelineSelect({
   menuTitle,
   menuWidth = 280,
   className,
+  create,
 }: PipelineSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -318,9 +332,95 @@ export function PipelineSelect({
                 </button>
               );
             })}
+            {create && (
+              <CreateRow
+                create={create}
+                onCommit={(next) => {
+                  onChange(next);
+                  close(true);
+                }}
+              />
+            )}
           </motion.div>,
           document.body,
         )}
     </>
+  );
+}
+
+function CreateRow({
+  create,
+  onCommit,
+}: {
+  create: PipelineSelectCreate;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = () => {
+    const value = draft.trim();
+    if (value === '') {
+      setError('请输入名称');
+      return;
+    }
+    const message = create.validate?.(value) ?? null;
+    if (message) {
+      setError(message);
+      return;
+    }
+    setError(null);
+    create.onCreate(value);
+    onCommit(value);
+  };
+
+  return (
+    <div
+      className="sticky bottom-0 -mx-2 -mb-2 mt-1 border-t border-mist-100/[0.08] bg-ink-900/95 px-2 pb-2 pt-2 backdrop-blur-xl"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' || event.key === 'Tab') {
+          // Let the menu's own handlers close it and move focus.
+          return;
+        }
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submit();
+        }
+      }}
+    >
+      <p className="px-1 pb-1.5 font-mono text-[0.52rem] uppercase tracking-[0.18em] text-mist-600">
+        {create.label ?? '新建'}
+      </p>
+      <div className="flex items-center gap-1.5">
+        <input
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setError(null);
+          }}
+          placeholder={create.placeholder ?? '输入名称'}
+          maxLength={create.maxLength}
+          spellCheck={false}
+          aria-label={create.label ?? '新建选项'}
+          className={cn(
+            'min-w-0 flex-1 rounded-md border bg-ink-950/70 px-2 py-1.5 font-mono text-[0.72rem] text-mist-200 outline-none transition placeholder:text-mist-600',
+            error
+              ? 'border-signal-400/50'
+              : 'border-mist-100/[0.12] focus:border-brass-400/45',
+          )}
+        />
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={submit}
+          className="flex shrink-0 items-center gap-1 rounded-md border border-brass-400/30 bg-brass-400/[0.08] px-2 py-1.5 text-[0.62rem] text-brass-200 transition hover:border-brass-400/60 hover:bg-brass-400/[0.14]"
+        >
+          <Plus className="size-3" strokeWidth={2} />
+          创建
+        </button>
+      </div>
+      {error && <p className="mt-1 px-1 text-[0.55rem] text-signal-400">{error}</p>}
+    </div>
   );
 }

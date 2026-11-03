@@ -7,6 +7,20 @@ import { History, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { formatDuration, formatRunTime } from './pipeline-ui';
 
+function formatVariableValue(value: unknown): string {
+  if (value === undefined || value === null) {
+    return '∅';
+  }
+  if (typeof value === 'string') {
+    return value.length > 24 ? `${value.slice(0, 24)}…` : value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  const text = JSON.stringify(value);
+  return text.length > 24 ? `${text.slice(0, 24)}…` : text;
+}
+
 const RUN_STATUS: Record<
   ChatPipelineRunStatus,
   { label: string; text: string; dot: string; border: string }
@@ -142,6 +156,23 @@ export function PipelineRunPanel({
             {cancelled > 0 && <span>{cancelled} 取消</span>}
             <span>{failed} 失败</span>
           </p>
+          {selectedRun.variableValues &&
+            Object.keys(selectedRun.variableValues).length > 0 && (
+              <div className="mt-1.5 rounded-lg border border-mist-100/[0.07] bg-ink-950/40 px-2 py-1.5">
+                <p className="font-mono text-[0.46rem] uppercase tracking-[0.12em] text-mist-600">
+                  变量 · 运行结束值
+                </p>
+                <p className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 font-mono text-[0.5rem]">
+                  {Object.entries(selectedRun.variableValues).map(([key, value]) => (
+                    <span key={key} className="truncate">
+                      <span className="text-[#8fd6c2]">{key}</span>
+                      <span className="text-mist-600"> = </span>
+                      <span className="text-mist-300">{formatVariableValue(value)}</span>
+                    </span>
+                  ))}
+                </p>
+              </div>
+            )}
           {selectedRun.error && (
             <p className="mt-1.5 line-clamp-2 text-[0.54rem] leading-4 text-signal-400">
               {selectedRun.error}

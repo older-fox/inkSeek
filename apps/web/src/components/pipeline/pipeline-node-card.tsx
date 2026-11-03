@@ -4,6 +4,7 @@ import type {
   ChatPipelineIoKind,
   ChatPipelineNodeRunSummary,
   ChatPipelineNodeType,
+  ChatPipelineVariable,
 } from '@inkseek/shared';
 import { canConnectPipelineKinds } from '@inkseek/shared';
 import { cn } from '@/lib/cn';
@@ -18,6 +19,7 @@ import {
   categoryOf,
   formatConfigValue,
   formatDuration,
+  variableSelectCreate,
 } from './pipeline-ui';
 import { PipelineSelect } from './pipeline-select';
 
@@ -28,9 +30,12 @@ interface PipelineNodeCardProps {
   run: ChatPipelineNodeRunSummary | undefined;
   /** Kind currently being dragged from an output port, for compatibility cues. */
   dragKind: ChatPipelineIoKind | null;
+  /** Variables declared on the graph, used by `pipeline-variables` selects. */
+  variables: ChatPipelineVariable[];
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
   onStartConnect: (event: React.PointerEvent<HTMLButtonElement>, portKey: string) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
+  onCreateVariable: (key: string) => void;
 }
 
 export function PipelineNodeCard({
@@ -39,9 +44,11 @@ export function PipelineNodeCard({
   selected,
   run,
   dragKind,
+  variables,
   onPointerDown,
   onStartConnect,
   onUpdateNodeConfig,
+  onCreateVariable,
 }: PipelineNodeCardProps) {
   const category = CATEGORY_STYLE[categoryOf(node, definition ? [definition] : [])];
   const Icon = category.icon;
@@ -144,7 +151,14 @@ export function PipelineNodeCard({
         {configEntries.length > 0 && (
           <div className="mt-2.5 space-y-1.5 rounded-lg border border-mist-100/[0.06] bg-ink-950/50 px-2 py-2">
             {configEntries.map(({ field, value }) => {
-              if (field.kind === 'select' && field.options?.length) {
+              const options =
+                field.optionsSource === 'pipeline-variables'
+                  ? variables.map((variable) => ({
+                      value: variable.key,
+                      label: variable.key,
+                    }))
+                  : field.options;
+              if (field.kind === 'select' && (options?.length || field.optionsSource)) {
                 const current = typeof value === 'string' ? value : '';
                 return (
                   <div key={field.key} className="flex min-w-0 items-center gap-2">
@@ -153,11 +167,16 @@ export function PipelineNodeCard({
                     </span>
                     <PipelineSelect
                       value={current}
-                      options={field.options}
+                      options={options ?? []}
                       onChange={(next) => onUpdateNodeConfig(node.id, field.key, next)}
                       ariaLabel={field.label}
                       variant="card"
                       menuTitle={field.label}
+                      create={
+                        field.optionsSource === 'pipeline-variables'
+                          ? variableSelectCreate(variables, onCreateVariable)
+                          : undefined
+                      }
                       className="flex-1"
                     />
                   </div>

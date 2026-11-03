@@ -1,5 +1,17 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   chatPipelineRunQuerySchema,
   chatPipelineScopeQuerySchema,
@@ -17,12 +29,14 @@ import {
 import { AuthGuard } from '../../auth/auth.guard.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { PipelineGraphService } from './pipeline-graph.service.js';
+import { PipelineEventsService } from './pipeline-events.service.js';
 import { ChatPipelineRunner } from './pipeline-runner.service.js';
 
 interface RunQuery {
   limit: number;
   scope?: ChatPipelineScope;
   scopeId?: string;
+  graphId?: string;
 }
 
 @ApiTags('pipeline')
@@ -33,6 +47,7 @@ export class PipelineController {
   constructor(
     private readonly pipeline: ChatPipelineRunner,
     private readonly graphs: PipelineGraphService,
+    private readonly events: PipelineEventsService,
   ) {}
 
   @Get('graph')
@@ -69,16 +84,67 @@ export class PipelineController {
   }
 
   @Get('runs')
-  @ApiOperation({ summary: '按时间倒序列出最近的管线运行，可按作用域筛选' })
+  @ApiOperation({ summary: '按时间倒序列出最近的管线运行，可按作用域或图筛选' })
   runs(
     @Query(new ZodValidationPipe(chatPipelineRunQuerySchema)) query: RunQuery,
   ): Promise<ChatPipelineRunSummary[]> {
-    return this.pipeline.listRuns(query.limit, { scope: query.scope, scopeId: query.scopeId });
+    return this.pipeline.listRuns(query.limit, {
+      scope: query.scope,
+      scopeId: query.scopeId,
+      graphId: query.graphId,
+    });
   }
 
   @Get('runs/:id')
   @ApiOperation({ summary: '读取单次管线运行及其节点轨迹' })
   run(@Param('id') id: string): Promise<ChatPipelineRunDetail> {
     return this.pipeline.getRun(id);
+  }
+
+  @Get('events')
+  @ApiOperation({ summary: '订阅管线运行开始与结束事件（调试画布实时跟随）' })
+  runEvents(@Req() request: FastifyRequest, @Res() reply: FastifyReply): void {
+    reply.hijack();
+
+    const response = reply.raw;
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    response.write('retry: 3000\n\n');
+    response.write(': connected\n\n');
+    response.flushHeaders();
+
+    let closed = false;
+    const cleanup = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      clearInterval(heartbeat);
+      subscription.unsubscribe();
+      response.end();
+    };
+
+    const subscription = this.events.stream().subscribe({
+      next: (event) => {
+        if (!closed) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+      },
+      error: cleanup,
+      complete: cleanup,
+    });
+
+    const heartbeat = setInterval(() => {
+      if (!closed) {
+        response.write(': keep-alive\n\n');
+      }
+    }, 15_000);
+
+    request.raw.on('close', cleanup);
+    response.on('close', cleanup);
   }
 }

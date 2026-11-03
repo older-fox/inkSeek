@@ -14,6 +14,7 @@ import {
   type ChatPipelineGraphSnapshot,
   type ChatPipelineNodeType,
   type ChatPipelineScope,
+  type ChatPipelineVariable,
   type PipelineScopeRef,
   type SaveChatPipelineGraphInput,
 } from '@inkseek/shared';
@@ -62,6 +63,7 @@ interface StoredGraphRecord {
   schemaVersion: number;
   nodes: Prisma.JsonValue;
   edges: Prisma.JsonValue;
+  variables: Prisma.JsonValue | null;
   updatedAt: Date;
 }
 
@@ -165,6 +167,7 @@ export class PipelineGraphService implements OnModuleInit {
       schemaVersion: PIPELINE_GRAPH_SCHEMA_VERSION,
       nodes,
       edges,
+      variables: input.variables.map((variable) => ({ ...variable })),
     };
     this.assertValid(next, true);
     stampNodeVersions(next);
@@ -190,6 +193,7 @@ export class PipelineGraphService implements OnModuleInit {
           schemaVersion: next.schemaVersion,
           nodes: toJson(next.nodes),
           edges: toJson(next.edges),
+          variables: toJson(next.variables),
         },
       });
 
@@ -221,6 +225,7 @@ export class PipelineGraphService implements OnModuleInit {
             schemaVersion: next.schemaVersion,
             nodes: toJson(next.nodes),
             edges: toJson(next.edges),
+            variables: toJson(next.variables),
           },
           select: { id: true, updatedAt: true },
         });
@@ -340,6 +345,7 @@ export class PipelineGraphService implements OnModuleInit {
         schemaVersion: graph.schemaVersion,
         nodes: toJson(graph.nodes),
         edges: toJson(graph.edges),
+        variables: toJson(graph.variables),
       },
     });
 
@@ -421,6 +427,7 @@ export class PipelineGraphService implements OnModuleInit {
           schemaVersion: graph.schemaVersion,
           nodes: toJson(graph.nodes),
           edges: toJson(graph.edges),
+          variables: toJson(graph.variables),
         },
         select: { updatedAt: true },
       });
@@ -528,7 +535,7 @@ function assertTypedGraph(graph: PipelineGraph): void {
   for (const node of graph.nodes) {
     const definition = getPipelineNode(node.type);
     try {
-      definition.validateConfig?.(node.config);
+      definition.validateConfig?.(node.config, graph);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`节点 ${node.id}（${node.type}）配置无效：${message}`, { cause: error });
@@ -652,6 +659,7 @@ function toContractGraph(graph: PipelineGraph, updatedAt: Date): ChatPipelineGra
         when: edge.when ? { field: edge.when.field, equals: edge.when.equals } : null,
       }),
     ),
+    variables: graph.variables.map((variable) => ({ ...variable })),
   };
 }
 
@@ -671,6 +679,7 @@ function signature(graph: PipelineGraph): string {
       toPort: edge.toPort,
       when: edge.when ? { field: edge.when.field, equals: edge.when.equals } : null,
     })),
+    variables: graph.variables,
   });
 }
 
@@ -745,6 +754,7 @@ function graphFromRecord(record: StoredGraphRecord): PipelineGraph {
     schemaVersion: record.schemaVersion,
     nodes: nodesFromJson(record.nodes),
     edges: edgesFromJson(record.edges),
+    variables: variablesFromJson(record.variables),
   };
 }
 
@@ -844,6 +854,30 @@ function edgesFromJson(value: Prisma.JsonValue): PipelineEdge[] {
       throw new Error(`边 ${from} -> ${to} 的条件格式错误`);
     }
     return { from, to, fromPort, toPort, when: { field: when['field'], equals: when['equals'] } };
+  });
+}
+
+function variablesFromJson(value: Prisma.JsonValue | null): ChatPipelineVariable[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('管线变量必须是数组');
+  }
+
+  return value.map((entry) => {
+    if (!isRecord(entry) || typeof entry['key'] !== 'string') {
+      throw new Error('管线变量格式错误');
+    }
+    const variableValue = entry['value'];
+    if (
+      typeof variableValue !== 'string' &&
+      typeof variableValue !== 'number' &&
+      typeof variableValue !== 'boolean'
+    ) {
+      throw new Error(`管线变量 ${entry['key']} 的值必须是文本、数字或布尔`);
+    }
+    return { key: entry['key'], value: variableValue };
   });
 }
 

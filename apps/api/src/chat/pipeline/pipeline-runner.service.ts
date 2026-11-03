@@ -20,6 +20,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { ImageDescriptionService } from '../image-description.service.js';
 import { PipelineEffectsService } from './pipeline-effects.service.js';
+import { PipelineEventsService } from './pipeline-events.service.js';
 import {
   topologicalOrder,
   type PipelineEdge,
@@ -54,6 +55,8 @@ type RunRecord = Prisma.ChatPipelineRunGetPayload<{ include: typeof RUN_INCLUDE 
 export interface PipelineRunFilter {
   scope?: ChatPipelineScope;
   scopeId?: string | null;
+  /** Matches runs that executed this exact graph, in every namespace. */
+  graphId?: string | null;
 }
 
 interface RunPlan {
@@ -84,6 +87,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     private readonly graphs: PipelineGraphService,
     private readonly effects: PipelineEffectsService,
     private readonly imageDescriptions: ImageDescriptionService,
+    private readonly events: PipelineEventsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -228,6 +232,9 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
 
   async listRuns(limit: number, filter: PipelineRunFilter = {}): Promise<ChatPipelineRunSummary[]> {
     const where: Prisma.ChatPipelineRunWhereInput = {};
+    if (filter.graphId) {
+      where.graphId = filter.graphId;
+    }
     if (filter.scope) {
       where.scope = toRunScope(filter.scope);
       where.scopeId = filter.scope === 'global' ? null : (filter.scopeId ?? null);
@@ -254,6 +261,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     return {
       ...this.toSummary(record),
       variables: asRecord(record.variables),
+      variableValues: asRecord(record.variableValues),
       effects: record.effects ?? null,
       nodes: record.nodes.map(
         (node): ChatPipelineNodeRunSummary => ({
@@ -309,8 +317,12 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
 
     const controller = new AbortController();
     this.activeRuns.set(runId, controller);
+    this.emitRunEvent(runId, plan, 'RUNNING');
 
     const outputs = new Map<string, Record<string, unknown>>();
+    const variables = new Map<string, unknown>(
+      graph.variables.map((variable) => [variable.key, variable.value]),
+    );
     const statuses = new Map<string, ChatPipelineNodeStatus>();
     const failures: string[] = [];
     const requestedEffects: PipelineEffect[] = [];
@@ -326,6 +338,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           config: node.config ?? null,
           join: node.join ?? 'all',
           ports: inputs,
+          vars: Object.fromEntries(variables),
         };
         const nodeStartedAt = new Date();
 
@@ -345,7 +358,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
         const rowId = await this.startNode(runId, node, nodeStartedAt, traceInput);
 
         try {
-          const helpers = createPipelineHelpers(message, outputs, inputs);
+          const helpers = createPipelineHelpers(message, outputs, inputs, variables);
           const result = await definition.run({
             message,
             graph,
@@ -354,6 +367,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
             inputs,
             resolve: helpers.resolve,
             template: helpers.template,
+            getVariable: (key) => variables.get(key),
+            setVariable: (key, value) => {
+              variables.set(key, value);
+            },
             wait: (ms) => this.wait(ms, controller.signal),
             describeImage: (input) => this.imageDescriptions.describe(input),
           });
@@ -401,7 +418,17 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.activeRuns.delete(runId);
-      await this.finishRun(runId, startedAt, outputs, statuses, failures, aborted, requestedEffects);
+      await this.finishRun(
+        runId,
+        startedAt,
+        outputs,
+        variables,
+        statuses,
+        failures,
+        aborted,
+        requestedEffects,
+        plan,
+      );
     }
 
     return runId;
@@ -411,10 +438,12 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     runId: string,
     startedAt: Date,
     outputs: PipelineOutputs,
+    variables: ReadonlyMap<string, unknown>,
     statuses: Map<string, ChatPipelineNodeStatus>,
     failures: string[],
     aborted: boolean,
     effects: PipelineEffect[],
+    plan: RunPlan,
   ): Promise<void> {
     const finishedAt = new Date();
     const durationMs = Math.max(0, finishedAt.getTime() - startedAt.getTime());
@@ -435,6 +464,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           durationMs,
           error: error ? truncate(error, 2000) : null,
           variables: toInputJson(Object.fromEntries(outputs)),
+          variableValues: toInputJson(Object.fromEntries(variables)),
           effects: effects.length > 0 ? toInputJson(effects) : undefined,
         },
       });
@@ -444,6 +474,8 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    this.emitRunEvent(runId, plan, status);
+
     const branchSummary = [...statuses.entries()]
       .map(([id, nodeStatus]) => `${id}:${nodeStatus}`)
       .join(', ');
@@ -451,6 +483,22 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       `管线运行 ${runId} ${status} ${durationMs}ms [${branchSummary}]` +
         (error ? ` error=${error}` : ''),
     );
+  }
+
+  private emitRunEvent(
+    runId: string,
+    plan: RunPlan,
+    status: ChatPipelineRunStatus,
+  ): void {
+    this.events.emit({
+      runId,
+      graphId: plan.graph.id,
+      scope: plan.scope,
+      scopeId: plan.scopeId,
+      mode: plan.mode,
+      status,
+      at: new Date().toISOString(),
+    });
   }
 
   /** Opens a RUNNING row before the node executes, so waits stay visible. */
@@ -672,8 +720,9 @@ function collectInputs(
 }
 
 /**
- * Source nodes (no inputs) run unconditionally; every other node needs active
- * edges. `all` additionally requires every incoming edge to be active and every
+ * Unwired nodes run when they either need no inputs or declare `alwaysRun`
+ * (their inputs only order execution). Every other node needs active edges.
+ * `all` additionally requires every incoming edge to be active and every
  * required port to have received a value.
  */
 function shouldRunNode(
@@ -684,7 +733,7 @@ function shouldRunNode(
   inputs: PipelineInputs,
 ): boolean {
   if (edges.length === 0) {
-    return definition.inputs.length === 0;
+    return definition.inputs.length === 0 || definition.alwaysRun === true;
   }
 
   if (node.join === 'any') {

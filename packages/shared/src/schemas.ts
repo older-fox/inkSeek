@@ -166,6 +166,8 @@ export const chatPipelineRunQuerySchema = z
     limit: z.coerce.number().int('数量必须是整数').min(1).max(100).default(30),
     scope: chatPipelineScopeSchema.optional(),
     scopeId: z.string().trim().min(1).max(64).optional(),
+    /** Watch every namespace that runs this exact graph (debug mode). */
+    graphId: z.string().trim().min(1).max(64).optional(),
   })
   .superRefine((value, context) => {
     if (value.scope && value.scope !== 'global' && !value.scopeId) {
@@ -183,6 +185,28 @@ const pipelineNodeIdSchema = z
   .min(1, '节点 id 不能为空')
   .max(48, '节点 id 最多 48 个字符')
   .regex(/^[A-Za-z0-9_-]+$/, '节点 id 仅支持字母、数字、下划线和连字符');
+
+const pipelineVariableKeySchema = z
+  .string()
+  .trim()
+  .min(1, '变量名不能为空')
+  .max(32, '变量名最多 32 个字符')
+  .regex(/^[A-Za-z0-9_-]+$/, '变量名仅支持字母、数字、下划线和连字符');
+
+const pipelineVariableValueSchema = z.union([
+  z.string().max(4000, '变量文本过长'),
+  z.number(),
+  z.boolean(),
+]);
+
+const pipelineVariablesSchema = z
+  .array(z.object({ key: pipelineVariableKeySchema, value: pipelineVariableValueSchema }))
+  .max(32, '管线变量最多 32 个')
+  .default([])
+  .refine(
+    (variables) => new Set(variables.map((variable) => variable.key)).size === variables.length,
+    '变量名不能重复',
+  );
 
 const pipelinePortSchema = z
   .string()
@@ -230,6 +254,7 @@ export const saveChatPipelineGraphSchema = z.object({
       }),
     )
     .max(200, '连线数量过多'),
+  variables: pipelineVariablesSchema,
 })
   .superRefine(requireScopedId);
 

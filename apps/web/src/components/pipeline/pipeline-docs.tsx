@@ -27,6 +27,7 @@ const CONFIG_KIND_LABEL: Record<ChatPipelineConfigFieldKind, string> = {
 const CATEGORY_ORDER: ChatPipelineNodeCategory[] = [
   'system',
   'data',
+  'variable',
   'media',
   'text',
   'logic',
@@ -104,6 +105,16 @@ export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
                 </dd>
               </div>
               <div>
+                <dt className="inline font-mono text-mist-200">源卡片</dt>
+                <dd className="inline">
+                  {' '}
+                  没有输入端口的卡片（取消息内容、固定内容）每次运行都直接执行，
+                  不需要上级激活，适合提供判定用的固定值或消息字段；读取变量在没有接线时也会直接执行。
+                  要让读取发生在写入之后，把「写入变量」的{' '}
+                  <span className="font-mono">value</span> 接到「读取变量」的顺序端口。
+                </dd>
+              </div>
+              <div>
                 <dt className="inline font-mono text-mist-200">消息对象</dt>
                 <dd className="inline">
                   {' '}
@@ -162,10 +173,30 @@ export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
                 </dd>
               </div>
               <div>
+                <dt className="inline font-mono text-mist-200">$vars.名称</dt>
+                <dd className="inline">
+                  {' '}
+                  读取管线变量，例如 <span className="font-mono">$vars.counter</span>，
+                  模板中写作 <span className="font-mono">{'{{vars.counter}}'}</span>。
+                  变量在图设置里声明，也可以直接在「读取变量 / 写入变量」的变量下拉底部新建；
+                  每次跑图都从声明值开始；「写入变量」只改本次运行的值，不会改动图。
+                </dd>
+              </div>
+              <div>
                 <dt className="inline font-mono text-mist-200">连线条件</dt>
                 <dd className="inline">
                   {' '}
                   连线可只在来源节点某字段等于指定值时激活；汇合节点用「任一命中」接收分支。
+                </dd>
+              </div>
+              <div>
+                <dt className="inline font-mono text-mist-200">调试模式</dt>
+                <dd className="inline">
+                  {' '}
+                  顶栏的「调试」开关保存在本机浏览器。开启后自动跟随这张图的最新一次运行
+                  （包括其他渠道继承同一张图时的实时消息），连线中点会显示来源输出与目标输入的实际值，
+                  运行中的连线带流动光点；点选连线或节点，右侧检查器会展开完整的输入 / 输出与判定结果。
+                  调试模式只叠加观察，不会改动图或运行数据。
                 </dd>
               </div>
             </dl>

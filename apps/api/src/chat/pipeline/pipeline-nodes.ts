@@ -1,4 +1,5 @@
 import type { ChatPipelineMessageValue } from '@inkseek/shared';
+import type { PipelineGraph } from './pipeline-graph.js';
 import type {
   PipelineEffect,
   PipelineInputs,
@@ -29,15 +30,23 @@ function readPath(root: unknown, path: string): unknown {
   }, root);
 }
 
+type PipelineVariables = ReadonlyMap<string, unknown>;
+
 function readReference(
   reference: string,
   message: PipelineMessage,
   outputs: PipelineOutputs,
   inputs: PipelineInputs,
+  variables: PipelineVariables,
 ): unknown {
   const [root, ...rest] = reference.split('.');
   if (!root) {
     return undefined;
+  }
+
+  if (root === 'vars') {
+    const [key, ...fieldPath] = rest;
+    return readPath(key ? variables.get(key) : undefined, fieldPath.join('.'));
   }
 
   const base =
@@ -67,17 +76,18 @@ function createHelpers(
   message: PipelineMessage,
   outputs: PipelineOutputs,
   inputs: PipelineInputs,
+  variables: PipelineVariables,
 ) {
   const template = (text: string): string =>
     text.replace(TEMPLATE, (_match, reference: string) =>
-      stringify(readReference(reference, message, outputs, inputs)),
+      stringify(readReference(reference, message, outputs, inputs, variables)),
     );
 
   const resolve = (value: unknown): unknown => {
     if (typeof value === 'string') {
       const exact = REFERENCE.exec(value);
       if (exact?.[1]) {
-        return readReference(exact[1], message, outputs, inputs);
+        return readReference(exact[1], message, outputs, inputs, variables);
       }
       if (value.includes('{{')) {
         return template(value);
@@ -182,6 +192,74 @@ function readDelayMs(config: Record<string, unknown> | undefined): number {
     throw new Error(`等待时长必须是 0–${MAX_DELAY_MS} 之间的毫秒数`);
   }
   return Math.round(value);
+}
+
+/**
+ * Reads the variable a card targets. An empty value is allowed so a freshly
+ * added card can be saved before the user picks one; a non-empty key must be
+ * declared on the graph, otherwise the save is rejected.
+ */
+function readVariableKey(
+  config: Record<string, unknown> | undefined,
+  graph: PipelineGraph,
+): string | null {
+  const raw = config?.['variable'];
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  if (typeof raw !== 'string') {
+    throw new Error('管线变量字段必须是字符串');
+  }
+  const key = raw.trim();
+  if (key.length === 0) {
+    return null;
+  }
+  if (!graph.variables.some((variable) => variable.key === key)) {
+    throw new Error(`管线变量 ${key} 未声明，请先在图的变量列表里添加`);
+  }
+  return key;
+}
+
+type ConstantKind = 'text' | 'number' | 'boolean';
+
+function readConstantKind(config: Record<string, unknown> | undefined): ConstantKind {
+  const value = config?.['kind'];
+  if (value === undefined) {
+    return 'text';
+  }
+  if (value !== 'text' && value !== 'number' && value !== 'boolean') {
+    throw new Error('固定内容的类型必须是 text、number 或 boolean');
+  }
+  return value;
+}
+
+function readConstantValue(config: Record<string, unknown> | undefined): string | number | boolean {
+  const raw = readOptionalString(config, 'value') ?? '';
+  switch (readConstantKind(config)) {
+    case 'text':
+      return raw;
+    case 'number': {
+      const trimmed = raw.trim();
+      if (trimmed.length === 0) {
+        throw new Error('固定内容缺少数字');
+      }
+      const value = Number(trimmed);
+      if (!Number.isFinite(value)) {
+        throw new Error(`固定内容不是有效数字：${raw}`);
+      }
+      return value;
+    }
+    default: {
+      const trimmed = raw.trim().toLowerCase();
+      if (trimmed === '' || trimmed === 'false') {
+        return false;
+      }
+      if (trimmed === 'true') {
+        return true;
+      }
+      throw new Error('布尔固定内容只能填 true 或 false');
+    }
+  }
 }
 
 function readImages(value: unknown): string[] {
@@ -347,6 +425,183 @@ const getObjectField: PipelineNodeDefinition = {
         found: value !== undefined && value !== null,
       },
     };
+  },
+};
+
+const readMessageField: PipelineNodeDefinition = {
+  type: 'message.get',
+  version: 1,
+  label: '取消息内容',
+  category: 'data',
+  description:
+    '无需接线，直接从本条消息对象里取一个字段（发送者、正文、引用、图片等），输出 value / text / found。',
+  defaultConfig: { path: 'text' },
+  fields: [
+    {
+      key: 'path',
+      label: '取值字段',
+      kind: 'select',
+      options: MESSAGE_FIELD_OPTIONS,
+      hint: '读取的就是本条入站消息，不需要把消息对象接进来。',
+    },
+  ],
+  inputs: [],
+  outputs: [
+    { key: 'value', label: '取值结果', kind: 'any', description: '对象或数组可直接接入任意端口。' },
+    {
+      key: 'text',
+      label: '文本形式',
+      kind: 'text',
+      description: '字符串原样输出，其它值转成 JSON 文本。',
+    },
+    {
+      key: 'found',
+      label: '是否存在',
+      kind: 'boolean',
+      description: '值为 null / undefined 时为 false，可直接用于分支条件。',
+    },
+  ],
+  run: (context) => {
+    const path = (readOptionalString(context.node.config, 'path') ?? '').trim();
+    const value = readPath(messageValueOf(context.message), path);
+    return {
+      outputs: {
+        value: value === undefined ? null : value,
+        text: stringify(value),
+        found: value !== undefined && value !== null,
+      },
+    };
+  },
+};
+
+const constantValue: PipelineNodeDefinition = {
+  type: 'value.constant',
+  version: 1,
+  label: '固定内容',
+  category: 'data',
+  description:
+    '无需上级激活，直接输出一段固定的文本、数字或布尔值，用来做阈值、固定回复或与上游取值比较。',
+  defaultConfig: { kind: 'text', value: '' },
+  fields: [
+    {
+      key: 'kind',
+      label: '内容类型',
+      kind: 'select',
+      options: [
+        { value: 'text', label: '文本' },
+        { value: 'number', label: '数字' },
+        { value: 'boolean', label: '布尔' },
+      ],
+    },
+    {
+      key: 'value',
+      label: '内容',
+      kind: 'string',
+      placeholder: '固定内容',
+      hint: '数字直接填如 42；布尔填 true 或 false。',
+    },
+  ],
+  inputs: [],
+  outputs: [
+    { key: 'value', label: '固定值', kind: 'any', description: '保持所选类型：文本、数字或布尔。' },
+    { key: 'text', label: '文本形式', kind: 'text', description: '固定内容的字符串形式。' },
+  ],
+  run: (context) => {
+    const value = readConstantValue(context.node.config);
+    return { outputs: { value, text: stringify(value) } };
+  },
+};
+
+const getVariable: PipelineNodeDefinition = {
+  type: 'vars.get',
+  version: 2,
+  label: '读取变量',
+  category: 'variable',
+  description:
+    '读取管线变量的当前值；默认直接执行，把「写入变量」的 value 接到顺序端口即可保证先写后读。',
+  alwaysRun: true,
+  defaultConfig: { variable: '' },
+  fields: [
+    {
+      key: 'variable',
+      label: '管线变量',
+      kind: 'select',
+      optionsSource: 'pipeline-variables',
+      hint: '先在画布「管线变量」里声明；这里选中的变量会在每次运行开始时重置。',
+    },
+  ],
+  inputs: [
+    {
+      key: 'after',
+      label: '顺序（可选）',
+      kind: 'any',
+      optional: true,
+      description:
+        '只用于约束执行顺序：把「写入变量」的 value 接进来，读取就会发生在写入之后。',
+    },
+  ],
+  outputs: [
+    { key: 'value', label: '变量值', kind: 'any' },
+    { key: 'text', label: '文本形式', kind: 'text' },
+    { key: 'exists', label: '是否存在', kind: 'boolean', description: '未选择或未声明时为 false。' },
+  ],
+  validateConfig: (config, graph) => {
+    readVariableKey(config, graph);
+  },
+  run: (context) => {
+    const key = readVariableKey(context.node.config, context.graph);
+    const value = key === null ? undefined : context.getVariable(key);
+    return {
+      outputs: {
+        value: value === undefined ? null : value,
+        text: stringify(value),
+        exists: value !== undefined,
+      },
+    };
+  },
+};
+
+const setVariable: PipelineNodeDefinition = {
+  type: 'vars.set',
+  version: 1,
+  label: '写入变量',
+  category: 'variable',
+  description:
+    '把接入的值写入管线变量并原样传给下游；把 value 接到「读取变量」的顺序端口，就能保证读取在写入之后。',
+  defaultConfig: { variable: '' },
+  fields: [
+    {
+      key: 'variable',
+      label: '管线变量',
+      kind: 'select',
+      optionsSource: 'pipeline-variables',
+      hint: '只能写入已声明的变量；写入只影响本次运行，不会改动声明值。',
+    },
+  ],
+  inputs: [
+    {
+      key: 'value',
+      label: '要写入的值',
+      kind: 'any',
+      description: '任意类型的值，写入变量后原样从 value 端口流出。',
+    },
+  ],
+  outputs: [
+    { key: 'value', label: '写入的值', kind: 'any' },
+    { key: 'text', label: '文本形式', kind: 'text' },
+    { key: 'variable', label: '变量名', kind: 'text' },
+  ],
+  validateConfig: (config, graph) => {
+    readVariableKey(config, graph);
+  },
+  run: (context) => {
+    const key = readVariableKey(context.node.config, context.graph);
+    if (key === null) {
+      throw new Error('请选择要写入的管线变量');
+    }
+    const value = context.inputs['value'] ?? null;
+    context.setVariable(key, value);
+    return { outputs: { value, text: stringify(value), variable: key } };
   },
 };
 
@@ -1013,6 +1268,10 @@ const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   messageInput,
   messageOutput,
   getObjectField,
+  readMessageField,
+  constantValue,
+  getVariable,
+  setVariable,
   templateText,
   transformText,
   regexText,
@@ -1041,11 +1300,12 @@ export function createPipelineHelpers(
   message: PipelineMessage,
   outputs: PipelineOutputs,
   inputs: PipelineInputs,
+  variables: PipelineVariables,
 ): {
   resolve: (value: unknown) => unknown;
   template: (text: string) => string;
 } {
-  return createHelpers(message, outputs, inputs);
+  return createHelpers(message, outputs, inputs, variables);
 }
 
 export type { PipelineNodeContext };

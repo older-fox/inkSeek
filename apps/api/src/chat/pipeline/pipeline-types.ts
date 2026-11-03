@@ -91,10 +91,14 @@ export interface PipelineNodeContext {
   node: PipelineNode;
   outputs: PipelineOutputs;
   inputs: PipelineInputs;
-  /** Resolves `$nodeId.field` / `$input.port` references and `{{…}}` templates. */
+  /** Resolves `$nodeId.field` / `$input.port` / `$vars.key` references and `{{…}}` templates. */
   resolve(value: unknown): unknown;
   /** Interpolates a template string using the same references. */
   template(template: string): string;
+  /** Live pipeline variable value; undefined when the key was never declared. */
+  getVariable(key: string): unknown;
+  /** Writes a pipeline variable for later cards in the same run. */
+  setVariable(key: string, value: unknown): void;
   /** Waits `ms`; the runner owns the timer and cancels it on shutdown. */
   wait(ms: number): Promise<void>;
   /** Hashes the image, returns a cached description or asks a vision model. */
@@ -113,13 +117,18 @@ export interface PipelineNodeDefinition {
   system?: boolean;
   /** Join mode used when the node is added from the palette. */
   defaultJoin?: ChatPipelineJoin;
+  /** Runs even without incoming edges; for cards whose inputs only order execution. */
+  alwaysRun?: boolean;
   defaultConfig: Record<string, unknown>;
   fields: ChatPipelineConfigField[];
   /** Typed input ports; edges connect to these keys. */
   inputs: ChatPipelineIoField[];
   /** Fields the node writes into its output namespace. */
   outputs: ChatPipelineIoField[];
-  /** Save-time validation for the node config; throwing rejects the save. */
-  validateConfig?(config: Record<string, unknown> | undefined): void;
+  /**
+   * Save-time validation for the node config; throwing rejects the save. The
+   * graph is passed so cards can check references against declared variables.
+   */
+  validateConfig?(config: Record<string, unknown> | undefined, graph: PipelineGraph): void;
   run(context: PipelineNodeContext): PipelineNodeResult | Promise<PipelineNodeResult>;
 }

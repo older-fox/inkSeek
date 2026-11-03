@@ -71,7 +71,13 @@ export const pipelineGraphQuery = (ref: PipelineScopeRef) =>
 
 export const pipelineRunsQuery = (filter: PipelineRunFilter) =>
   queryOptions({
-    queryKey: ['pipeline', 'runs', filter.scope ?? 'all', filter.scopeId ?? null],
+    queryKey: [
+      'pipeline',
+      'runs',
+      filter.graphId ?? null,
+      filter.scope ?? 'all',
+      filter.scopeId ?? null,
+    ],
     queryFn: () => api.pipelineRuns(30, filter),
     staleTime: 3_000,
   });

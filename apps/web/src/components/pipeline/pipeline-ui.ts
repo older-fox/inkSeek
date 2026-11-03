@@ -6,9 +6,11 @@ import type {
   ChatPipelineNodePosition,
   ChatPipelineNodeStatus,
   ChatPipelineNodeType,
+  ChatPipelineVariable,
 } from '@inkseek/shared';
 import type { LucideIcon } from 'lucide-react';
-import { Braces, Cpu, GitBranch, Images, Timer, Type } from 'lucide-react';
+import { Braces, Cpu, GitBranch, Images, Timer, Type, Variable } from 'lucide-react';
+import type { PipelineSelectCreate } from './pipeline-select';
 
 export const CARD_WIDTH = 248;
 /** Fixed header band; port rows start right below it. */
@@ -76,6 +78,14 @@ export const CATEGORY_STYLE: Record<
     border: 'border-[#a98fd6]/30',
     background: 'bg-[#a98fd6]/[0.08]',
     dot: 'bg-[#a98fd6]',
+  },
+  variable: {
+    label: '变量',
+    icon: Variable,
+    text: 'text-[#8fd6c2]',
+    border: 'border-[#6fc0aa]/30',
+    background: 'bg-[#6fc0aa]/[0.08]',
+    dot: 'bg-[#6fc0aa]',
   },
 };
 
@@ -211,6 +221,26 @@ export function edgeMidpoint(
   return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
 }
 
+/** Point at `t` on the cubic bezier drawn by `edgePath`. */
+export function edgeCurvePoint(
+  start: ChatPipelineNodePosition,
+  end: ChatPipelineNodePosition,
+  t: number,
+): ChatPipelineNodePosition {
+  const distance = Math.max(48, Math.abs(end.x - start.x) * 0.5);
+  const control1 = { x: start.x + distance, y: start.y };
+  const control2 = { x: end.x - distance, y: end.y };
+  const mt = 1 - t;
+  const a = mt * mt * mt;
+  const b = 3 * mt * mt * t;
+  const c = 3 * mt * t * t;
+  const d = t * t * t;
+  return {
+    x: a * start.x + b * control1.x + c * control2.x + d * end.x,
+    y: a * start.y + b * control1.y + c * control2.y + d * end.y,
+  };
+}
+
 export function categoryOf(
   node: ChatPipelineGraphNode,
   catalog: ChatPipelineNodeType[],
@@ -240,6 +270,50 @@ export function formatConditionValue(value: unknown): string {
     return `"${value}"`;
   }
   return JSON.stringify(value) ?? 'null';
+}
+
+/** One-line runtime value for edge pills; whitespace is flattened. */
+export function formatRuntimePreview(value: unknown, max = 26): string {
+  if (value === undefined) {
+    return '—';
+  }
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value === 'string') {
+    const text = value.replace(/\s+/g, ' ').trim();
+    if (text === '') {
+      return '空文本';
+    }
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.length} 项]`;
+  }
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) {
+      return String(value);
+    }
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  } catch {
+    return '…';
+  }
+}
+
+/** Pretty runtime value for inspector blocks. */
+export function formatRuntimeDetail(value: unknown): string {
+  if (value === undefined) {
+    return '（未收到）';
+  }
+  try {
+    return JSON.stringify(value, null, 2) ?? 'null';
+  } catch {
+    return String(value);
+  }
 }
 
 export function formatRunTime(iso: string): string {
@@ -288,4 +362,32 @@ export function wouldCreateCycle(
   }
 
   return false;
+}
+
+export const VARIABLE_KEY_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+export const MAX_PIPELINE_VARIABLES = 32;
+
+/** Create-row config for dropdowns that pick a pipeline variable. */
+export function variableSelectCreate(
+  variables: ChatPipelineVariable[],
+  onCreate: (key: string) => void,
+): PipelineSelectCreate {
+  return {
+    label: '新建变量',
+    placeholder: '变量名，如 counter',
+    maxLength: 32,
+    validate: (value) => {
+      if (!VARIABLE_KEY_PATTERN.test(value)) {
+        return '仅限字母、数字、下划线或连字符，1–32 个字符';
+      }
+      if (variables.some((variable) => variable.key === value)) {
+        return '该变量已存在，直接选择即可';
+      }
+      if (variables.length >= MAX_PIPELINE_VARIABLES) {
+        return `一张图最多 ${MAX_PIPELINE_VARIABLES} 个变量`;
+      }
+      return null;
+    },
+    onCreate,
+  };
 }

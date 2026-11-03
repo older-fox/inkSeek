@@ -319,13 +319,43 @@ export interface ChatPipelineRunSummary {
 export interface ChatPipelineRunDetail extends ChatPipelineRunSummary {
   /** Final namespaced node outputs: `{ [nodeId]: output }`. */
   variables: Record<string, unknown> | null;
+  /** Final pipeline variable values after the run: `{ [key]: value }`. */
+  variableValues: Record<string, unknown> | null;
   /** Effects the nodes asked for; debug runs record them without committing. */
   effects: unknown;
   nodes: ChatPipelineNodeRunSummary[];
 }
 
-export type ChatPipelineNodeCategory = 'system' | 'text' | 'logic' | 'data' | 'media' | 'flow';
+/** Pushed over SSE so an open canvas can follow runs in real time. */
+export interface ChatPipelineRunEvent {
+  runId: string;
+  graphId: string;
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+  mode: ChatPipelineRunMode;
+  /** `RUNNING` when the run opens, the final status when it settles. */
+  status: ChatPipelineRunStatus;
+  at: string;
+}
+
+export type ChatPipelineNodeCategory =
+  | 'system'
+  | 'text'
+  | 'logic'
+  | 'data'
+  | 'media'
+  | 'flow'
+  | 'variable';
 export type ChatPipelineJoin = 'all' | 'any';
+
+/**
+ * Declared on the graph, reset to `value` at the start of every run. Cards read
+ * the live value through `$vars.<key>` / `{{vars.<key>}}` or the `vars.get` card.
+ */
+export interface ChatPipelineVariable {
+  key: string;
+  value: string | number | boolean;
+}
 
 /**
  * Structured message object emitted by the `message.input` card. Downstream
@@ -408,6 +438,8 @@ export interface ChatPipelineGraph {
   updatedAt: string;
   nodes: ChatPipelineGraphNode[];
   edges: ChatPipelineGraphEdge[];
+  /** Graph-level variables, in palette order; every run starts from these values. */
+  variables: ChatPipelineVariable[];
 }
 
 export type ChatPipelineConfigFieldKind =
@@ -420,10 +452,14 @@ export type ChatPipelineConfigFieldKind =
 
 /**
  * Select fields can resolve their options at runtime instead of listing them in
- * the catalog: `model-providers` lists configured model providers, and
- * `provider-models` lists the models of the provider named by `dependsOn`.
+ * the catalog: `model-providers` lists configured model providers,
+ * `provider-models` lists the models of the provider named by `dependsOn`, and
+ * `pipeline-variables` lists the variables declared on the current graph.
  */
-export type ChatPipelineConfigOptionsSource = 'model-providers' | 'provider-models';
+export type ChatPipelineConfigOptionsSource =
+  | 'model-providers'
+  | 'provider-models'
+  | 'pipeline-variables';
 
 export interface ChatPipelineConfigField {
   key: string;
@@ -511,6 +547,7 @@ export interface SaveChatPipelineGraphInput extends PipelineScopeRef {
   name: string;
   nodes: ChatPipelineGraphNode[];
   edges: ChatPipelineGraphEdge[];
+  variables: ChatPipelineVariable[];
   /** Revision the editor loaded; a mismatch means another window saved first. */
   expectedRevision: number;
   /** Graph row the editor loaded; guards the copy-on-write race. */

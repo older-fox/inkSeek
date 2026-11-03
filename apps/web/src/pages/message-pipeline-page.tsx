@@ -6,6 +6,7 @@ import type {
   ChatPipelineNodeType,
   ChatPipelineRunDetail,
   ChatPipelineScope,
+  ChatPipelineVariable,
   PipelineScopeRef,
   SaveChatPipelineGraphInput,
 } from '@inkseek/shared';
@@ -15,6 +16,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import {
   AlertTriangle,
   BookOpen,
+  Bug,
   CheckCircle2,
   ChevronDown,
   CopyPlus,
@@ -39,11 +41,13 @@ import {
   CARD_WIDTH,
   CATEGORY_STYLE,
   IO_KIND_STYLE,
+  MAX_PIPELINE_VARIABLES,
   wouldCreateCycle,
   type PipelineSelection,
 } from '@/components/pipeline/pipeline-ui';
 import { cn } from '@/lib/cn';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, type PipelineRunFilter } from '@/lib/api';
+import { usePipelineRunEvents } from '@/lib/pipeline-events';
 import {
   chatChannelsQuery,
   personasQuery,
@@ -54,6 +58,8 @@ import {
 
 type SaveState = 'saved' | 'saving' | 'error' | 'conflict';
 
+const DEBUG_STORAGE_KEY = 'inkseek.pipeline.debug';
+
 function toInput(graph: ChatPipelineGraph, ref: PipelineScopeRef): SaveChatPipelineGraphInput {
   return {
     scope: ref.scope,
@@ -61,6 +67,7 @@ function toInput(graph: ChatPipelineGraph, ref: PipelineScopeRef): SaveChatPipel
     name: graph.name.trim() || '未命名消息图',
     nodes: graph.nodes,
     edges: graph.edges,
+    variables: graph.variables,
     expectedRevision: graph.revision,
     expectedGraphId: graph.id,
   };
@@ -91,7 +98,6 @@ export function MessagePipelinePage() {
   refRef.current = scopeRef;
 
   const graphQuery = useQuery(pipelineGraphQuery(scopeRef));
-  const runsQuery = useQuery(pipelineRunsQuery(scopeRef));
   const channelsQuery = useQuery(chatChannelsQuery);
   const personaListQuery = useQuery(personasQuery);
 
@@ -110,6 +116,24 @@ export function MessagePipelinePage() {
   const [docsOpen, setDocsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
+  const [debugMode, setDebugMode] = useState(() => {
+    try {
+      return window.localStorage.getItem(DEBUG_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const watchGraphId = graph?.id ?? graphQuery.data?.graph.id ?? null;
+  const runFilter = useMemo<PipelineRunFilter>(
+    () => (debugMode && watchGraphId ? { graphId: watchGraphId } : scopeRef),
+    [debugMode, watchGraphId, scopeRef],
+  );
+  const runsQuery = useQuery({
+    ...pipelineRunsQuery(runFilter),
+    // SSE pushes lifecycle events; polling is the fallback when it drops.
+    refetchInterval: debugMode ? 4000 : false,
+  });
 
   const graphRef = useRef<ChatPipelineGraph | null>(null);
   const dirtyRef = useRef(false);
@@ -176,6 +200,42 @@ export function MessagePipelinePage() {
     setSelectedRunId(runsQuery.data[0]?.id ?? null);
   }, [runsQuery.data, refKey]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DEBUG_STORAGE_KEY, debugMode ? '1' : '0');
+    } catch {
+      // 隐私模式下 localStorage 不可写，开关仅在本次会话生效。
+    }
+  }, [debugMode]);
+
+  const debugFollowRef = useRef<string | null>(null);
+  useEffect(() => {
+    const runs = runsQuery.data;
+    if (debugMode) {
+      const top = runs?.[0]?.id ?? null;
+      if (top && debugFollowRef.current !== top) {
+        debugFollowRef.current = top;
+        setSelectedRunId(top);
+      }
+      return;
+    }
+    debugFollowRef.current = null;
+    if (!runs || runs.length === 0) {
+      return;
+    }
+    setSelectedRunId((current) =>
+      current && runs.some((run) => run.id === current) ? current : (runs[0]?.id ?? null),
+    );
+  }, [debugMode, runsQuery.data]);
+
+  usePipelineRunEvents(debugMode && Boolean(watchGraphId), (event) => {
+    if (event.graphId !== watchGraphId) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: ['pipeline', 'runs'] });
+    void queryClient.invalidateQueries({ queryKey: ['pipeline', 'run', event.runId] });
+  });
+
   const switchScope = (nextScope: ChatPipelineScope, nextId: string | null) => {
     setScopeMenuOpen(false);
     setFollowArmed(false);
@@ -188,7 +248,11 @@ export function MessagePipelinePage() {
     });
   };
 
-  const detailQuery = useQuery(pipelineRunQuery(selectedRunId ?? ''));
+  const detailQuery = useQuery({
+    ...pipelineRunQuery(selectedRunId ?? ''),
+    refetchInterval: (query) =>
+      debugMode && query.state.data?.status === 'RUNNING' ? 1200 : false,
+  });
   const nodeRuns = useMemo(
     () => new Map((detailQuery.data?.nodes ?? []).map((node) => [node.nodeId, node])),
     [detailQuery.data],
@@ -357,6 +421,82 @@ export function MessagePipelinePage() {
         ...current,
         edges: current.edges.map((edge, currentIndex) =>
           currentIndex === index ? { ...edge, ...patch } : edge,
+        ),
+      }));
+    },
+    [applyGraph],
+  );
+
+  const addVariable = useCallback(() => {
+    applyGraph((current) => {
+      let index = 1;
+      while (current.variables.some((variable) => variable.key === `var_${index}`)) {
+        index += 1;
+      }
+      return {
+        ...current,
+        variables: [...current.variables, { key: `var_${index}`, value: '' }],
+      };
+    });
+  }, [applyGraph]);
+
+  const createVariable = useCallback(
+    (key: string) => {
+      const current = graphRef.current;
+      if (!current || current.variables.some((variable) => variable.key === key)) {
+        return;
+      }
+      if (current.variables.length >= MAX_PIPELINE_VARIABLES) {
+        flash(`一张图最多 ${MAX_PIPELINE_VARIABLES} 个变量`);
+        return;
+      }
+      applyGraph((graph) => ({
+        ...graph,
+        variables: [...graph.variables, { key, value: '' }],
+      }));
+    },
+    [applyGraph, flash],
+  );
+
+  const renameVariable = useCallback(
+    (from: string, to: string) => {
+      applyGraph((current) => ({
+        ...current,
+        variables: current.variables.map((variable) =>
+          variable.key === from ? { ...variable, key: to } : variable,
+        ),
+        nodes: current.nodes.map((node) =>
+          node.config?.['variable'] === from
+            ? { ...node, config: { ...node.config, variable: to } }
+            : node,
+        ),
+      }));
+    },
+    [applyGraph],
+  );
+
+  const updateVariableValue = useCallback(
+    (key: string, value: ChatPipelineVariable['value']) => {
+      applyGraph((current) => ({
+        ...current,
+        variables: current.variables.map((variable) =>
+          variable.key === key ? { ...variable, value } : variable,
+        ),
+      }));
+    },
+    [applyGraph],
+  );
+
+  const deleteVariable = useCallback(
+    (key: string) => {
+      applyGraph((current) => ({
+        ...current,
+        variables: current.variables.filter((variable) => variable.key !== key),
+        // Clearing the picker keeps the card savable: an empty key is allowed.
+        nodes: current.nodes.map((node) =>
+          node.config?.['variable'] === key
+            ? { ...node, config: { ...node.config, variable: '' } }
+            : node,
         ),
       }));
     },
@@ -661,6 +801,24 @@ export function MessagePipelinePage() {
         <div className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
+            aria-pressed={debugMode}
+            onClick={() => setDebugMode((current) => !current)}
+            title="调试模式：自动跟随最新一次运行，并在连线上显示传递的输入/输出"
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.62rem] transition',
+              debugMode
+                ? 'border-brass-400/50 bg-brass-400/[0.12] text-brass-200'
+                : 'border-mist-100/[0.1] text-mist-400 hover:border-brass-400/30 hover:text-brass-200',
+            )}
+          >
+            <Bug className="size-3" strokeWidth={1.8} />
+            {debugMode ? '调试中' : '调试'}
+            {debugMode && (
+              <span className="size-1.5 animate-pulse rounded-full bg-brass-300" />
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setDebugOpen(true)}
             className="flex items-center gap-1.5 rounded-lg border border-jade-400/25 bg-jade-400/[0.06] px-2.5 py-1.5 text-[0.62rem] text-jade-300 transition hover:bg-jade-400/[0.12]"
           >
@@ -848,9 +1006,11 @@ export function MessagePipelinePage() {
             catalog={catalog}
             selection={selection}
             nodeRuns={nodeRuns}
+            debugMode={debugMode}
             onSelect={setSelection}
             onMoveNode={moveNode}
             onUpdateNodeConfig={updateNodeConfig}
+            onCreateVariable={createVariable}
             onConnect={connect}
             onConnectError={flash}
           />
@@ -861,12 +1021,19 @@ export function MessagePipelinePage() {
             graph={graph}
             catalog={catalog}
             selection={selection}
+            debugMode={debugMode}
+            nodeRuns={nodeRuns}
             onRenameGraph={(name) =>
               applyGraph((current) => ({ ...current, name }))
             }
             onUpdateNode={updateNode}
             onUpdateNodeConfig={updateNodeConfig}
             onUpdateEdge={updateEdge}
+            onAddVariable={addVariable}
+            onCreateVariable={createVariable}
+            onRenameVariable={renameVariable}
+            onUpdateVariableValue={updateVariableValue}
+            onDeleteVariable={deleteVariable}
             onDelete={deleteSelection}
           />
           <PipelineRunPanel
@@ -900,15 +1067,32 @@ export function MessagePipelinePage() {
       )}
 
       {!runsQuery.isPending && (
-        <div className="pointer-events-none absolute bottom-4 right-4 z-30 hidden items-center gap-2 rounded-full border border-mist-100/[0.08] bg-ink-950/80 px-3 py-1.5 xl:flex">
+        <div
+          className={cn(
+            'pointer-events-none absolute bottom-4 right-4 z-30 hidden items-center gap-2 rounded-full border px-3 py-1.5 xl:flex',
+            debugMode
+              ? 'border-brass-400/30 bg-ink-950/85'
+              : 'border-mist-100/[0.08] bg-ink-950/80',
+          )}
+        >
           <span
             className={cn(
               'size-1.5 rounded-full',
-              selectedRunId ? 'bg-jade-400' : 'bg-mist-600',
+              detailQuery.data?.status === 'RUNNING'
+                ? 'animate-pulse bg-brass-300'
+                : debugMode
+                  ? 'bg-brass-300'
+                  : selectedRunId
+                    ? 'bg-jade-400'
+                    : 'bg-mist-600',
             )}
           />
           <span className="font-mono text-[0.52rem] uppercase tracking-[0.12em] text-mist-500">
-            {selectedRunId ? `叠加运行 ${nodeRuns.size} 节点` : '未叠加运行轨迹'}
+            {debugMode
+              ? `调试模式 · ${runsQuery.data?.length ?? 0} 次运行 · 叠加 ${nodeRuns.size} 节点`
+              : selectedRunId
+                ? `叠加运行 ${nodeRuns.size} 节点`
+                : '未叠加运行轨迹'}
           </span>
         </div>
       )}
@@ -1032,7 +1216,9 @@ function AddNodeMenu({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [open]);
 
-  const categories = (['system', 'data', 'media', 'text', 'logic', 'flow'] as const).map((category) => ({
+  const categories = (
+    ['system', 'data', 'variable', 'media', 'text', 'logic', 'flow'] as const
+  ).map((category) => ({
     category,
     style: CATEGORY_STYLE[category],
     items: catalog.filter((entry) => entry.category === category && !entry.system),

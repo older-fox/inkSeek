@@ -185,6 +185,9 @@ export const api = {
     ),
   pipelineRuns: (limit = 30, filter?: PipelineRunFilter) => {
     const params = new URLSearchParams({ limit: String(limit) });
+    if (filter?.graphId) {
+      params.set('graphId', filter.graphId);
+    }
     if (filter?.scope) {
       params.set('scope', filter.scope);
       if (filter.scopeId) {
@@ -222,4 +225,6 @@ export const api = {
 export interface PipelineRunFilter {
   scope?: ChatPipelineScope;
   scopeId?: string | null;
+  /** Watch every namespace running this graph; used by debug mode. */
+  graphId?: string | null;
 }
