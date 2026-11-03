@@ -1,25 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type {
   ChatConversationKind,
-  ChatMessageImageSummary,
+  ChatForwardSummary,
   ChatMessageKind,
-  ChatMessagePart,
   ChatMessageSummary,
-  ChatMessageVoiceSummary,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   ChatChannel,
   ChatContact,
   ChatConversation,
+  ChatForward,
   ChatImageAsset,
   ChatMessageRecord,
   ChatVoiceAsset,
   Prisma,
 } from '../generated/prisma/client.js';
 import { ChatEventsService } from './chat-events.service.js';
+import {
+  ChatForwardService,
+  forwardSummaryText,
+  stripExpandedForward,
+  type ForwardNodeWrite,
+  type ForwardWrite,
+} from './chat-forward.service.js';
 import { ChatMediaService, type StoredMedia } from './chat-media.service.js';
 import { ChatMessageProcessor } from './chat-message-processor.service.js';
+import { buildParts, extractContent, findForwardSegment } from './message-content.js';
 import {
   externalIdOf,
   groupAvatarUrl,
@@ -39,7 +47,10 @@ type MessageView = ChatMessageRecord & {
   images: ChatImageAsset[];
   voices: ChatVoiceAsset[];
   sender: Pick<ChatContact, 'externalId' | 'avatarUrl'>;
+  forward: ForwardMeta | null;
 };
+
+type ForwardMeta = Pick<ChatForward, 'id' | 'title' | 'source' | 'status' | 'nodeCount'>;
 
 type PositionedMedia = StoredMedia & { position: number };
 
@@ -65,6 +76,7 @@ export class ChatMessagesService {
     private readonly media: ChatMediaService,
     private readonly events: ChatEventsService,
     private readonly processor: ChatMessageProcessor,
+    private readonly forwards: ChatForwardService,
   ) {}
 
   async ingest(
@@ -127,8 +139,19 @@ export class ChatMessagesService {
       );
       const imageAssets = storedImages.filter((item): item is PositionedMedia => item !== null);
       const voiceAssets = storedVoices.filter((item): item is PositionedMedia => item !== null);
-      const content = extractContent(parsed.segments);
+      const forwardSegment = findForwardSegment(parsed.segments);
+      const forward = forwardSegment
+        ? await this.forwards.expand(client, forwardSegment)
+        : null;
+      const content = forward
+        ? { kind: 'FORWARD' as const, text: forwardSummaryText(forward) }
+        : extractContent(parsed.segments);
       const text = content.text;
+      const segments = forward
+        ? stripExpandedForward(parsed.segments, forward)
+        : parsed.segments;
+      // Nested nodes reference their forward by id, so generate it up front.
+      const forwardRecordId = forward ? randomUUID() : '';
 
       const { id } = await this.prisma.$transaction(async (tx) => {
         const created = await tx.chatMessageRecord.create({
@@ -142,7 +165,7 @@ export class ChatMessagesService {
             isSelf: parsed.isSelf,
             kind: content.kind,
             text,
-            segments: parsed.segments as unknown as Prisma.InputJsonValue,
+            segments: segments as unknown as Prisma.InputJsonValue,
             sentAt: parsed.sentAt,
             images: {
               create: imageAssets.map((asset) => ({
@@ -167,6 +190,27 @@ export class ChatMessagesService {
                 position: asset.position,
               })),
             },
+            ...(forward
+              ? {
+                  forward: {
+                    create: {
+                      id: forwardRecordId,
+                      forwardId: forward.forwardId,
+                      title: forward.title,
+                      source: forward.source,
+                      status: forward.status,
+                      nodeCount: forward.nodes.length,
+                      depth: forward.depth,
+                      errorCode: forward.errorCode,
+                      nodes: {
+                        create: forward.nodes.map((node) =>
+                          toForwardNodeCreate(node, forwardRecordId),
+                        ),
+                      },
+                    },
+                  },
+                }
+              : {}),
           },
           select: { id: true },
         });
@@ -266,6 +310,9 @@ export class ChatMessagesService {
           images: { orderBy: { position: 'asc' } },
           voices: { orderBy: { position: 'asc' } },
           sender: { select: { externalId: true, avatarUrl: true } },
+          forward: {
+            select: { id: true, title: true, source: true, status: true, nodeCount: true },
+          },
         },
       });
 
@@ -384,7 +431,56 @@ export class ChatMessagesService {
         images: { orderBy: { position: 'asc' } },
         voices: { orderBy: { position: 'asc' } },
         sender: { select: { externalId: true, avatarUrl: true } },
+        forward: {
+          select: { id: true, title: true, source: true, status: true, nodeCount: true },
+        },
       },
+    });
+  }
+
+  /**
+   * Repairs a message ingested before forward expansion existed: its stored
+   * segments still point at the original card, so expand it once and attach the
+   * nodes without changing message identity or ordering.
+   */
+  async attachForward(messageId: string, forward: ForwardWrite): Promise<void> {
+    const record = await this.prisma.chatMessageRecord.findUnique({
+      where: { id: messageId },
+      select: { segments: true },
+    });
+
+    if (!record) {
+      return;
+    }
+
+    const segments = Array.isArray(record.segments)
+      ? (record.segments as unknown as OneBotSegment[])
+      : [];
+    const forwardRecordId = randomUUID();
+
+    await this.prisma.chatMessageRecord.update({
+      where: { id: messageId },
+      data: {
+        kind: 'FORWARD',
+        text: forwardSummaryText(forward),
+        segments: stripExpandedForward(segments, forward) as unknown as Prisma.InputJsonValue,
+        forward: {
+          create: {
+            id: forwardRecordId,
+            forwardId: forward.forwardId,
+            title: forward.title,
+            source: forward.source,
+            status: forward.status,
+            nodeCount: forward.nodes.length,
+            depth: forward.depth,
+            errorCode: forward.errorCode,
+            nodes: {
+              create: forward.nodes.map((node) => toForwardNodeCreate(node, forwardRecordId)),
+            },
+          },
+        },
+      },
+      select: { id: true },
     });
   }
 
@@ -780,6 +876,9 @@ export function toMessageSummary(record: MessageView): ChatMessageSummary {
       byteSize: voice.byteSize,
     }));
 
+  const forward = toForwardSummary(record.forward);
+  const card = forward ?? storedForwardSummary(record.segments);
+
   return {
     id: record.id,
     conversationId: record.conversationId,
@@ -794,212 +893,122 @@ export function toMessageSummary(record: MessageView): ChatMessageSummary {
     kind: record.kind,
     images,
     voices,
-    parts: buildParts(record.segments, images, voices, record.text),
+    forward: card,
+    parts: card
+      ? [{ type: 'forward', forward: card }]
+      : buildParts(record.segments, images, voices, record.text),
     sentAt: record.sentAt.toISOString(),
   };
 }
 
 /**
- * Replays the stored OneBot segments so text, images and voices keep their
- * original order. Media assets carry the segment index in `position`.
+ * Cards received before eager expansion existed kept only the res-id segment.
+ * Surface them as pending cards instead of a bare "[嵌套聊天记录]" text bubble;
+ * opening one expands and persists it.
  */
-function buildParts(
-  rawSegments: unknown,
-  images: readonly ChatMessageImageSummary[],
-  voices: readonly ChatMessageVoiceSummary[],
-  fallbackText: string,
-): ChatMessagePart[] {
-  const parts: ChatMessagePart[] = [];
-  const imagesByPosition = new Map<number, ChatMessageImageSummary>();
-  const voicesByPosition = new Map<number, ChatMessageVoiceSummary>();
-
-  images.forEach((image) => {
-    if (!imagesByPosition.has(image.position)) {
-      imagesByPosition.set(image.position, image);
-    }
-  });
-  voices.forEach((voice) => {
-    if (!voicesByPosition.has(voice.position)) {
-      voicesByPosition.set(voice.position, voice);
-    }
-  });
-
-  const consumedImages = new Set<string>();
-  const consumedVoices = new Set<string>();
-
-  const appendText = (value: string) => {
-    if (!value) {
-      return;
-    }
-    const last = parts[parts.length - 1];
-    if (last && last.type === 'text') {
-      last.text += value;
-    } else {
-      parts.push({ type: 'text', text: value });
-    }
-  };
-
-  if (Array.isArray(rawSegments)) {
-    rawSegments.forEach((raw, position) => {
-      if (!raw || typeof raw !== 'object') {
-        return;
-      }
-
-      const segment = raw as { type?: unknown; data?: unknown };
-      const data =
-        segment.data && typeof segment.data === 'object'
-          ? (segment.data as Record<string, unknown>)
-          : {};
-
-      switch (segment.type) {
-        case 'text':
-          appendText(typeof data['text'] === 'string' ? data['text'] : '');
-          break;
-        case 'at': {
-          const label =
-            (typeof data['name'] === 'string' && data['name']) ||
-            (data['qq'] !== undefined ? String(data['qq']) : '');
-          if (label) {
-            appendText(`@${label} `);
-          }
-          break;
-        }
-        case 'image':
-        case 'mface':
-        case 'marketface': {
-          const image = imagesByPosition.get(position);
-          if (image && !consumedImages.has(image.id)) {
-            consumedImages.add(image.id);
-            parts.push({ type: 'image', image });
-          } else if (!image) {
-            appendText('[图片]');
-          }
-          break;
-        }
-        case 'record': {
-          const voice = voicesByPosition.get(position);
-          if (voice && !consumedVoices.has(voice.id)) {
-            consumedVoices.add(voice.id);
-            parts.push({ type: 'voice', voice });
-          } else if (!voice) {
-            appendText('[语音]');
-          }
-          break;
-        }
-        case 'face':
-          appendText('[表情]');
-          break;
-        case 'video':
-          appendText('[视频]');
-          break;
-        case 'file':
-          appendText('[文件]');
-          break;
-        case 'json':
-        case 'xml':
-          appendText('[卡片消息]');
-          break;
-        default:
-          break;
-      }
-    });
+function storedForwardSummary(segments: Prisma.JsonValue): ChatForwardSummary | null {
+  if (!Array.isArray(segments)) {
+    return null;
   }
 
-  images.forEach((image) => {
-    if (!consumedImages.has(image.id)) {
-      parts.push({ type: 'image', image });
-    }
-  });
-  voices.forEach((voice) => {
-    if (!consumedVoices.has(voice.id)) {
-      parts.push({ type: 'voice', voice });
-    }
-  });
+  const hasForward = segments.some(
+    (segment) =>
+      Boolean(segment) &&
+      typeof segment === 'object' &&
+      (segment as { type?: unknown }).type === 'forward',
+  );
 
-  if (parts.length === 0 && fallbackText) {
-    appendText(fallbackText);
-  }
-
-  return parts;
+  return hasForward
+    ? { id: '', title: '合并转发', source: 'FETCHED', status: 'PENDING', nodeCount: 0 }
+    : null;
 }
 
-function extractContent(segments: readonly OneBotSegment[]): {
-  text: string;
-  kind: ChatMessageKind;
-} {
-  const parts: string[] = [];
-  let hasFace = false;
-  let hasPlainText = false;
-  let hasImages = false;
-  let hasVoices = false;
+function toForwardSummary(record: ForwardMeta | null): ChatForwardSummary | null {
+  if (!record) {
+    return null;
+  }
 
-  segments.forEach((segment) => {
-    const data = segment.data;
+  return {
+    id: record.id,
+    title: record.title,
+    source: record.source === 'FETCHED' ? 'FETCHED' : 'INLINE',
+    status:
+      record.status === 'FAILED'
+        ? 'FAILED'
+        : record.status === 'TRUNCATED'
+          ? 'TRUNCATED'
+          : 'COMPLETE',
+    nodeCount: record.nodeCount,
+  };
+}
 
-    switch (segment.type) {
-      case 'text': {
-        const text = typeof data['text'] === 'string' ? data['text'] : '';
-        if (text.length > 0) {
-          parts.push(text);
-          hasPlainText = true;
+function toForwardNodeCreate(
+  node: ForwardNodeWrite,
+  forwardId: string,
+): Prisma.ChatForwardNodeCreateWithoutForwardInput {
+  return {
+    ...forwardNodeFields(node),
+    ...(node.children.length > 0
+      ? {
+          children: {
+            create: node.children.map((child) => toNestedForwardNodeCreate(child, forwardId)),
+          },
         }
-        break;
-      }
-      case 'at': {
-        const label =
-          (typeof data['name'] === 'string' && data['name']) ||
-          (data['qq'] !== undefined ? String(data['qq']) : '');
-        if (label) {
-          parts.push(`@${label} `);
-          hasPlainText = true;
+      : {}),
+  };
+}
+
+function toNestedForwardNodeCreate(
+  node: ForwardNodeWrite,
+  forwardId: string,
+): Prisma.ChatForwardNodeUncheckedCreateWithoutParentInput {
+  return {
+    forwardId,
+    ...forwardNodeFields(node),
+    ...(node.children.length > 0
+      ? {
+          children: {
+            create: node.children.map((child) => toNestedForwardNodeCreate(child, forwardId)),
+          },
         }
-        break;
-      }
-      case 'face':
-        parts.push('[表情]');
-        hasFace = true;
-        break;
-      // mface / marketface are stored as image assets and rendered directly.
-      case 'image':
-      case 'mface':
-      case 'marketface':
-        hasImages = true;
-        break;
-      // record is stored as a voice asset and rendered as an audio bar.
-      case 'record':
-        hasVoices = true;
-        break;
-      case 'video':
-        parts.push('[视频]');
-        hasPlainText = true;
-        break;
-      case 'file':
-        parts.push('[文件]');
-        hasPlainText = true;
-        break;
-      case 'json':
-      case 'xml':
-        parts.push('[卡片消息]');
-        hasPlainText = true;
-        break;
-      default:
-        break;
-    }
-  });
+      : {}),
+  };
+}
 
-  const text = parts.join('').trim();
-  const kind: ChatMessageKind =
-    hasImages || hasVoices
-      ? text.length > 0
-        ? 'MIXED'
-        : hasVoices && !hasImages
-          ? 'VOICE'
-          : 'IMAGE'
-      : hasFace && !hasPlainText
-        ? 'FACE'
-        : 'TEXT';
-
-  return { text, kind };
+function forwardNodeFields(node: ForwardNodeWrite) {
+  return {
+    position: node.position,
+    depth: node.depth,
+    senderExternalId: node.senderExternalId,
+    senderName: node.senderName,
+    sentAt: node.sentAt,
+    kind: node.kind,
+    text: node.text,
+    segments: node.segments as unknown as Prisma.InputJsonValue,
+    images: {
+      create: node.images.map((asset) => ({
+        url: asset.url,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        byteSize: asset.byteSize,
+        width: asset.width,
+        height: asset.height,
+        remoteUrl: asset.remoteUrl,
+        position: asset.position,
+      })),
+    },
+    voices: {
+      create: node.voices.map((asset) => ({
+        url: asset.url,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        byteSize: asset.byteSize,
+        duration: asset.duration,
+        remoteUrl: asset.remoteUrl,
+        position: asset.position,
+      })),
+    },
+  };
 }
 
 function previewOf(

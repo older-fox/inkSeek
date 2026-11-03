@@ -24,6 +24,7 @@ import {
   type ChatConversationKind,
   type ChatConversationPersonaRecord,
   type ChatConversationSummary,
+  type ChatForwardDetail,
   type ChatMessagePage,
   type ChatMessageSummary,
   type ChatSendMessageInput,
@@ -93,6 +94,12 @@ export class ChatController {
     @Query(new ZodValidationPipe(chatMessageQuerySchema)) query: MessageQuery,
   ): Promise<ChatMessagePage> {
     return this.chat.getMessages(id, { cursor: query.cursor, limit: query.limit });
+  }
+
+  @Get('messages/:id/forward')
+  @ApiOperation({ summary: '读取合并转发消息展开后的节点' })
+  forward(@Param('id') id: string): Promise<ChatForwardDetail> {
+    return this.chat.getForwardDetail(id);
   }
 
   @Post('conversations/:id/messages')

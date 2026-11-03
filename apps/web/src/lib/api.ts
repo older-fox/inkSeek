@@ -8,6 +8,7 @@ import type {
   ChatConversationKind,
   ChatConversationPersonaRecord,
   ChatConversationSummary,
+  ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
   ChatSendMessageInput,
@@ -153,6 +154,8 @@ export const api = {
       `/chat/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`,
     );
   },
+  chatForwardDetail: (messageId: string) =>
+    request<ChatForwardDetail>(`/chat/messages/${encodeURIComponent(messageId)}/forward`),
   sendChatMessage: (conversationId: string, input: ChatSendMessageInput) =>
     request<ChatMessageSummary>(
       `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,

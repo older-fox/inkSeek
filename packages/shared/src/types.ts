@@ -77,7 +77,14 @@ export interface HealthStatus {
 
 export type ChatChannelStatus = 'CONNECTING' | 'ONLINE' | 'OFFLINE' | 'ERROR';
 export type ChatConversationKind = 'PRIVATE' | 'GROUP';
-export type ChatMessageKind = 'TEXT' | 'IMAGE' | 'VOICE' | 'FACE' | 'MIXED' | 'SYSTEM';
+export type ChatMessageKind =
+  | 'TEXT'
+  | 'IMAGE'
+  | 'VOICE'
+  | 'FACE'
+  | 'MIXED'
+  | 'SYSTEM'
+  | 'FORWARD';
 
 export interface ChatChannelStats {
   private: number;
@@ -163,10 +170,49 @@ export interface ChatMessageVoiceSummary {
   byteSize: number | null;
 }
 
+export type ChatForwardSource = 'INLINE' | 'FETCHED';
+/**
+ * PENDING is derived at read time for cards stored before forward expansion
+ * existed; opening the card expands and persists them. It is never saved.
+ */
+export type ChatForwardStatus = 'PENDING' | 'COMPLETE' | 'TRUNCATED' | 'FAILED';
+
+/** Card-level metadata for a merged-forward message. */
+export interface ChatForwardSummary {
+  id: string;
+  title: string;
+  source: ChatForwardSource;
+  status: ChatForwardStatus;
+  nodeCount: number;
+}
+
 export type ChatMessagePart =
   | { type: 'text'; text: string }
   | { type: 'image'; image: ChatMessageImageSummary }
-  | { type: 'voice'; voice: ChatMessageVoiceSummary };
+  | { type: 'voice'; voice: ChatMessageVoiceSummary }
+  | { type: 'forward'; forward: ChatForwardSummary };
+
+export interface ChatForwardNodeSummary {
+  id: string;
+  position: number;
+  depth: number;
+  senderName: string;
+  senderExternalId: string | null;
+  avatarUrl: string | null;
+  sentAt: string | null;
+  kind: ChatMessageKind;
+  /** Flattened transcript of this line, used for search and LLM context. */
+  text: string;
+  /** Ordered text/image/voice parts; expanded nested forwards render from `children`. */
+  parts: ChatMessagePart[];
+  /** Expanded nested forward lines, empty when this node has none or hit a limit. */
+  children: ChatForwardNodeSummary[];
+}
+
+export interface ChatForwardDetail extends ChatForwardSummary {
+  messageId: string;
+  nodes: ChatForwardNodeSummary[];
+}
 
 export interface ChatMessageSummary {
   id: string;
@@ -182,7 +228,9 @@ export interface ChatMessageSummary {
   kind: ChatMessageKind;
   images: ChatMessageImageSummary[];
   voices: ChatMessageVoiceSummary[];
-  /** Ordered text/image/voice segments; pure-media messages contain no text parts. */
+  /** Card metadata when this message is a merged-forward snapshot. */
+  forward: ChatForwardSummary | null;
+  /** Ordered text/image/voice/forward segments; pure-media messages contain no text parts. */
   parts: ChatMessagePart[];
   sentAt: string;
 }

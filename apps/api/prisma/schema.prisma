@@ -121,6 +121,7 @@ enum ChatMessageKind {
   FACE
   MIXED
   SYSTEM
+  FORWARD
 }
 
 /// Namespace root. Every contact, conversation, message and future persona
@@ -247,8 +248,9 @@ model ChatMessageRecord {
   sentAt         DateTime
   receivedAt     DateTime         @default(now())
 
-  images ChatImageAsset[]
-  voices ChatVoiceAsset[]
+  images  ChatImageAsset[]
+  voices  ChatVoiceAsset[]
+  forward ChatForward?
 
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
@@ -318,4 +320,98 @@ model ChatVoiceAsset {
   createdAt DateTime          @default(now())
 
   @@index([messageId, position])
+}
+
+enum ChatForwardSource {
+  INLINE
+  FETCHED
+}
+
+enum ChatForwardStatus {
+  COMPLETE
+  TRUNCATED
+  FAILED
+}
+
+/// Expanded copy of one merged-forward card. The anchor stays a normal
+/// ChatMessageRecord so conversation ordering, previews and dedupe keep
+/// working; every visible line lives in ChatForwardNode.
+model ChatForward {
+  id        String            @id @default(cuid())
+  messageId String            @unique
+  message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// NapCat forward data.id (resid); kept for traceability and future dedupe.
+  forwardId String?
+  title     String
+  source    ChatForwardSource
+  status    ChatForwardStatus
+  nodeCount Int               @default(0)
+  /// Deepest nested level persisted for this card. Nested forwards expand eagerly.
+  depth     Int               @default(1)
+  errorCode String?
+  createdAt DateTime          @default(now())
+
+  nodes ChatForwardNode[]
+
+  @@index([forwardId])
+}
+
+/// One line of a merged-forward transcript. Senders are deliberately not
+/// materialised as ChatContact rows: they are not participants of the
+/// conversation that received the card.
+model ChatForwardNode {
+  id               String            @id @default(cuid())
+  forwardId        String
+  forward          ChatForward       @relation(fields: [forwardId], references: [id], onDelete: Cascade)
+  parentId         String?
+  parent           ChatForwardNode?  @relation("ChatForwardNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children         ChatForwardNode[] @relation("ChatForwardNodeTree")
+  position         Int
+  depth            Int               @default(1)
+  senderExternalId String?
+  senderName       String
+  /// Often missing from forwarded history; null instead of a made-up time.
+  sentAt           DateTime?
+  kind             ChatMessageKind
+  text             String            @default("")
+  segments         Json
+  createdAt        DateTime          @default(now())
+
+  images ChatForwardNodeImage[]
+  voices ChatForwardNodeVoice[]
+
+  @@index([forwardId, parentId, position])
+}
+
+model ChatForwardNodeImage {
+  id        String          @id @default(cuid())
+  nodeId    String
+  node      ChatForwardNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  url       String
+  fileName  String?
+  mimeType  String?
+  byteSize  Int?
+  width     Int?
+  height    Int?
+  remoteUrl String?
+  position  Int             @default(0)
+  createdAt DateTime        @default(now())
+
+  @@index([nodeId, position])
+}
+
+model ChatForwardNodeVoice {
+  id        String          @id @default(cuid())
+  nodeId    String
+  node      ChatForwardNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  url       String
+  fileName  String?
+  mimeType  String?
+  byteSize  Int?
+  duration  Int?
+  remoteUrl String?
+  position  Int             @default(0)
+  createdAt DateTime        @default(now())
+
+  @@index([nodeId, position])
 }

@@ -9,8 +9,6 @@ import {
   ListFilter,
   LoaderCircle,
   MessagesSquare,
-  Pause,
-  Play,
   Plus,
   Search,
   Send,
@@ -20,12 +18,24 @@ import {
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+} from 'react';
 import { toast } from 'sonner';
 import { InputShell } from '@/components/field';
 import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-bits';
+import { ForwardMessageCard } from '@/components/forward-message';
 import { GroupPersonaPanel } from '@/components/group-persona-panel';
+import { ImageLightbox } from '@/components/image-lightbox';
 import { PrivatePersonaPanel } from '@/components/private-persona-panel';
+import { VoiceBar } from '@/components/voice-bar';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
@@ -44,151 +54,8 @@ import { chatConversationsQuery, chatMessagesQuery } from '@/lib/queries';
 const EASE = [0.22, 1, 0.36, 1] as const;
 const MAX_IMAGE_COUNT = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const WAVE_BARS = [
-  0.34, 0.58, 0.82, 0.46, 0.96, 0.68, 0.42, 0.88, 0.52, 0.74, 0.38, 0.62, 0.9, 0.48, 0.78, 0.56,
-  0.32, 0.7,
-];
-
 function initialsOf(name: string): string {
   return Array.from(name.trim())[0] ?? '我';
-}
-
-function formatClock(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
-  const total = Math.round(seconds);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
-
-function VoiceBar({
-  voice,
-  self,
-}: {
-  voice: ChatMessage['voices'][number];
-  self: boolean;
-}) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(voice.duration ?? 0);
-  const progress = duration > 0 ? Math.min(position / duration, 1) : 0;
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onTime = () => setPosition(audio.currentTime);
-    const onMeta = () => {
-      if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration);
-    };
-    const onEnd = () => {
-      setPlaying(false);
-      setPosition(0);
-      audio.currentTime = 0;
-    };
-    audio.addEventListener('timeupdate', onTime);
-    audio.addEventListener('loadedmetadata', onMeta);
-    audio.addEventListener('ended', onEnd);
-    return () => {
-      audio.removeEventListener('timeupdate', onTime);
-      audio.removeEventListener('loadedmetadata', onMeta);
-      audio.removeEventListener('ended', onEnd);
-    };
-  }, []);
-
-  const toggle = () => {
-    const audio = audioRef.current;
-    if (!audio || failed) return;
-    if (audio.paused) {
-      void audio
-        .play()
-        .then(() => setPlaying(true))
-        .catch(() => setFailed(true));
-    } else {
-      audio.pause();
-      setPlaying(false);
-    }
-  };
-
-  const seekTo = (ratio: number) => {
-    const audio = audioRef.current;
-    if (!audio || !(audio.duration > 0)) return;
-    audio.currentTime = ratio * audio.duration;
-    setPosition(audio.currentTime);
-  };
-
-  return (
-    <div
-      className={cn(
-        'flex w-[13.5rem] items-center gap-2.5 rounded-2xl px-3 py-2',
-        self
-          ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
-          : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
-      )}
-    >
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={failed}
-        aria-label={failed ? '语音加载失败' : playing ? '暂停语音' : '播放语音'}
-        className={cn(
-          'grid size-8 shrink-0 place-items-center rounded-full border transition disabled:opacity-40',
-          self
-            ? 'border-brass-400/30 bg-brass-400/15 text-brass-200 hover:bg-brass-400/25'
-            : 'border-mist-100/10 bg-mist-100/5 text-mist-200 hover:bg-mist-100/10',
-        )}
-      >
-        {playing ? (
-          <Pause className="size-3.5" fill="currentColor" />
-        ) : (
-          <Play className="ml-0.5 size-3.5" fill="currentColor" />
-        )}
-      </button>
-
-      <div className="min-w-0 flex-1">
-        <button
-          type="button"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            if (rect.width > 0) seekTo((event.clientX - rect.left) / rect.width);
-          }}
-          aria-label="跳转播放位置"
-          className="flex h-6 w-full items-end gap-[2px]"
-        >
-          {WAVE_BARS.map((height, index) => {
-            const active = (index + 0.5) / WAVE_BARS.length <= progress;
-            return (
-              <span
-                key={index}
-                style={{ height: `${Math.round(height * 100)}%` }}
-                className={cn(
-                  'flex-1 rounded-full transition-colors duration-150',
-                  active
-                    ? self
-                      ? 'bg-brass-300'
-                      : 'bg-jade-300'
-                    : 'bg-mist-100/20',
-                )}
-              />
-            );
-          })}
-        </button>
-        <p className="mt-1 flex items-center justify-between font-mono text-[0.48rem] text-mist-500">
-          <span>{formatClock(playing ? position : duration)}</span>
-          <span className="uppercase tracking-[0.14em]">
-            {failed ? '加载失败' : '语音'}
-          </span>
-        </p>
-      </div>
-
-      <audio
-        ref={audioRef}
-        src={voice.url}
-        preload="metadata"
-        className="hidden"
-        onError={() => setFailed(true)}
-      />
-    </div>
-  );
 }
 
 function MessageBubble({
@@ -203,9 +70,11 @@ function MessageBubble({
   selfInitial: string;
 }) {
   const avatarAccent = message.self ? 'brass' : kind === 'group' ? 'jade' : 'brass';
+  const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
 
   return (
-    <motion.div
+    <>
+      <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.24, ease: EASE }}
@@ -254,18 +123,36 @@ function MessageBubble({
                   </div>
                 );
               }
+              if (part.type === 'forward') {
+                return (
+                  <ForwardMessageCard
+                    key={key}
+                    messageId={message.id}
+                    forward={part.forward}
+                    self={message.self}
+                  />
+                );
+              }
               if (part.type === 'voice') {
                 return <VoiceBar key={key} voice={part.voice} self={message.self} />;
               }
               return (
-                <a key={key} href={part.image.url} target="_blank" rel="noreferrer" className="block">
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() =>
+                    setViewer({ src: part.image.url, alt: `图片 ${part.image.position + 1}` })
+                  }
+                  aria-label={`预览图片 ${part.image.position + 1}`}
+                  className="block cursor-zoom-in"
+                >
                   <img
                     src={part.image.url}
                     alt={`图片 ${part.image.position + 1}`}
                     loading="lazy"
                     className="max-h-64 max-w-[16rem] rounded-xl border border-mist-100/10 object-cover"
                   />
-                </a>
+                </button>
               );
             })}
           </div>
@@ -286,6 +173,18 @@ function MessageBubble({
         />
       )}
     </motion.div>
+
+      <AnimatePresence>
+        {viewer && (
+          <ImageLightbox
+            key={viewer.src}
+            src={viewer.src}
+            alt={viewer.alt}
+            onClose={() => setViewer(null)}
+          />
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -578,6 +477,8 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const [attachments, setAttachments] = useState<string[]>([]);
   const [personaOpen, setPersonaOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
   const conversations = useMemo(
     () => (conversationsQuery.data ?? []).map(toSourcedConversation),
@@ -650,13 +551,52 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   });
 
   const lastMessageId = messages.at(-1)?.id ?? '';
-
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
     const element = scrollRef.current;
     if (element) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [selectedId, lastMessageId]);
+  }, []);
+
+  // Stick to the bottom while media lazy-loads and grows the transcript.
+  useEffect(() => {
+    const element = scrollRef.current;
+    const content = scrollContentRef.current;
+
+    if (!element || !content || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        element.scrollTop = element.scrollHeight;
+      }
+    });
+    observer.observe(content);
+
+    return () => observer.disconnect();
+  }, [selectedId]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const handleScroll = () => {
+      stickToBottomRef.current =
+        element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+    };
+    element.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => element.removeEventListener('scroll', handleScroll);
+  }, [selectedId]);
+
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    scrollToBottom();
+  }, [selectedId, lastMessageId, scrollToBottom]);
 
   useEffect(() => {
     setAttachments([]);
@@ -920,44 +860,46 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
             </header>
 
             <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-              <div className="mb-5 text-center">
-                <span className="rounded-full border border-mist-100/[0.07] bg-ink-950/30 px-3 py-1 font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
-                  最近消息
-                </span>
+              <div ref={scrollContentRef}>
+                <div className="mb-5 text-center">
+                  <span className="rounded-full border border-mist-100/[0.07] bg-ink-950/30 px-3 py-1 font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
+                    最近消息
+                  </span>
+                </div>
+
+                {messagesQuery.isPending ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-[0.7rem] text-mist-500">
+                    <LoaderCircle className="size-4 animate-spin text-brass-300" />
+                    正在读取消息记录…
+                  </div>
+                ) : messagesQuery.isError ? (
+                  <p className="py-10 text-center text-[0.7rem] text-signal-400/90">
+                    消息记录读取失败，请稍后重试。
+                  </p>
+                ) : messages.length === 0 ? (
+                  <p className="py-10 text-center text-[0.7rem] text-mist-600">
+                    这个会话还没有消息记录。
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((message) => (
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        kind={kind}
+                        selfAvatar={selfAvatar}
+                        selfInitial={selfInitial}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {messagesQuery.data?.hasMore && (
+                  <p className="mt-6 text-center font-mono text-[0.48rem] uppercase tracking-[0.18em] text-mist-600">
+                    已加载最近 100 条 · 更早消息已归档
+                  </p>
+                )}
               </div>
-
-              {messagesQuery.isPending ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-[0.7rem] text-mist-500">
-                  <LoaderCircle className="size-4 animate-spin text-brass-300" />
-                  正在读取消息记录…
-                </div>
-              ) : messagesQuery.isError ? (
-                <p className="py-10 text-center text-[0.7rem] text-signal-400/90">
-                  消息记录读取失败，请稍后重试。
-                </p>
-              ) : messages.length === 0 ? (
-                <p className="py-10 text-center text-[0.7rem] text-mist-600">
-                  这个会话还没有消息记录。
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((message) => (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
-                      kind={kind}
-                      selfAvatar={selfAvatar}
-                      selfInitial={selfInitial}
-                    />
-                  ))}
-                </div>
-              )}
-
-              <p className="mt-6 text-center font-mono text-[0.48rem] uppercase tracking-[0.18em] text-mist-600">
-                {messagesQuery.data?.hasMore
-                  ? '已加载最近 100 条 · 更早消息已归档'
-                  : '已同步该会话的全部消息'}
-              </p>
             </div>
 
             <div className="border-t border-mist-100/[0.06] px-3.5 py-3">

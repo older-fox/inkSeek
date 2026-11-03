@@ -45,6 +45,36 @@ export interface OneBotGroupMember {
   join_time?: number;
 }
 
+/**
+ * One forwarded history line. NapCat exposes two shapes: a `node` wrapper
+ * (from `get_forward_msg`) carrying `message`, or a plain message object
+ * (from the inline `forward.data.content`) carrying `message` + `sender`.
+ * `content` sometimes arrives as a legacy CQ-code string instead.
+ */
+export interface OneBotForwardNode {
+  type?: string;
+  data?: {
+    id?: string;
+    user_id?: number | string;
+    uin?: number | string;
+    nickname?: string;
+    name?: string;
+    time?: number | string;
+    message?: OneBotSegment[] | string;
+    content?: OneBotSegment[] | string;
+  };
+  user_id?: number | string;
+  time?: number | string;
+  message_id?: number | string;
+  message?: OneBotSegment[] | string;
+  sender?: OneBotSender;
+}
+
+export interface OneBotForwardData {
+  id?: string;
+  content?: OneBotForwardNode[];
+}
+
 export interface OneBotActionResponse<T = unknown> {
   status: string;
   retcode: number;

@@ -13,6 +13,7 @@ import type {
   ChatChannelSummary,
   ChatConversationKind,
   ChatConversationSummary,
+  ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
   ChatPersonaValue,
@@ -27,10 +28,12 @@ import type {
 } from '../generated/prisma/client.js';
 import { PersonasService } from '../personas/personas.service.js';
 import { ChatEventsService } from './chat-events.service.js';
+import { ChatForwardService, toForwardDetail } from './chat-forward.service.js';
 import { ChatMessagesService, toMessageSummary } from './chat-messages.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
+import { findForwardSegment } from './message-content.js';
 import { NapCatClient } from './napcat-client.js';
-import { externalIdOf, userAvatarUrl } from './onebot.js';
+import { externalIdOf, userAvatarUrl, type OneBotSegment } from './onebot.js';
 
 interface LoginInfo {
   user_id?: number | string;
@@ -48,6 +51,7 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly runtime: ChatRuntimeService,
     private readonly messages: ChatMessagesService,
+    private readonly forwards: ChatForwardService,
     private readonly events: ChatEventsService,
     private readonly personas: PersonasService,
   ) {}
@@ -275,6 +279,9 @@ export class ChatService {
         images: { orderBy: { position: 'asc' } },
         voices: { orderBy: { position: 'asc' } },
         sender: { select: { externalId: true, avatarUrl: true } },
+        forward: {
+          select: { id: true, title: true, source: true, status: true, nodeCount: true },
+        },
       },
       orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
@@ -288,6 +295,88 @@ export class ChatService {
       messages: page.map(toMessageSummary),
       hasMore,
     };
+  }
+
+  async getForwardDetail(messageId: string): Promise<ChatForwardDetail> {
+    const record = await this.loadForward(messageId);
+
+    if (!record) {
+      throw new NotFoundException({
+        code: 'MESSAGE_NOT_FOUND',
+        message: '消息不存在或已被删除',
+      });
+    }
+
+    if (record.forward) {
+      return toForwardDetail(record.forward);
+    }
+
+    const segment = findForwardSegment(
+      Array.isArray(record.segments) ? (record.segments as unknown as OneBotSegment[]) : [],
+    );
+
+    if (!segment) {
+      throw new NotFoundException({
+        code: 'FORWARD_NOT_FOUND',
+        message: '该消息不是合并转发',
+      });
+    }
+
+    const client = this.runtime.getClient(record.channelId);
+
+    if (!client) {
+      throw new ServiceUnavailableException({
+        code: 'CHANNEL_OFFLINE',
+        message: '渠道不在线，暂时无法展开合并转发',
+      });
+    }
+
+    const forward = await this.forwards.expand(client, segment);
+
+    if (forward.nodes.length === 0) {
+      return {
+        id: '',
+        messageId,
+        title: forward.title,
+        source: forward.source,
+        status: forward.status,
+        nodeCount: 0,
+        nodes: [],
+      };
+    }
+
+    await this.messages.attachForward(messageId, forward);
+    const repaired = await this.loadForward(messageId);
+
+    if (!repaired?.forward) {
+      throw new ServiceUnavailableException({
+        code: 'FORWARD_EXPAND_FAILED',
+        message: '合并转发已读取，但内容写入失败，请稍后重试',
+      });
+    }
+
+    return toForwardDetail(repaired.forward);
+  }
+
+  private loadForward(messageId: string) {
+    return this.prisma.chatMessageRecord.findUnique({
+      where: { id: messageId },
+      select: {
+        channelId: true,
+        segments: true,
+        forward: {
+          include: {
+            nodes: {
+              orderBy: [{ depth: 'asc' }, { position: 'asc' }],
+              include: {
+                images: { orderBy: { position: 'asc' } },
+                voices: { orderBy: { position: 'asc' } },
+              },
+            },
+          },
+        },
+      },
+    });
   }
 
   async sendMessage(

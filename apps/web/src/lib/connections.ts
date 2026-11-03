@@ -5,6 +5,7 @@ import type {
   ChatChannelStatus,
   ChatChannelSummary,
   ChatConversationSummary,
+  ChatForwardSummary,
   ChatMessageImageSummary,
   ChatMessagePart,
   ChatMessageSummary,
@@ -100,6 +101,7 @@ export interface ChatMessage {
   kind: string;
   images: ChatMessageImageSummary[];
   voices: ChatMessageVoiceSummary[];
+  forward: ChatForwardSummary | null;
   parts: ChatMessagePart[];
 }
 
@@ -296,6 +298,7 @@ export function toChatMessage(summary: ChatMessageSummary): ChatMessage {
     kind: summary.kind,
     images: summary.images,
     voices: summary.voices,
+    forward: summary.forward,
     parts: summary.parts,
   };
 }
