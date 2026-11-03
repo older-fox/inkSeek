@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
-import type { ChatConversationKind } from '@inkseek/shared';
-import { api } from './api';
+import type { ChatConversationKind, PipelineScopeRef } from '@inkseek/shared';
+import { api, type PipelineRunFilter } from './api';
 
 export const bootstrapStatusQuery = queryOptions({
   queryKey: ['bootstrap', 'status'],
@@ -62,17 +62,19 @@ export const chatConversationPersonaQuery = (conversationId: string) =>
     staleTime: 30_000,
   });
 
-export const pipelineGraphQuery = queryOptions({
-  queryKey: ['pipeline', 'graph'],
-  queryFn: api.pipelineGraph,
-  staleTime: 30_000,
-});
+export const pipelineGraphQuery = (ref: PipelineScopeRef) =>
+  queryOptions({
+    queryKey: ['pipeline', 'graph', ref.scope, ref.scopeId ?? null],
+    queryFn: () => api.pipelineGraph(ref),
+    staleTime: 30_000,
+  });
 
-export const pipelineRunsQuery = queryOptions({
-  queryKey: ['pipeline', 'runs'],
-  queryFn: () => api.pipelineRuns(),
-  staleTime: 3_000,
-});
+export const pipelineRunsQuery = (filter: PipelineRunFilter) =>
+  queryOptions({
+    queryKey: ['pipeline', 'runs', filter.scope ?? 'all', filter.scopeId ?? null],
+    queryFn: () => api.pipelineRuns(30, filter),
+    staleTime: 3_000,
+  });
 
 export const pipelineRunQuery = (id: string) =>
   queryOptions({

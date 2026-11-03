@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai/ai.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { PersonasModule } from '../personas/personas.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatForwardService } from './chat-forward.service.js';
+import { ImageDescriptionService } from './image-description.service.js';
 import { ChatMediaService } from './chat-media.service.js';
 import { ChatMessageProcessor } from './chat-message-processor.service.js';
 import { ChatMessagesService } from './chat-messages.service.js';
@@ -16,13 +18,14 @@ import { PipelineGraphService } from './pipeline/pipeline-graph.service.js';
 import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
 
 @Module({
-  imports: [AuthModule, PersonasModule],
+  imports: [AuthModule, PersonasModule, AiModule],
   controllers: [ChatController, PipelineController],
   providers: [
     ChatService,
     ChatRuntimeService,
     ChatMessagesService,
     ChatForwardService,
+    ImageDescriptionService,
     ChatPersonaService,
     ChatMediaService,
     ChatMessageProcessor,

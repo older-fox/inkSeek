@@ -1,5 +1,6 @@
 import {
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   type OnModuleDestroy,
@@ -9,11 +10,15 @@ import type {
   ChatPipelineNodeRunSummary,
   ChatPipelineNodeStatus,
   ChatPipelineRunDetail,
+  ChatPipelineRunMode,
   ChatPipelineRunStatus,
   ChatPipelineRunSummary,
+  ChatPipelineScope,
+  DebugChatPipelineRunInput,
 } from '@inkseek/shared';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
+import { ImageDescriptionService } from '../image-description.service.js';
 import { PipelineEffectsService } from './pipeline-effects.service.js';
 import {
   topologicalOrder,
@@ -21,10 +26,11 @@ import {
   type PipelineGraph,
   type PipelineNode,
 } from './pipeline-graph.js';
-import { PipelineGraphService } from './pipeline-graph.service.js';
+import { PipelineGraphService, type ResolvedPipelineGraph } from './pipeline-graph.service.js';
 import { createPipelineHelpers, getPipelineNode } from './pipeline-nodes.js';
 import {
   PipelineAbortError,
+  type PipelineEffect,
   type PipelineInputs,
   type PipelineMessage,
   type PipelineNodeDefinition,
@@ -35,6 +41,7 @@ const RUN_INCLUDE = {
   channel: { select: { displayName: true } },
   conversation: { select: { name: true } },
   message: { select: { text: true, senderName: true, kind: true } },
+  persona: { select: { name: true } },
 } satisfies Prisma.ChatPipelineRunInclude;
 
 const RUN_DETAIL_INCLUDE = {
@@ -43,6 +50,24 @@ const RUN_DETAIL_INCLUDE = {
 } satisfies Prisma.ChatPipelineRunInclude;
 
 type RunRecord = Prisma.ChatPipelineRunGetPayload<{ include: typeof RUN_INCLUDE }>;
+
+export interface PipelineRunFilter {
+  scope?: ChatPipelineScope;
+  scopeId?: string | null;
+}
+
+interface RunPlan {
+  graph: PipelineGraph;
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+  mode: ChatPipelineRunMode;
+  /** Null for debug runs that have no persisted conversation context. */
+  channelId: string | null;
+  conversationId: string | null;
+  messageId: string | null;
+  personaCardId: string | null;
+  debugInput: { text: string; senderName: string } | null;
+}
 
 const PREVIEW_LENGTH = 80;
 const STALE_MESSAGE = '服务重启，运行被中断';
@@ -58,6 +83,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly graphs: PipelineGraphService,
     private readonly effects: PipelineEffectsService,
+    private readonly imageDescriptions: ImageDescriptionService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -107,9 +133,9 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    let graph: PipelineGraph;
+    let resolved: ResolvedPipelineGraph;
     try {
-      graph = await this.graphs.load();
+      resolved = await this.graphs.resolveForChannel(message.channelId);
     } catch (error) {
       this.logger.warn(
         `管线图读取失败，跳过本次运行：${error instanceof Error ? error.message : String(error)}`,
@@ -117,6 +143,139 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    await this.execute(message, {
+      graph: resolved.graph,
+      scope: resolved.scope,
+      scopeId: resolved.scopeId,
+      mode: 'live',
+      channelId: message.channelId,
+      conversationId: message.conversationId,
+      messageId: message.messageId,
+      personaCardId: null,
+      debugInput: null,
+    });
+  }
+
+  /**
+   * Executes the effective graph for a namespace against a simulated message.
+   * Node effects are recorded on the run but never committed, so a debug run
+   * cannot post into a live channel.
+   */
+  async debug(input: DebugChatPipelineRunInput): Promise<ChatPipelineRunDetail> {
+    const scope = input.scope;
+    const scopeId = scope === 'global' ? null : (input.scopeId ?? null);
+
+    let channelId: string | null = null;
+    let personaCardId: string | null = null;
+
+    if (scope === 'channel') {
+      const channel = await this.prisma.chatChannel.findUnique({
+        where: { id: scopeId! },
+        select: { id: true },
+      });
+      if (!channel) {
+        throw new NotFoundException('渠道不存在');
+      }
+      channelId = channel.id;
+    } else if (scope === 'persona') {
+      const persona = await this.prisma.personaCard.findUnique({
+        where: { id: scopeId! },
+        select: { id: true },
+      });
+      if (!persona) {
+        throw new NotFoundException('人格卡不存在');
+      }
+      personaCardId = persona.id;
+    }
+
+    const resolved = await this.graphs.resolve({ scope, scopeId });
+    const senderName = input.senderName?.trim() || '调试消息';
+    const message: PipelineMessage = {
+      messageId: `debug-${Date.now().toString(36)}`,
+      channelId: channelId ?? '',
+      conversationId: '',
+      conversationKind: 'PRIVATE',
+      externalId: null,
+      isSelf: false,
+      senderId: 'debug',
+      senderName,
+      text: input.text,
+      kind: 'TEXT',
+      quote: null,
+      images: [],
+      imageCount: 0,
+      voiceCount: 0,
+      sentAt: new Date(),
+    };
+
+    const runId = await this.execute(message, {
+      graph: resolved.graph,
+      scope,
+      scopeId,
+      mode: 'debug',
+      channelId,
+      conversationId: null,
+      messageId: null,
+      personaCardId,
+      debugInput: { text: input.text, senderName },
+    });
+
+    if (!runId) {
+      throw new InternalServerErrorException('调试运行创建失败');
+    }
+    return this.getRun(runId);
+  }
+
+  async listRuns(limit: number, filter: PipelineRunFilter = {}): Promise<ChatPipelineRunSummary[]> {
+    const where: Prisma.ChatPipelineRunWhereInput = {};
+    if (filter.scope) {
+      where.scope = toRunScope(filter.scope);
+      where.scopeId = filter.scope === 'global' ? null : (filter.scopeId ?? null);
+    }
+
+    const records = await this.prisma.chatPipelineRun.findMany({
+      where,
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+      include: RUN_INCLUDE,
+    });
+    return records.map((record) => this.toSummary(record));
+  }
+
+  async getRun(id: string): Promise<ChatPipelineRunDetail> {
+    const record = await this.prisma.chatPipelineRun.findUnique({
+      where: { id },
+      include: RUN_DETAIL_INCLUDE,
+    });
+    if (!record) {
+      throw new NotFoundException('管线运行不存在');
+    }
+
+    return {
+      ...this.toSummary(record),
+      variables: asRecord(record.variables),
+      effects: record.effects ?? null,
+      nodes: record.nodes.map(
+        (node): ChatPipelineNodeRunSummary => ({
+          id: node.id,
+          nodeId: node.nodeId,
+          nodeType: node.nodeType,
+          nodeVersion: node.nodeVersion,
+          status: node.status,
+          startedAt: node.startedAt.toISOString(),
+          finishedAt: node.finishedAt?.toISOString() ?? null,
+          durationMs: node.durationMs,
+          input: node.input,
+          output: node.output,
+          error: node.error,
+        }),
+      ),
+    };
+  }
+
+  /** Runs the DAG and returns the run id, or null when the run row cannot open. */
+  private async execute(message: PipelineMessage, plan: RunPlan): Promise<string | null> {
+    const { graph } = plan;
     const order = topologicalOrder(graph);
     const incoming = indexIncoming(graph);
 
@@ -128,9 +287,14 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           graphId: graph.id,
           graphVersion: graph.version,
           status: 'RUNNING',
-          channelId: message.channelId,
-          conversationId: message.conversationId,
-          messageId: message.messageId,
+          scope: toRunScope(plan.scope),
+          scopeId: plan.scopeId,
+          mode: plan.mode === 'debug' ? 'DEBUG' : 'LIVE',
+          channelId: plan.channelId,
+          conversationId: plan.conversationId,
+          messageId: plan.messageId,
+          personaCardId: plan.personaCardId,
+          debugInput: plan.debugInput ? toInputJson(plan.debugInput) : undefined,
         },
         select: { id: true, startedAt: true },
       });
@@ -140,7 +304,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `管线运行创建失败：${error instanceof Error ? error.message : String(error)}`,
       );
-      return;
+      return null;
     }
 
     const controller = new AbortController();
@@ -149,6 +313,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     const outputs = new Map<string, Record<string, unknown>>();
     const statuses = new Map<string, ChatPipelineNodeStatus>();
     const failures: string[] = [];
+    const requestedEffects: PipelineEffect[] = [];
     let aborted = false;
 
     try {
@@ -190,10 +355,14 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
             resolve: helpers.resolve,
             template: helpers.template,
             wait: (ms) => this.wait(ms, controller.signal),
+            describeImage: (input) => this.imageDescriptions.describe(input),
           });
           const output = sanitizeRecord(result.outputs);
           if (result.effects && result.effects.length > 0) {
-            await this.effects.commit(message, result.effects);
+            requestedEffects.push(...result.effects);
+            if (plan.mode === 'live') {
+              await this.effects.commit(message, result.effects);
+            }
           }
           outputs.set(node.id, output);
           statuses.set(node.id, 'SUCCEEDED');
@@ -232,47 +401,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.activeRuns.delete(runId);
-      await this.finishRun(runId, startedAt, outputs, statuses, failures, aborted);
-    }
-  }
-
-  async listRuns(limit: number): Promise<ChatPipelineRunSummary[]> {
-    const records = await this.prisma.chatPipelineRun.findMany({
-      orderBy: { startedAt: 'desc' },
-      take: limit,
-      include: RUN_INCLUDE,
-    });
-    return records.map((record) => this.toSummary(record));
-  }
-
-  async getRun(id: string): Promise<ChatPipelineRunDetail> {
-    const record = await this.prisma.chatPipelineRun.findUnique({
-      where: { id },
-      include: RUN_DETAIL_INCLUDE,
-    });
-    if (!record) {
-      throw new NotFoundException('管线运行不存在');
+      await this.finishRun(runId, startedAt, outputs, statuses, failures, aborted, requestedEffects);
     }
 
-    return {
-      ...this.toSummary(record),
-      variables: asRecord(record.variables),
-      nodes: record.nodes.map(
-        (node): ChatPipelineNodeRunSummary => ({
-          id: node.id,
-          nodeId: node.nodeId,
-          nodeType: node.nodeType,
-          nodeVersion: node.nodeVersion,
-          status: node.status,
-          startedAt: node.startedAt.toISOString(),
-          finishedAt: node.finishedAt?.toISOString() ?? null,
-          durationMs: node.durationMs,
-          input: node.input,
-          output: node.output,
-          error: node.error,
-        }),
-      ),
-    };
+    return runId;
   }
 
   private async finishRun(
@@ -282,6 +414,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     statuses: Map<string, ChatPipelineNodeStatus>,
     failures: string[],
     aborted: boolean,
+    effects: PipelineEffect[],
   ): Promise<void> {
     const finishedAt = new Date();
     const durationMs = Math.max(0, finishedAt.getTime() - startedAt.getTime());
@@ -302,6 +435,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           durationMs,
           error: error ? truncate(error, 2000) : null,
           variables: toInputJson(Object.fromEntries(outputs)),
+          effects: effects.length > 0 ? toInputJson(effects) : undefined,
         },
       });
     } catch (updateError) {
@@ -432,15 +566,24 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
   }
 
   private toSummary(record: RunRecord): ChatPipelineRunSummary {
+    const debugInput = asRecord(record.debugInput);
+    const debugText = typeof debugInput?.['text'] === 'string' ? debugInput['text'] : null;
+    const debugSender =
+      typeof debugInput?.['senderName'] === 'string' ? debugInput['senderName'] : null;
+
     return {
       id: record.id,
       graphId: record.graphId,
       graphVersion: record.graphVersion,
       status: record.status,
-      channelName: record.channel.displayName,
-      conversationName: record.conversation.name,
-      senderName: record.message?.senderName ?? null,
-      messagePreview: truncate(record.message?.text ?? '', PREVIEW_LENGTH),
+      scope: fromRunScope(record.scope),
+      scopeId: record.scopeId,
+      mode: record.mode === 'DEBUG' ? 'debug' : 'live',
+      channelName: record.channel?.displayName ?? null,
+      conversationName: record.conversation?.name ?? null,
+      personaName: record.persona?.name ?? null,
+      senderName: record.message?.senderName ?? debugSender,
+      messagePreview: truncate(record.message?.text ?? debugText ?? '', PREVIEW_LENGTH),
       messageKind: record.message?.kind ?? null,
       startedAt: record.startedAt.toISOString(),
       finishedAt: record.finishedAt?.toISOString() ?? null,
@@ -448,6 +591,26 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       error: record.error,
     };
   }
+}
+
+function toRunScope(scope: ChatPipelineScope): 'GLOBAL' | 'CHANNEL' | 'PERSONA' {
+  if (scope === 'channel') {
+    return 'CHANNEL';
+  }
+  if (scope === 'persona') {
+    return 'PERSONA';
+  }
+  return 'GLOBAL';
+}
+
+function fromRunScope(scope: 'GLOBAL' | 'CHANNEL' | 'PERSONA'): ChatPipelineScope {
+  if (scope === 'CHANNEL') {
+    return 'channel';
+  }
+  if (scope === 'PERSONA') {
+    return 'persona';
+  }
+  return 'global';
 }
 
 function sanitizeRecord(values: Record<string, unknown>): Record<string, unknown> {

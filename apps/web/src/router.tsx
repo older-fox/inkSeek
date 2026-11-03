@@ -119,6 +119,21 @@ const personasRoute = createRoute({
 const messagePipelineRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/pipeline',
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { scope?: 'global' | 'channel' | 'persona'; scopeId?: string } => {
+    const scope =
+      search.scope === 'channel' || search.scope === 'persona' || search.scope === 'global'
+        ? search.scope
+        : undefined;
+    return {
+      scope,
+      scopeId:
+        typeof search.scopeId === 'string' && search.scopeId.length > 0
+          ? search.scopeId
+          : undefined,
+    };
+  },
   component: MessagePipelinePage,
 });
 

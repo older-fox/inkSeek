@@ -270,6 +270,14 @@ export type ChatPipelineNodeStatus =
   | 'FAILED'
   | 'CANCELLED';
 
+/**
+ * A pipeline graph belongs to exactly one namespace. `global` is the editable
+ * system template; channels and personas inherit it until they save their own
+ * copy, which stops the inheritance for that namespace only.
+ */
+export type ChatPipelineScope = 'global' | 'channel' | 'persona';
+export type ChatPipelineRunMode = 'live' | 'debug';
+
 export interface ChatPipelineNodeRunSummary {
   id: string;
   nodeId: string;
@@ -290,8 +298,12 @@ export interface ChatPipelineRunSummary {
   graphId: string;
   graphVersion: number;
   status: ChatPipelineRunStatus;
-  channelName: string;
-  conversationName: string;
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+  mode: ChatPipelineRunMode;
+  channelName: string | null;
+  conversationName: string | null;
+  personaName: string | null;
   senderName: string | null;
   /** Truncated message text so the list is readable without another request. */
   messagePreview: string;
@@ -305,10 +317,12 @@ export interface ChatPipelineRunSummary {
 export interface ChatPipelineRunDetail extends ChatPipelineRunSummary {
   /** Final namespaced node outputs: `{ [nodeId]: output }`. */
   variables: Record<string, unknown> | null;
+  /** Effects the nodes asked for; debug runs record them without committing. */
+  effects: unknown;
   nodes: ChatPipelineNodeRunSummary[];
 }
 
-export type ChatPipelineNodeCategory = 'system' | 'text' | 'logic' | 'data' | 'flow';
+export type ChatPipelineNodeCategory = 'system' | 'text' | 'logic' | 'data' | 'media' | 'flow';
 export type ChatPipelineJoin = 'all' | 'any';
 
 /**
@@ -402,6 +416,13 @@ export type ChatPipelineConfigFieldKind =
   | 'select'
   | 'json';
 
+/**
+ * Select fields can resolve their options at runtime instead of listing them in
+ * the catalog: `model-providers` lists configured model providers, and
+ * `provider-models` lists the models of the provider named by `dependsOn`.
+ */
+export type ChatPipelineConfigOptionsSource = 'model-providers' | 'provider-models';
+
 export interface ChatPipelineConfigField {
   key: string;
   label: string;
@@ -409,6 +430,10 @@ export interface ChatPipelineConfigField {
   placeholder?: string;
   hint?: string;
   options?: Array<{ value: string; label: string }>;
+  /** Runtime option origin; takes precedence over `options`. */
+  optionsSource?: ChatPipelineConfigOptionsSource;
+  /** Config key whose value scopes the dynamic options (provider id for models). */
+  dependsOn?: string;
 }
 
 /**
@@ -461,6 +486,12 @@ export function canConnectPipelineKinds(
 export interface ChatPipelineGraphSnapshot {
   graph: ChatPipelineGraph;
   catalog: ChatPipelineNodeType[];
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+  /** True while the namespace has no saved copy and uses an inherited graph. */
+  following: boolean;
+  /** Where the effective graph comes from when `following` is true. */
+  inheritedFrom: ChatPipelineScope | null;
   /**
    * The stored graph failed to parse and the default graph is shown instead.
    * Nothing was written back; saving will replace the stored row.
@@ -469,12 +500,24 @@ export interface ChatPipelineGraphSnapshot {
   degradedReason: string | null;
 }
 
-export interface SaveChatPipelineGraphInput {
+export interface PipelineScopeRef {
+  scope: ChatPipelineScope;
+  scopeId?: string | null;
+}
+
+export interface SaveChatPipelineGraphInput extends PipelineScopeRef {
   name: string;
   nodes: ChatPipelineGraphNode[];
   edges: ChatPipelineGraphEdge[];
   /** Revision the editor loaded; a mismatch means another window saved first. */
   expectedRevision: number;
+  /** Graph row the editor loaded; guards the copy-on-write race. */
+  expectedGraphId: string;
+}
+
+export interface DebugChatPipelineRunInput extends PipelineScopeRef {
+  text: string;
+  senderName?: string;
 }
 
 export interface ChatPersonaHistoryEntry {

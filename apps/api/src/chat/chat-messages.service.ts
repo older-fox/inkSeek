@@ -27,7 +27,10 @@ import {
   type ForwardWrite,
 } from './chat-forward.service.js';
 import { ChatMediaService, type StoredMedia } from './chat-media.service.js';
-import { ChatMessageProcessor, type PersistedChatMessage } from './chat-message-processor.service.js';
+import {
+  ChatMessageProcessor,
+  type PersistedChatMessage,
+} from './chat-message-processor.service.js';
 import { buildParts, extractContent, findForwardSegment } from './message-content.js';
 import {
   externalIdOf,
@@ -133,40 +136,10 @@ export class ChatMessagesService {
       const voiceSegments = parsed.segments.flatMap((segment, position) =>
         this.media.isVoiceSegment(segment) ? [{ segment, position }] : [],
       );
-      // Resolving a quote may call NapCat; run it alongside media so the ingest
-      // stays bounded by the slowest step instead of adding latency serially.
-      const quotePromise = this.resolveQuote(conversation.id, parsed.segments, client).catch(
-        () => null,
-      );
-      const storedImages = await Promise.all(
-        imageSegments.map(async ({ segment, position }) => {
-          const media = await this.media.saveSegment(segment);
-          return media ? { ...media, position } : null;
-        }),
-      );
-      const storedVoices = await Promise.all(
-        voiceSegments.map(async ({ segment, position }) => {
-          const media = await this.media.saveVoiceSegment(segment, client);
-          return media ? { ...media, position } : null;
-        }),
-      );
-      const imageAssets = storedImages.filter((item): item is PositionedMedia => item !== null);
-      const voiceAssets = storedVoices.filter((item): item is PositionedMedia => item !== null);
-      const forwardSegment = findForwardSegment(parsed.segments);
-      const forward = forwardSegment
-        ? await this.forwards.expand(client, forwardSegment)
-        : null;
-      const quote = await quotePromise;
-      const content = forward
-        ? { kind: 'FORWARD' as const, text: forwardSummaryText(forward) }
-        : extractContent(parsed.segments);
-      const text = content.text;
-      const segments = forward
-        ? stripExpandedForward(parsed.segments, forward)
-        : parsed.segments;
-      // Nested nodes reference their forward by id, so generate it up front.
-      const forwardRecordId = forward ? randomUUID() : '';
+      const content = extractContent(parsed.segments);
 
+      // Persist the message before any media download, quote lookup or forward
+      // expansion: a slow or failing remote must never cost the message itself.
       const { id } = await this.prisma.$transaction(async (tx) => {
         const created = await tx.chatMessageRecord.create({
           data: {
@@ -178,16 +151,80 @@ export class ChatMessagesService {
             senderCard: parsed.senderCard,
             isSelf: parsed.isSelf,
             kind: content.kind,
-            text,
-            segments: segments as unknown as Prisma.InputJsonValue,
+            text: content.text,
+            segments: sanitizeInlineMedia(parsed.segments) as unknown as Prisma.InputJsonValue,
             sentAt: parsed.sentAt,
-            replyToExternalId: quote?.replyToExternalId ?? null,
-            replyToMessageId: quote?.replyToMessageId ?? null,
-            ...(quote
-              ? { replySnapshot: quote.snapshot as unknown as Prisma.InputJsonValue }
-              : {}),
-            images: {
-              create: imageAssets.map((asset) => ({
+          },
+          select: { id: true },
+        });
+
+        await tx.chatConversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: parsed.sentAt,
+            lastMessagePreview: previewOf(
+              content.text,
+              content.kind,
+              imageSegments.length,
+              voiceSegments.length,
+            ),
+            lastMessageSender: parsed.senderCard ?? parsed.senderName,
+          },
+        });
+
+        return created;
+      });
+
+      let imageAssets: PositionedMedia[] = [];
+      let voiceAssets: PositionedMedia[] = [];
+
+      try {
+        // These three may each call NapCat or the network; run them together so
+        // ingest is bounded by the slowest one, and isolate individual failures.
+        const quotePromise = this.resolveQuote(conversation.id, parsed.segments, client).catch(
+          () => null,
+        );
+        const forwardSegment = findForwardSegment(parsed.segments);
+        const forwardPromise = forwardSegment
+          ? this.forwards.expand(client, forwardSegment).catch((error: unknown) => {
+              this.logger.warn(
+                `转发展开失败，保留基础消息：${error instanceof Error ? error.message : String(error)}`,
+              );
+              return null;
+            })
+          : Promise.resolve(null);
+        const [storedImages, storedVoices, forward, quote] = await Promise.all([
+          Promise.all(
+            imageSegments.map(async ({ segment, position }) => {
+              const media = await this.media.saveSegment(segment).catch(() => null);
+              return media ? { ...media, position } : null;
+            }),
+          ),
+          Promise.all(
+            voiceSegments.map(async ({ segment, position }) => {
+              const media = await this.media.saveVoiceSegment(segment, client).catch(() => null);
+              return media ? { ...media, position } : null;
+            }),
+          ),
+          forwardPromise,
+          quotePromise,
+        ]);
+
+        imageAssets = storedImages.filter((item): item is PositionedMedia => item !== null);
+        voiceAssets = storedVoices.filter((item): item is PositionedMedia => item !== null);
+        const finalContent = forward
+          ? { kind: 'FORWARD' as const, text: forwardSummaryText(forward) }
+          : content;
+        const segments = forward ? stripExpandedForward(parsed.segments, forward) : parsed.segments;
+        // Nested nodes reference their forward by id, so generate it up front.
+        const forwardRecordId = forward ? randomUUID() : '';
+
+        await this.prisma.$transaction(async (tx) => {
+          if (imageAssets.length > 0) {
+            await tx.chatImageAsset.createMany({
+              data: imageAssets.map((asset) => ({
+                messageId: id,
+                mediaId: asset.mediaId,
                 url: asset.url,
                 fileName: asset.fileName,
                 mimeType: asset.mimeType,
@@ -197,9 +234,12 @@ export class ChatMessagesService {
                 remoteUrl: asset.remoteUrl,
                 position: asset.position,
               })),
-            },
-            voices: {
-              create: voiceAssets.map((asset) => ({
+            });
+          }
+          if (voiceAssets.length > 0) {
+            await tx.chatVoiceAsset.createMany({
+              data: voiceAssets.map((asset) => ({
+                messageId: id,
                 url: asset.url,
                 fileName: asset.fileName,
                 mimeType: asset.mimeType,
@@ -208,43 +248,58 @@ export class ChatMessagesService {
                 remoteUrl: asset.remoteUrl,
                 position: asset.position,
               })),
+            });
+          }
+          if (forward) {
+            await tx.chatForward.create({
+              data: {
+                id: forwardRecordId,
+                messageId: id,
+                forwardId: forward.forwardId,
+                title: forward.title,
+                source: forward.source,
+                status: forward.status,
+                nodeCount: forward.nodes.length,
+                depth: forward.depth,
+                errorCode: forward.errorCode,
+                nodes: {
+                  create: forward.nodes.map((node) => toForwardNodeCreate(node, forwardRecordId)),
+                },
+              },
+            });
+          }
+
+          await tx.chatMessageRecord.update({
+            where: { id },
+            data: {
+              kind: finalContent.kind,
+              text: finalContent.text,
+              segments: sanitizeInlineMedia(segments) as unknown as Prisma.InputJsonValue,
+              replyToExternalId: quote?.replyToExternalId ?? null,
+              replyToMessageId: quote?.replyToMessageId ?? null,
+              ...(quote
+                ? { replySnapshot: quote.snapshot as unknown as Prisma.InputJsonValue }
+                : {}),
             },
-            ...(forward
-              ? {
-                  forward: {
-                    create: {
-                      id: forwardRecordId,
-                      forwardId: forward.forwardId,
-                      title: forward.title,
-                      source: forward.source,
-                      status: forward.status,
-                      nodeCount: forward.nodes.length,
-                      depth: forward.depth,
-                      errorCode: forward.errorCode,
-                      nodes: {
-                        create: forward.nodes.map((node) =>
-                          toForwardNodeCreate(node, forwardRecordId),
-                        ),
-                      },
-                    },
-                  },
-                }
-              : {}),
-          },
-          select: { id: true },
-        });
+          });
 
-        await tx.chatConversation.update({
-          where: { id: conversation.id },
-          data: {
-            lastMessageAt: parsed.sentAt,
-            lastMessagePreview: previewOf(text, content.kind, imageAssets.length, voiceAssets.length),
-            lastMessageSender: parsed.senderCard ?? parsed.senderName,
-          },
+          await tx.chatConversation.update({
+            where: { id: conversation.id },
+            data: {
+              lastMessagePreview: previewOf(
+                finalContent.text,
+                finalContent.kind,
+                imageAssets.length,
+                voiceAssets.length,
+              ),
+            },
+          });
         });
-
-        return created;
-      });
+      } catch (error) {
+        this.logger.warn(
+          `消息附件处理失败，保留基础消息：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
 
       // Loading relations inside the transaction issues concurrent SELECTs on one
       // pg connection; fetch the view from the pool once the write is committed.
@@ -272,7 +327,7 @@ export class ChatMessagesService {
       );
     } catch (error) {
       this.logger.error(
-        `处理 NapCat 消息失败：${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+        `处理 NapCat 消息失败：${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
       );
     }
   }
@@ -303,18 +358,13 @@ export class ChatMessagesService {
       throw new Error('消息内容为空');
     }
 
-    const action =
-      conversation.kind === 'GROUP' ? 'send_group_msg' : 'send_private_msg';
+    const action = conversation.kind === 'GROUP' ? 'send_group_msg' : 'send_private_msg';
     const params =
       conversation.kind === 'GROUP'
         ? { group_id: toOneBotId(conversation.externalId), message: segments }
         : { user_id: toOneBotId(conversation.externalId), message: segments };
 
-    const response = await client.call<{ message_id?: number | string }>(
-      action,
-      params,
-      30_000,
-    );
+    const response = await client.call<{ message_id?: number | string }>(action, params, 30_000);
     const externalId = externalIdOf(response?.message_id);
 
     if (externalId) {
@@ -367,11 +417,7 @@ export class ChatMessagesService {
       return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
     });
     const kind: ChatMessageKind =
-      imageAssets.length > 0
-        ? input.text.length > 0
-          ? 'MIXED'
-          : 'IMAGE'
-        : 'TEXT';
+      imageAssets.length > 0 ? (input.text.length > 0 ? 'MIXED' : 'IMAGE') : 'TEXT';
     const text = input.text;
 
     const { id } = await this.prisma.$transaction(async (tx) => {
@@ -390,6 +436,7 @@ export class ChatMessagesService {
           sentAt: now,
           images: {
             create: imageAssets.map((asset) => ({
+              mediaId: asset.mediaId,
               url: asset.url,
               fileName: asset.fileName,
               mimeType: asset.mimeType,
@@ -523,10 +570,7 @@ export class ChatMessagesService {
     });
   }
 
-  private parseEvent(
-    channel: ChatChannel,
-    event: OneBotMessageEvent,
-  ): ParsedMessageEvent | null {
+  private parseEvent(channel: ChatChannel, event: OneBotMessageEvent): ParsedMessageEvent | null {
     const kind: ChatConversationKind = event.message_type === 'group' ? 'GROUP' : 'PRIVATE';
     const isSelf =
       event.post_type === 'message_sent' || externalIdOf(event.user_id) === channel.accountId;
@@ -545,9 +589,7 @@ export class ChatMessagesService {
     } else if (isSelf) {
       peerId =
         externalIdOf(event.target_id) ??
-        (externalIdOf(event.user_id) !== channel.accountId
-          ? externalIdOf(event.user_id)
-          : null);
+        (externalIdOf(event.user_id) !== channel.accountId ? externalIdOf(event.user_id) : null);
     } else {
       peerId = externalIdOf(event.user_id);
     }
@@ -563,7 +605,7 @@ export class ChatMessagesService {
       senderId,
       senderName: isSelf ? channel.displayName : nickname || card || `QQ ${senderId}`,
       senderCard: kind === 'GROUP' ? card || null : null,
-      senderRole: kind === 'GROUP' ? event.sender?.role ?? null : null,
+      senderRole: kind === 'GROUP' ? (event.sender?.role ?? null) : null,
       isSelf,
       externalId: externalIdOf(event.message_id),
       sentAt: new Date(event.time ? event.time * 1000 : Date.now()),
@@ -594,9 +636,7 @@ export class ChatMessagesService {
       }
       if (!existing.avatarUrl) {
         patch.avatarUrl =
-          parsed.kind === 'GROUP'
-            ? groupAvatarUrl(parsed.peerId)
-            : userAvatarUrl(parsed.peerId);
+          parsed.kind === 'GROUP' ? groupAvatarUrl(parsed.peerId) : userAvatarUrl(parsed.peerId);
       }
 
       const needsGroupInfo =
@@ -712,12 +752,10 @@ export class ChatMessagesService {
       const now = new Date();
 
       for (let index = 0; index < members.length; index += MEMBER_SYNC_CHUNK) {
-        const chunk = members
-          .slice(index, index + MEMBER_SYNC_CHUNK)
-          .flatMap((member) => {
-            const externalId = externalIdOf(member.user_id);
-            return externalId ? [{ member, externalId }] : [];
-          });
+        const chunk = members.slice(index, index + MEMBER_SYNC_CHUNK).flatMap((member) => {
+          const externalId = externalIdOf(member.user_id);
+          return externalId ? [{ member, externalId }] : [];
+        });
 
         if (chunk.length === 0) {
           continue;
@@ -934,9 +972,7 @@ export class ChatMessagesService {
         .map((media) => media.url);
       const authorId = externalIdOf(result?.sender?.user_id);
       const authorName =
-        result?.sender?.card ||
-        result?.sender?.nickname ||
-        (authorId ? `QQ ${authorId}` : '');
+        result?.sender?.card || result?.sender?.nickname || (authorId ? `QQ ${authorId}` : '');
       const sentAt =
         typeof result?.time === 'number' && Number.isFinite(result.time)
           ? new Date(result.time * 1000).toISOString()
@@ -1146,9 +1182,10 @@ function quoteFromSnapshot(value: Prisma.JsonValue | null): ChatQuoteSummary | n
     authorName: typeof record['authorName'] === 'string' ? record['authorName'] : '',
     authorId: typeof record['authorId'] === 'string' ? record['authorId'] : null,
     sentAt: typeof record['sentAt'] === 'string' ? record['sentAt'] : null,
-    kind: typeof kind === 'string' && QUOTE_KINDS.has(kind as ChatMessageKind)
-      ? (kind as ChatMessageKind)
-      : 'TEXT',
+    kind:
+      typeof kind === 'string' && QUOTE_KINDS.has(kind as ChatMessageKind)
+        ? (kind as ChatMessageKind)
+        : 'TEXT',
     text: typeof record['text'] === 'string' ? record['text'] : '',
     images: Array.isArray(record['images'])
       ? record['images'].filter(
@@ -1178,9 +1215,7 @@ function quoteFromRecord(record: MessageView): ChatQuoteSummary | null {
   return externalId ? unavailableQuote(externalId) : null;
 }
 
-function quoteContextOf(
-  value: Prisma.JsonValue | null,
-): PersistedChatMessage['quote'] {
+function quoteContextOf(value: Prisma.JsonValue | null): PersistedChatMessage['quote'] {
   const quote = quoteFromSnapshot(value);
 
   if (!quote || quote.status !== 'RESOLVED') {
@@ -1248,6 +1283,7 @@ function forwardNodeFields(node: ForwardNodeWrite) {
     segments: node.segments as unknown as Prisma.InputJsonValue,
     images: {
       create: node.images.map((asset) => ({
+        mediaId: asset.mediaId,
         url: asset.url,
         fileName: asset.fileName,
         mimeType: asset.mimeType,
@@ -1270,6 +1306,31 @@ function forwardNodeFields(node: ForwardNodeWrite) {
       })),
     },
   };
+}
+
+/** Segments whose payload may arrive inline as base64 instead of a URL. */
+const INLINE_MEDIA_TYPES = new Set(['image', 'mface', 'marketface', 'record']);
+
+/**
+ * The archived segment list must never carry megabytes of base64. Media bytes
+ * live in ChatMediaObject and the asset row keeps the position, so the inline
+ * payload is dropped once the asset has been stored.
+ */
+function sanitizeInlineMedia(segments: readonly OneBotSegment[]): OneBotSegment[] {
+  return segments.map((segment) => {
+    if (!INLINE_MEDIA_TYPES.has(segment.type)) {
+      return segment;
+    }
+
+    const file = segment.data['file'];
+    if (typeof file !== 'string' || !/^(?:base64:\/\/|data:)/i.test(file)) {
+      return segment;
+    }
+
+    const data = { ...segment.data };
+    delete data['file'];
+    return { ...segment, data };
+  });
 }
 
 function previewOf(

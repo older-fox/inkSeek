@@ -9,6 +9,7 @@ import type {
 } from '@inkseek/shared';
 import { Info, Link2, Lock, Trash2, Unlink } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
   CATEGORY_STYLE,
@@ -18,7 +19,72 @@ import {
   formatRunTime,
   type PipelineSelection,
 } from './pipeline-ui';
-import { PipelineSelect } from './pipeline-select';
+import { PipelineSelect, type PipelineSelectOption } from './pipeline-select';
+
+interface ProviderOption {
+  id: string;
+  name: string;
+  models: string[];
+}
+
+function useProviderOptions(active: boolean): ProviderOption[] {
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    let cancelled = false;
+
+    api
+      .personaAiProviders()
+      .then((list) => {
+        if (cancelled) {
+          return;
+        }
+        setProviders(list.map(({ id, name, models }) => ({ id, name, models })));
+      })
+      .catch(() => {
+        // 读取失败时下拉只剩「自动」项，已保存的值仍会作为自定义项显示。
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
+
+  return providers;
+}
+
+function dynamicFieldOptions(
+  field: ChatPipelineConfigField,
+  config: Record<string, unknown>,
+  providers: ProviderOption[],
+): PipelineSelectOption[] | null {
+  if (field.optionsSource === 'model-providers') {
+    return [
+      { value: '', label: '自动（首个提供商）' },
+      ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
+    ];
+  }
+
+  if (field.optionsSource === 'provider-models') {
+    const scope = config[field.dependsOn ?? 'providerId'];
+    const scoped =
+      typeof scope === 'string' && scope !== ''
+        ? providers.filter((provider) => provider.id === scope)
+        : providers;
+    const models = [...new Set(scoped.flatMap((provider) => provider.models))];
+
+    return [
+      { value: '', label: '自动（该提供商的首个模型）' },
+      ...models.map((model) => ({ value: model, label: model })),
+    ];
+  }
+
+  return null;
+}
 
 interface PipelineInspectorProps {
   graph: ChatPipelineGraph;
@@ -47,6 +113,11 @@ export function PipelineInspector({
       : null;
   const selectedEdge =
     selection?.kind === 'edge' ? (graph.edges[selection.index] ?? null) : null;
+  const providers = useProviderOptions(
+    catalog.some((definition) =>
+      definition.fields.some((field) => field.optionsSource !== undefined),
+    ),
+  );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
@@ -54,6 +125,7 @@ export function PipelineInspector({
         <NodeInspector
           node={selectedNode}
           definition={definitionOf(selectedNode, catalog)}
+          providers={providers}
           onUpdateNode={onUpdateNode}
           onUpdateNodeConfig={onUpdateNodeConfig}
           onDelete={onDelete}
@@ -134,12 +206,14 @@ function GraphInspector({
 function NodeInspector({
   node,
   definition,
+  providers,
   onUpdateNode,
   onUpdateNodeConfig,
   onDelete,
 }: {
   node: ChatPipelineGraphNode;
   definition: ChatPipelineNodeType | null;
+  providers: ProviderOption[];
   onUpdateNode: (id: string, patch: Partial<ChatPipelineGraphNode>) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
   onDelete: () => void;
@@ -152,6 +226,28 @@ function NodeInspector({
     !isSystem &&
     definition !== null &&
     (definition.inputs.length > 1 || definition.inputs.some((port) => port.multiple));
+
+  const commitField = (field: ChatPipelineConfigField, value: unknown) => {
+    onUpdateNodeConfig(node.id, field.key, value);
+
+    for (const dependent of definition?.fields ?? []) {
+      if (dependent.dependsOn !== field.key) {
+        continue;
+      }
+      const current = config[dependent.key];
+      if (typeof current !== 'string' || current === '') {
+        continue;
+      }
+      const options = dynamicFieldOptions(
+        dependent,
+        { ...config, [field.key]: value },
+        providers,
+      );
+      if (options && !options.some((option) => option.value === current)) {
+        onUpdateNodeConfig(node.id, dependent.key, '');
+      }
+    }
+  };
 
   return (
     <div>
@@ -212,7 +308,8 @@ function NodeInspector({
               key={field.key}
               field={field}
               value={config[field.key]}
-              onChange={(value) => onUpdateNodeConfig(node.id, field.key, value)}
+              options={dynamicFieldOptions(field, config, providers)}
+              onChange={(value) => commitField(field, value)}
             />
           ))
         )}
@@ -583,10 +680,13 @@ function ConditionValue({
 function FieldControl({
   field,
   value,
+  options,
   onChange,
 }: {
   field: ChatPipelineConfigField;
   value: unknown;
+  /** Runtime options for dynamic selects; `null` falls back to `field.options`. */
+  options: PipelineSelectOption[] | null;
   onChange: (value: unknown) => void;
 }) {
   if (field.kind === 'json') {
@@ -628,7 +728,7 @@ function FieldControl({
       {field.kind === 'select' ? (
         <PipelineSelect
           value={typeof value === 'string' ? value : ''}
-          options={field.options ?? []}
+          options={options ?? field.options ?? []}
           onChange={onChange}
           ariaLabel={field.label}
           menuTitle={field.label}

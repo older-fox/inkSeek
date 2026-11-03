@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { PrismaService } from '../../database/prisma.service.js';
 import { ChatMediaService } from '../chat-media.service.js';
 import { ChatService } from '../chat.service.js';
 import type { PipelineEffect, PipelineMessage } from './pipeline-types.js';
@@ -12,6 +13,7 @@ import type { PipelineEffect, PipelineMessage } from './pipeline-types.js';
 @Injectable()
 export class PipelineEffectsService {
   constructor(
+    private readonly prisma: PrismaService,
     private readonly media: ChatMediaService,
     // Resolved lazily: ChatService owns the message store and depends on the
     // processor → runner → effects chain.
@@ -20,6 +22,13 @@ export class PipelineEffectsService {
 
   async commit(message: PipelineMessage, effects: PipelineEffect[]): Promise<void> {
     for (const effect of effects) {
+      if (effect.type === 'media.description') {
+        await this.prisma.chatMediaObject.updateMany({
+          where: { id: effect.mediaId },
+          data: { description: effect.description },
+        });
+        continue;
+      }
       if (effect.type !== 'reply') {
         continue;
       }

@@ -51,7 +51,27 @@ export type PipelineInputs = Readonly<Record<string, unknown>>;
  * never perform I/O themselves, so a failed node cannot leave a half-sent reply
  * and a future dry-run only has to skip the commit step.
  */
-export type PipelineEffect = { type: 'reply'; text: string; images: string[] };
+export type PipelineEffect =
+  | { type: 'reply'; text: string; images: string[] }
+  | { type: 'media.description'; mediaId: string; description: string };
+
+export interface PipelineImageDescriptionInput {
+  /** Stored media reference or data URL carried by an image port. */
+  reference: string;
+  prompt: string;
+  providerId?: string | null;
+  model?: string | null;
+  /** Regenerate even when the blob already has a description. */
+  force?: boolean;
+}
+
+export interface PipelineImageDescriptionResult {
+  sha256: string;
+  /** Blob row to attach the description to; null when storage was unavailable. */
+  mediaId: string | null;
+  description: string;
+  cached: boolean;
+}
 
 export interface PipelineNodeResult {
   outputs: Record<string, unknown>;
@@ -77,6 +97,10 @@ export interface PipelineNodeContext {
   template(template: string): string;
   /** Waits `ms`; the runner owns the timer and cancels it on shutdown. */
   wait(ms: number): Promise<void>;
+  /** Hashes the image, returns a cached description or asks a vision model. */
+  describeImage(
+    input: PipelineImageDescriptionInput,
+  ): Promise<PipelineImageDescriptionResult>;
 }
 
 export interface PipelineNodeDefinition {

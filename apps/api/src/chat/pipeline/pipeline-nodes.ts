@@ -1,5 +1,6 @@
 import type { ChatPipelineMessageValue } from '@inkseek/shared';
 import type {
+  PipelineEffect,
   PipelineInputs,
   PipelineMessage,
   PipelineNodeContext,
@@ -12,6 +13,8 @@ const TEMPLATE = /{{\s*([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*}}/g;
 const MAX_REPLY_LENGTH = 4000;
 const MAX_REPLY_IMAGES = 4;
 const MAX_DELAY_MS = 60_000;
+const MAX_IMAGE_INDEX = 99;
+const MAX_DESCRIPTION_PROMPT = 4000;
 
 function readPath(root: unknown, path: string): unknown {
   if (!path) {
@@ -124,6 +127,46 @@ function readBoolean(config: Record<string, unknown> | undefined, key: string, f
   }
   if (typeof value !== 'boolean') {
     throw new Error(`节点配置字段必须是布尔值：${key}`);
+  }
+  return value;
+}
+
+function readDescriptionPrompt(config: Record<string, unknown> | undefined): string {
+  const prompt = readString(config, 'prompt').trim();
+  if (prompt.length === 0) {
+    throw new Error('图片描述提示词不能为空');
+  }
+  if (prompt.length > MAX_DESCRIPTION_PROMPT) {
+    throw new Error(`图片描述提示词不能超过 ${MAX_DESCRIPTION_PROMPT} 个字符`);
+  }
+  return prompt;
+}
+
+function readImageIndex(config: Record<string, unknown> | undefined): number {
+  const value = config?.['imageIndex'];
+  if (value === undefined) {
+    return 0;
+  }
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_IMAGE_INDEX
+  ) {
+    throw new Error(`第几张图片必须是 0–${MAX_IMAGE_INDEX} 之间的整数`);
+  }
+  return value;
+}
+
+type DescriptionMode = 'single' | 'all';
+
+function readDescriptionMode(config: Record<string, unknown> | undefined): DescriptionMode {
+  const value = config?.['mode'];
+  if (value === undefined) {
+    return 'single';
+  }
+  if (value !== 'single' && value !== 'all') {
+    throw new Error('描述范围必须是 single 或 all');
   }
   return value;
 }
@@ -715,6 +758,257 @@ const delayFlow: PipelineNodeDefinition = {
   },
 };
 
+const describeImage: PipelineNodeDefinition = {
+  type: 'media.describe',
+  version: 2,
+  label: '图片描述',
+  category: 'media',
+  description:
+    '按图片哈希查库中已有描述；缺失时用卡片提示词调用视觉模型并写回媒体库。可只描述一张，也可为消息里的每张图片逐张生成。',
+  defaultConfig: {
+    mode: 'single',
+    prompt:
+      '请用简洁的中文描述这张图片：先说明主体与场景，再补充关键细节（人物、动作、文字、风格）。不要编造图片中没有的内容，控制在 120 字以内。',
+    imageIndex: 0,
+    force: false,
+    providerId: '',
+    model: '',
+  },
+  fields: [
+    {
+      key: 'mode',
+      label: '描述范围',
+      kind: 'select',
+      options: [
+        { value: 'single', label: '仅一张' },
+        { value: 'all', label: '全部图片' },
+      ],
+      hint: '「全部图片」会按输入顺序逐张查询缓存并为缺失描述调用模型，单张失败不影响其他图片。',
+    },
+    {
+      key: 'prompt',
+      label: '描述提示词',
+      kind: 'text',
+      hint: '只在库中没有该图片描述时调用模型；已有描述会直接复用。',
+    },
+    {
+      key: 'imageIndex',
+      label: '第几张图片',
+      kind: 'number',
+      placeholder: '0',
+      hint: `仅在「仅一张」模式使用，从 0 开始，最大 ${MAX_IMAGE_INDEX}。`,
+    },
+    {
+      key: 'force',
+      label: '强制重新描述',
+      kind: 'boolean',
+      hint: '开启后即使已有描述也会重新调用模型，并用新结果覆盖。',
+    },
+    {
+      key: 'providerId',
+      label: '提供商',
+      kind: 'select',
+      optionsSource: 'model-providers',
+      hint: '留空使用设置中的首个提供商；需要支持图片输入的视觉模型。',
+    },
+    {
+      key: 'model',
+      label: '模型',
+      kind: 'select',
+      optionsSource: 'provider-models',
+      dependsOn: 'providerId',
+      hint: '只列出所选提供商已配置的模型；留空使用其首个模型。',
+    },
+  ],
+  inputs: [
+    {
+      key: 'image',
+      label: '图片',
+      kind: 'image',
+      description: '接入消息图片或引用图片；传入数组时按所选范围逐张处理。',
+    },
+  ],
+  outputs: [
+    {
+      key: 'description',
+      label: '图片描述',
+      kind: 'text',
+      description: '仅一张时是该图的描述；全部图片时按输入顺序用空行拼接。',
+    },
+    {
+      key: 'descriptions',
+      label: '逐张描述',
+      kind: 'json',
+      description: '数组，每项含 sha256 / description / cached / image，按输入顺序排列。',
+    },
+    {
+      key: 'failed',
+      label: '失败图片',
+      kind: 'json',
+      description: '「全部图片」模式下单张失败的记录，含 image 与 message；其他图片仍会生成描述。',
+    },
+    {
+      key: 'found',
+      label: '是否找到图片',
+      kind: 'boolean',
+      description: '输入没有图片时为 false，可据此跳过下游分支。',
+    },
+    {
+      key: 'cached',
+      label: '命中缓存',
+      kind: 'boolean',
+      description: 'true 表示本次没有任何图片调用模型，描述全部来自媒体库。',
+    },
+    {
+      key: 'count',
+      label: '图片数量',
+      kind: 'number',
+      description: '本次输入的图片总数，包含生成失败的张数。',
+    },
+    {
+      key: 'sha256',
+      label: '图片哈希',
+      kind: 'text',
+      description: '仅一张时是该图哈希；全部图片时是首张成功图片的哈希。',
+    },
+    {
+      key: 'image',
+      label: '原图片',
+      kind: 'image',
+      description: '仅一张时是该图；全部图片时按原顺序输出图片数组。',
+    },
+  ],
+  validateConfig: (config) => {
+    readDescriptionPrompt(config);
+    if (readDescriptionMode(config) === 'single') {
+      readImageIndex(config);
+    }
+  },
+  run: async (context) => {
+    const images = readImages(context.inputs['image']);
+    if (images.length === 0) {
+      return {
+        outputs: {
+          description: '',
+          descriptions: [],
+          failed: [],
+          found: false,
+          cached: false,
+          count: 0,
+          sha256: '',
+          image: null,
+        },
+      };
+    }
+
+    const config = context.node.config;
+    const prompt = readDescriptionPrompt(config);
+    const providerId = readOptionalString(config, 'providerId');
+    const model = readOptionalString(config, 'model');
+    const force = readBoolean(config, 'force', false);
+
+    if (readDescriptionMode(config) === 'all') {
+      const descriptions: Array<{
+        sha256: string;
+        description: string;
+        cached: boolean;
+        image: string;
+      }> = [];
+      const failed: Array<{ image: string; message: string }> = [];
+      const effects: PipelineEffect[] = [];
+      // Same reference twice in one message should cost one model call; the
+      // effect is emitted once because the media row is shared by hash.
+      const seen = new Map<string, Awaited<ReturnType<typeof context.describeImage>>>();
+      let cached = true;
+
+      // Sequential on purpose: one model call at a time keeps provider rate
+      // limits predictable and preserves the input order in `descriptions`.
+      for (const reference of images) {
+        try {
+          let result = seen.get(reference);
+          if (!result) {
+            result = await context.describeImage({ reference, prompt, providerId, model, force });
+            seen.set(reference, result);
+            if (result.mediaId && !result.cached) {
+              effects.push({
+                type: 'media.description',
+                mediaId: result.mediaId,
+                description: result.description,
+              });
+            }
+          }
+          descriptions.push({
+            sha256: result.sha256,
+            description: result.description,
+            cached: result.cached,
+            image: reference,
+          });
+          cached = cached && result.cached;
+        } catch (error) {
+          cached = false;
+          failed.push({
+            image: reference,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return {
+        outputs: {
+          description: descriptions.map((entry) => entry.description).join('\n\n'),
+          descriptions,
+          failed,
+          found: true,
+          cached: descriptions.length > 0 && cached,
+          count: images.length,
+          sha256: descriptions[0]?.sha256 ?? '',
+          image: images,
+        },
+        effects,
+      };
+    }
+
+    const index = readImageIndex(config);
+    const reference = images[index];
+    if (reference === undefined) {
+      throw new Error(`输入只有 ${images.length} 张图片，取不到第 ${index} 张`);
+    }
+
+    const result = await context.describeImage({ reference, prompt, providerId, model, force });
+    const effects: PipelineEffect[] =
+      result.mediaId && !result.cached
+        ? [
+            {
+              type: 'media.description',
+              mediaId: result.mediaId,
+              description: result.description,
+            },
+          ]
+        : [];
+
+    return {
+      outputs: {
+        description: result.description,
+        descriptions: [
+          {
+            sha256: result.sha256,
+            description: result.description,
+            cached: result.cached,
+            image: reference,
+          },
+        ],
+        failed: [],
+        found: true,
+        cached: result.cached,
+        count: images.length,
+        sha256: result.sha256,
+        image: reference,
+      },
+      effects,
+    };
+  },
+};
+
 const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   messageInput,
   messageOutput,
@@ -725,6 +1019,7 @@ const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   joinText,
   classifyContains,
   compareValues,
+  describeImage,
   delayFlow,
 ];
 

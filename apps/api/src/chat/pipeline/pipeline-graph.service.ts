@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   type OnModuleInit,
 } from '@nestjs/common';
 import {
@@ -12,6 +13,8 @@ import {
   type ChatPipelineGraphNode,
   type ChatPipelineGraphSnapshot,
   type ChatPipelineNodeType,
+  type ChatPipelineScope,
+  type PipelineScopeRef,
   type SaveChatPipelineGraphInput,
 } from '@inkseek/shared';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -27,6 +30,13 @@ import {
 import { migrateLegacyMessagePorts } from './pipeline-migrate.js';
 import { getPipelineNode, listPipelineNodes } from './pipeline-nodes.js';
 
+type PrismaScope = 'GLOBAL' | 'CHANNEL' | 'PERSONA';
+
+interface NormalizedRef {
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+}
+
 interface LoadedGraph {
   graph: PipelineGraph;
   updatedAt: Date;
@@ -34,8 +44,18 @@ interface LoadedGraph {
   degradedReason: string | null;
 }
 
+export interface ResolvedPipelineGraph extends LoadedGraph {
+  scope: ChatPipelineScope;
+  scopeId: string | null;
+  /** True while this namespace has no saved row and uses an inherited graph. */
+  following: boolean;
+  inheritedFrom: ChatPipelineScope | null;
+}
+
 interface StoredGraphRecord {
   id: string;
+  scope: PrismaScope;
+  scopeId: string;
   name: string;
   version: number;
   revision: number;
@@ -45,20 +65,25 @@ interface StoredGraphRecord {
   updatedAt: Date;
 }
 
+const GLOBAL_REF: NormalizedRef = { scope: 'global', scopeId: null };
+
 /**
- * Reads and writes the single editable graph. The compiled graph is cached in
- * process; saves and resets invalidate it, so message ingest only pays one
- * query after a graph edit rather than one per message.
+ * Graphs are stored per namespace: the global template, one optional copy per
+ * channel, and one optional copy per persona card. A namespace without a row
+ * follows its parent (channel → bound persona card → global, persona → global);
+ * the first save writes a copy-on-write row and stops following. Deleting that
+ * row (follow) resumes inheritance.
  *
- * Writes are guarded by `revision`: a save that lost a race returns 409 instead
- * of overwriting the other editor. Migrations run once at startup; the read
- * path never rewrites the row, and an unreadable graph falls back to the
- * default in memory instead of being replaced in the database.
+ * Parsed rows are cached per namespace. Resolution itself always re-reads the
+ * channel → persona binding so re-binding a persona cannot serve a stale graph.
+ * Writes are guarded by `revision`; a save that lost a race returns 409. Startup
+ * migrates every stored row; the read path never writes, and an unreadable row
+ * is served from memory as the default instead of being replaced on disk.
  */
 @Injectable()
 export class PipelineGraphService implements OnModuleInit {
   private readonly logger = new Logger(PipelineGraphService.name);
-  private cache: LoadedGraph | null = null;
+  private readonly cache = new Map<string, LoadedGraph>();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -66,17 +91,57 @@ export class PipelineGraphService implements OnModuleInit {
     await this.bootstrap();
   }
 
-  async snapshot(): Promise<ChatPipelineGraphSnapshot> {
-    return snapshotOf(await this.loadWithMeta());
+  async snapshot(ref: PipelineScopeRef): Promise<ChatPipelineGraphSnapshot> {
+    return snapshotOf(await this.resolve(ref));
   }
 
-  /** Used by the runner; a degraded graph yields the default (no reply). */
-  async load(): Promise<PipelineGraph> {
-    return (await this.loadWithMeta()).graph;
+  /** Used by the live runner: the graph a channel actually executes. */
+  async resolveForChannel(channelId: string): Promise<ResolvedPipelineGraph> {
+    return this.resolve({ scope: 'channel', scopeId: channelId });
+  }
+
+  async resolve(input: PipelineScopeRef): Promise<ResolvedPipelineGraph> {
+    const ref = normalizeRef(input);
+
+    if (ref.scope === 'global') {
+      return wrap(await this.loadGlobalOrDefault(), ref, false, null);
+    }
+
+    const own = await this.loadStored(ref);
+    if (own) {
+      return wrap(own, ref, false, null);
+    }
+
+    if (ref.scope === 'persona') {
+      return wrap(await this.loadGlobalOrDefault(), ref, true, 'global');
+    }
+
+    const binding = await this.prisma.chatChannelPersona.findUnique({
+      where: { channelId: ref.scopeId! },
+      select: { cardId: true },
+    });
+    if (binding) {
+      const persona = await this.loadStored({ scope: 'persona', scopeId: binding.cardId });
+      if (persona) {
+        return wrap(persona, ref, true, 'persona');
+      }
+    }
+
+    return wrap(await this.loadGlobalOrDefault(), ref, true, 'global');
   }
 
   async save(input: SaveChatPipelineGraphInput): Promise<ChatPipelineGraphSnapshot> {
-    const current = await this.loadWithMeta();
+    const ref = normalizeRef(input);
+    await this.assertScopeTarget(ref);
+
+    const current = await this.resolve(ref);
+    if (current.graph.id !== input.expectedGraphId) {
+      throw new ConflictException('管线图来源已变化，请刷新后再保存');
+    }
+    if (current.graph.revision !== input.expectedRevision) {
+      throw new ConflictException('管线图已在其他窗口被修改，请刷新后再保存');
+    }
+
     const nodes: PipelineNode[] = input.nodes.map((node) => ({
       id: node.id,
       type: node.type,
@@ -104,106 +169,161 @@ export class PipelineGraphService implements OnModuleInit {
     this.assertValid(next, true);
     stampNodeVersions(next);
 
-    const structuralChange = signature(next) !== signature(current.graph);
-    if (structuralChange) {
+    if (signature(next) !== signature(current.graph)) {
       next.version = current.graph.version + 1;
     }
 
-    const nextRevision = input.expectedRevision + 1;
-    const updated = await this.prisma.chatPipelineGraph.updateMany({
-      where: { id: next.id, revision: input.expectedRevision },
-      data: {
-        name: next.name,
-        version: next.version,
-        revision: nextRevision,
-        schemaVersion: next.schemaVersion,
-        nodes: toJson(next.nodes),
-        edges: toJson(next.edges),
-      },
+    const existing = await this.prisma.chatPipelineGraph.findUnique({
+      where: { scope_scopeId: toUniqueWhere(ref) },
+      select: { id: true },
     });
 
-    if (updated.count === 0) {
-      // The cache may predate another process's write; force a reload next read.
-      this.cache = null;
-      throw new ConflictException('管线图已在其他窗口被修改，请刷新后再保存');
-    }
+    let persisted: LoadedGraph;
+    if (existing) {
+      const nextRevision = input.expectedRevision + 1;
+      const updated = await this.prisma.chatPipelineGraph.updateMany({
+        where: { id: existing.id, revision: input.expectedRevision },
+        data: {
+          name: next.name,
+          version: next.version,
+          revision: nextRevision,
+          schemaVersion: next.schemaVersion,
+          nodes: toJson(next.nodes),
+          edges: toJson(next.edges),
+        },
+      });
 
-    next.revision = nextRevision;
-    const record = await this.prisma.chatPipelineGraph.findUnique({
-      where: { id: next.id },
-      select: { updatedAt: true },
-    });
-    this.cache = {
-      graph: next,
-      updatedAt: record?.updatedAt ?? new Date(),
-      degraded: false,
-      degradedReason: null,
-    };
-    return snapshotOf(this.cache);
-  }
-
-  async reset(): Promise<ChatPipelineGraphSnapshot> {
-    await this.prisma.chatPipelineGraph.deleteMany({
-      where: { id: DEFAULT_PIPELINE_GRAPH.id },
-    });
-    this.cache = null;
-    return snapshotOf(await this.seedDefault());
-  }
-
-  /**
-   * Startup pass: apply the one-time port migration, stamp node versions and
-   * validate. This is the only path that writes without a user save.
-   */
-  private async bootstrap(): Promise<void> {
-    const record = await this.prisma.chatPipelineGraph.findUnique({
-      where: { id: DEFAULT_PIPELINE_GRAPH.id },
-    });
-    if (!record) {
-      await this.seedDefault();
-      return;
-    }
-
-    try {
-      const graph = graphFromRecord(record);
-      const storedVersions = new Map(graph.nodes.map((node) => [node.id, node.nodeVersion]));
-      const migrated = migrateLegacyMessagePorts(graph, (message) =>
-        this.logger.warn(message),
-      );
-      stampNodeVersions(graph);
-      this.assertValid(graph);
-
-      const versionsStale = graph.nodes.some(
-        (node) => storedVersions.get(node.id) !== node.nodeVersion,
-      );
-      const schemaStale = record.schemaVersion !== PIPELINE_GRAPH_SCHEMA_VERSION;
-
-      if (migrated || versionsStale || schemaStale) {
-        await this.persistStartupWrite(graph, record.revision, {
-          bumpVersion: migrated,
-          logMessage: migrated ? '管线图启动迁移完成' : '管线图节点版本与结构版本已更新',
-        });
-        return;
+      if (updated.count === 0) {
+        // The cache may predate another process's write; force a reload next read.
+        this.cache.clear();
+        throw new ConflictException('管线图已在其他窗口被修改，请刷新后再保存');
       }
 
-      this.cache = {
-        graph,
-        updatedAt: record.updatedAt,
+      next.id = existing.id;
+      next.revision = nextRevision;
+      persisted = {
+        graph: next,
+        updatedAt: await this.readUpdatedAt(existing.id),
         degraded: false,
         degradedReason: null,
       };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`管线图定义无法解析，已回退到默认图且不会写回存储：${message}`);
-      this.cache = {
-        graph: fallbackGraph(record),
-        updatedAt: record.updatedAt,
-        degraded: true,
-        degradedReason: message,
-      };
+    } else {
+      // Copy-on-write: this namespace stops following and owns revision 1.
+      next.revision = 1;
+      try {
+        const created = await this.prisma.chatPipelineGraph.create({
+          data: {
+            scope: toPrismaScope(ref.scope),
+            scopeId: ref.scopeId ?? '',
+            name: next.name,
+            version: next.version,
+            revision: next.revision,
+            schemaVersion: next.schemaVersion,
+            nodes: toJson(next.nodes),
+            edges: toJson(next.edges),
+          },
+          select: { id: true, updatedAt: true },
+        });
+        next.id = created.id;
+        persisted = {
+          graph: next,
+          updatedAt: created.updatedAt,
+          degraded: false,
+          degradedReason: null,
+        };
+      } catch (error) {
+        if ((error as { code?: string }).code === 'P2002') {
+          this.cache.clear();
+          throw new ConflictException('该管线副本已被其他窗口创建，请刷新后再保存');
+        }
+        throw error;
+      }
+    }
+
+    this.cache.set(cacheKey(ref), persisted);
+    return snapshotOf(wrap(persisted, ref, false, null));
+  }
+
+  /**
+   * Drop the namespace's own copy and resume following its parent. For the
+   * global namespace this restores the factory template.
+   */
+  async follow(input: PipelineScopeRef): Promise<ChatPipelineGraphSnapshot> {
+    const ref = normalizeRef(input);
+    await this.assertScopeTarget(ref);
+
+    if (ref.scope === 'global') {
+      await this.prisma.chatPipelineGraph.deleteMany({ where: { scope: 'GLOBAL' } });
+      this.cache.clear();
+      return snapshotOf(await this.resolve(GLOBAL_REF));
+    }
+
+    await this.prisma.chatPipelineGraph.deleteMany({
+      where: { scope: toPrismaScope(ref.scope), scopeId: ref.scopeId! },
+    });
+    this.cache.delete(cacheKey(ref));
+    return this.snapshot(ref);
+  }
+
+  /**
+   * Startup pass: apply the one-time port migration to every stored row, stamp
+   * node versions and validate. This is the only path that writes without a
+   * user save.
+   */
+  private async bootstrap(): Promise<void> {
+    const records = await this.prisma.chatPipelineGraph.findMany();
+    if (records.length === 0) {
+      await this.seedGlobal();
+      return;
+    }
+
+    for (const record of records) {
+      const ref = refOfRecord(record);
+      try {
+        const graph = graphFromRecord(record);
+        const storedVersions = new Map(graph.nodes.map((node) => [node.id, node.nodeVersion]));
+        const migrated = migrateLegacyMessagePorts(graph, (message) =>
+          this.logger.warn(message),
+        );
+        stampNodeVersions(graph);
+        this.assertValid(graph);
+
+        const versionsStale = graph.nodes.some(
+          (node) => storedVersions.get(node.id) !== node.nodeVersion,
+        );
+        const schemaStale = record.schemaVersion !== PIPELINE_GRAPH_SCHEMA_VERSION;
+
+        if (migrated || versionsStale || schemaStale) {
+          await this.persistStartupWrite(ref, graph, record.revision, {
+            bumpVersion: migrated,
+            logMessage: migrated ? '管线图启动迁移完成' : '管线图节点版本与结构版本已更新',
+          });
+          continue;
+        }
+
+        this.cache.set(cacheKey(ref), {
+          graph,
+          updatedAt: record.updatedAt,
+          degraded: false,
+          degradedReason: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `管线图 ${scopeLabel(ref)} 无法解析，已回退到默认图且不会写回存储：${message}`,
+        );
+        this.cache.set(cacheKey(ref), {
+          graph: fallbackGraph(record),
+          updatedAt: record.updatedAt,
+          degraded: true,
+          degradedReason: message,
+        });
+      }
     }
   }
 
   private async persistStartupWrite(
+    ref: NormalizedRef,
     graph: PipelineGraph,
     expectedRevision: number,
     options: { bumpVersion: boolean; logMessage: string },
@@ -224,24 +344,39 @@ export class PipelineGraphService implements OnModuleInit {
     });
 
     if (updated.count === 0) {
-      this.cache = null;
+      this.cache.delete(cacheKey(ref));
       this.logger.warn(`${options.logMessage}：存储已被其他进程修改，本次未写回`);
       return;
     }
 
     graph.version = nextVersion;
     graph.revision = nextRevision;
-    const record = await this.prisma.chatPipelineGraph.findUnique({
-      where: { id: graph.id },
-      select: { updatedAt: true },
-    });
-    this.cache = {
+    this.cache.set(cacheKey(ref), {
       graph,
-      updatedAt: record?.updatedAt ?? new Date(),
+      updatedAt: await this.readUpdatedAt(graph.id),
       degraded: false,
       degradedReason: null,
-    };
-    this.logger.log(`${options.logMessage}：v${nextVersion} r${nextRevision}`);
+    });
+    this.logger.log(`${options.logMessage}：${scopeLabel(ref)} v${nextVersion} r${nextRevision}`);
+  }
+
+  private async loadStored(ref: NormalizedRef): Promise<LoadedGraph | null> {
+    const key = cacheKey(ref);
+    const cached = this.cache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const record = await this.prisma.chatPipelineGraph.findUnique({
+      where: { scope_scopeId: toUniqueWhere(ref) },
+    });
+    if (!record) {
+      return null;
+    }
+
+    const loaded = this.parseRecord(record);
+    this.cache.set(key, loaded);
+    return loaded;
   }
 
   /**
@@ -249,48 +384,37 @@ export class PipelineGraphService implements OnModuleInit {
    * served from memory as the default and left untouched on disk, so a schema
    * drift or a removed node type can never wipe the user's layout.
    */
-  private async loadWithMeta(): Promise<LoadedGraph> {
-    if (this.cache) {
-      return this.cache;
-    }
-
-    const record = await this.prisma.chatPipelineGraph.findUnique({
-      where: { id: DEFAULT_PIPELINE_GRAPH.id },
-    });
-
-    if (!record) {
-      return this.seedDefault();
-    }
-
+  private parseRecord(record: StoredGraphRecord): LoadedGraph {
     try {
       const graph = graphFromRecord(record);
       this.assertValid(graph);
-      this.cache = {
-        graph,
-        updatedAt: record.updatedAt,
-        degraded: false,
-        degradedReason: null,
-      };
-      return this.cache;
+      return { graph, updatedAt: record.updatedAt, degraded: false, degradedReason: null };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`管线图定义无法解析，本次使用默认图且不会写回存储：${message}`);
-      this.cache = {
+      this.logger.error(
+        `管线图 ${scopeLabel(refOfRecord(record))} 无法解析，本次使用默认图且不会写回存储：${message}`,
+      );
+      return {
         graph: fallbackGraph(record),
         updatedAt: record.updatedAt,
         degraded: true,
         degradedReason: message,
       };
-      return this.cache;
     }
   }
 
-  private async seedDefault(): Promise<LoadedGraph> {
+  private async loadGlobalOrDefault(): Promise<LoadedGraph> {
+    return (await this.loadStored(GLOBAL_REF)) ?? (await this.seedGlobal());
+  }
+
+  private async seedGlobal(): Promise<LoadedGraph> {
     const graph = cloneGraph(DEFAULT_PIPELINE_GRAPH);
     try {
       const record = await this.prisma.chatPipelineGraph.create({
         data: {
           id: graph.id,
+          scope: 'GLOBAL',
+          scopeId: '',
           name: graph.name,
           version: graph.version,
           revision: graph.revision,
@@ -300,20 +424,57 @@ export class PipelineGraphService implements OnModuleInit {
         },
         select: { updatedAt: true },
       });
-      this.cache = {
+      const loaded: LoadedGraph = {
         graph,
         updatedAt: record.updatedAt,
         degraded: false,
         degradedReason: null,
       };
-      return this.cache;
+      this.cache.set(cacheKey(GLOBAL_REF), loaded);
+      return loaded;
     } catch (error) {
       if ((error as { code?: string }).code === 'P2002') {
         // Another process seeded first; serve what it wrote.
-        this.cache = null;
-        return this.loadWithMeta();
+        this.cache.delete(cacheKey(GLOBAL_REF));
+        const existing = await this.loadStored(GLOBAL_REF);
+        if (existing) {
+          return existing;
+        }
       }
       throw error;
+    }
+  }
+
+  private async readUpdatedAt(id: string): Promise<Date> {
+    const record = await this.prisma.chatPipelineGraph.findUnique({
+      where: { id },
+      select: { updatedAt: true },
+    });
+    return record?.updatedAt ?? new Date();
+  }
+
+  private async assertScopeTarget(ref: NormalizedRef): Promise<void> {
+    if (ref.scope === 'global') {
+      return;
+    }
+
+    if (ref.scope === 'channel') {
+      const channel = await this.prisma.chatChannel.findUnique({
+        where: { id: ref.scopeId! },
+        select: { id: true },
+      });
+      if (!channel) {
+        throw new NotFoundException('渠道不存在，无法保存管线');
+      }
+      return;
+    }
+
+    const persona = await this.prisma.personaCard.findUnique({
+      where: { id: ref.scopeId! },
+      select: { id: true },
+    });
+    if (!persona) {
+      throw new NotFoundException('人格卡不存在，无法保存管线');
     }
   }
 
@@ -437,12 +598,31 @@ function assertTypedGraph(graph: PipelineGraph): void {
   }
 }
 
-function snapshotOf(loaded: LoadedGraph): ChatPipelineGraphSnapshot {
+function snapshotOf(resolved: ResolvedPipelineGraph): ChatPipelineGraphSnapshot {
   return {
-    graph: toContractGraph(loaded.graph, loaded.updatedAt),
+    graph: toContractGraph(resolved.graph, resolved.updatedAt),
     catalog: pipelineCatalog(),
-    degraded: loaded.degraded,
-    degradedReason: loaded.degradedReason,
+    scope: resolved.scope,
+    scopeId: resolved.scopeId,
+    following: resolved.following,
+    inheritedFrom: resolved.inheritedFrom,
+    degraded: resolved.degraded,
+    degradedReason: resolved.degradedReason,
+  };
+}
+
+function wrap(
+  loaded: LoadedGraph,
+  ref: NormalizedRef,
+  following: boolean,
+  inheritedFrom: ChatPipelineScope | null,
+): ResolvedPipelineGraph {
+  return {
+    ...loaded,
+    scope: ref.scope,
+    scopeId: ref.scopeId,
+    following,
+    inheritedFrom,
   };
 }
 
@@ -500,6 +680,56 @@ function stampNodeVersions(graph: PipelineGraph): void {
   }
 }
 
+function normalizeRef(input: PipelineScopeRef): NormalizedRef {
+  return {
+    scope: input.scope,
+    scopeId: input.scope === 'global' ? null : (input.scopeId ?? null),
+  };
+}
+
+function toPrismaScope(scope: ChatPipelineScope): PrismaScope {
+  if (scope === 'channel') {
+    return 'CHANNEL';
+  }
+  if (scope === 'persona') {
+    return 'PERSONA';
+  }
+  return 'GLOBAL';
+}
+
+function fromPrismaScope(scope: PrismaScope): ChatPipelineScope {
+  if (scope === 'CHANNEL') {
+    return 'channel';
+  }
+  if (scope === 'PERSONA') {
+    return 'persona';
+  }
+  return 'global';
+}
+
+function toUniqueWhere(ref: NormalizedRef): {
+  scope: PrismaScope;
+  scopeId: string;
+} {
+  return { scope: toPrismaScope(ref.scope), scopeId: ref.scopeId ?? '' };
+}
+
+function cacheKey(ref: NormalizedRef): string {
+  return `${ref.scope}:${ref.scopeId ?? ''}`;
+}
+
+function refOfRecord(record: Pick<StoredGraphRecord, 'scope' | 'scopeId'>): NormalizedRef {
+  const scope = fromPrismaScope(record.scope);
+  return { scope, scopeId: scope === 'global' ? null : record.scopeId };
+}
+
+function scopeLabel(ref: NormalizedRef): string {
+  if (ref.scope === 'global') {
+    return '全局模板';
+  }
+  return `${ref.scope === 'channel' ? '渠道' : '人格'} ${ref.scopeId ?? ''}`;
+}
+
 function graphFromRecord(record: StoredGraphRecord): PipelineGraph {
   if (record.schemaVersion > PIPELINE_GRAPH_SCHEMA_VERSION) {
     throw new Error(
@@ -520,9 +750,11 @@ function graphFromRecord(record: StoredGraphRecord): PipelineGraph {
 
 function fallbackGraph(record: StoredGraphRecord): PipelineGraph {
   const graph = cloneGraph(DEFAULT_PIPELINE_GRAPH);
+  graph.name = record.name;
   graph.version = record.version;
   graph.revision = record.revision;
   graph.schemaVersion = record.schemaVersion;
+  graph.id = record.id;
   return graph;
 }
 

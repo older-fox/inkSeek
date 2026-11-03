@@ -119,9 +119,63 @@ export const chatMessageQuerySchema = z.object({
   limit: z.coerce.number().int('数量必须是整数').min(1).max(200).default(50),
 });
 
-export const chatPipelineRunQuerySchema = z.object({
-  limit: z.coerce.number().int('数量必须是整数').min(1).max(100).default(30),
-});
+export const chatPipelineScopeSchema = z.enum(['global', 'channel', 'persona']);
+
+const pipelineScopeIdSchema = z.string().trim().min(1).max(64).nullable().default(null);
+
+function requireScopedId(
+  value: { scope: 'global' | 'channel' | 'persona'; scopeId: string | null },
+  context: z.RefinementCtx,
+): void {
+  if (value.scope !== 'global' && !value.scopeId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '渠道或人格作用域需要 scopeId',
+      path: ['scopeId'],
+    });
+  }
+  if (value.scope === 'global' && value.scopeId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '全局作用域不接受 scopeId',
+      path: ['scopeId'],
+    });
+  }
+}
+
+export const chatPipelineScopeQuerySchema = z
+  .object({
+    scope: chatPipelineScopeSchema.default('global'),
+    scopeId: pipelineScopeIdSchema,
+  })
+  .superRefine(requireScopedId);
+
+export const followChatPipelineGraphSchema = chatPipelineScopeQuerySchema;
+
+export const debugChatPipelineRunSchema = z
+  .object({
+    scope: chatPipelineScopeSchema.default('global'),
+    scopeId: pipelineScopeIdSchema,
+    text: z.string().trim().min(1, '请输入一条模拟消息').max(4000, '模拟消息最多 4000 个字符'),
+    senderName: z.string().trim().max(80).optional(),
+  })
+  .superRefine(requireScopedId);
+
+export const chatPipelineRunQuerySchema = z
+  .object({
+    limit: z.coerce.number().int('数量必须是整数').min(1).max(100).default(30),
+    scope: chatPipelineScopeSchema.optional(),
+    scopeId: z.string().trim().min(1).max(64).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.scope && value.scope !== 'global' && !value.scopeId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '按渠道或人格筛选运行记录需要 scopeId',
+        path: ['scopeId'],
+      });
+    }
+  });
 
 const pipelineNodeIdSchema = z
   .string()
@@ -142,6 +196,9 @@ const pipelinePositionSchema = z.object({
 });
 
 export const saveChatPipelineGraphSchema = z.object({
+  scope: chatPipelineScopeSchema.default('global'),
+  scopeId: pipelineScopeIdSchema,
+  expectedGraphId: z.string().trim().min(1, '缺少图标识，请刷新后重试').max(64),
   name: z.string().trim().min(1, '请填写图名称').max(80, '图名称最多 80 个字符'),
   expectedRevision: z.number().int().min(0, '缺少保存版本，请刷新后重试'),
   nodes: z
@@ -173,7 +230,8 @@ export const saveChatPipelineGraphSchema = z.object({
       }),
     )
     .max(200, '连线数量过多'),
-});
+})
+  .superRefine(requireScopedId);
 
 export const chatPersonaHistoryEntrySchema = z.object({
   id: z.string().trim().min(1).max(80),

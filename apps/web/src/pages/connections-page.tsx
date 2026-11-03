@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
+import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints, Workflow } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -86,6 +86,15 @@ function ChannelCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
+          <Link
+            to="/pipeline"
+            search={{ scope: 'channel', scopeId: channel.id }}
+            aria-label={`编辑 ${channel.displayName} 的消息管线`}
+            title="消息管线"
+            className="rounded-lg p-2 text-mist-600 transition hover:bg-jade-400/10 hover:text-jade-300"
+          >
+            <Workflow className="size-3.5" />
+          </Link>
           <button
             type="button"
             onClick={onOpenPersona}

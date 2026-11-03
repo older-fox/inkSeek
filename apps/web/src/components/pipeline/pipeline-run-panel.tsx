@@ -105,6 +105,11 @@ export function PipelineRunPanel({
               <span className={cn(RUN_STATUS[selectedRun.status].text)}>
                 {RUN_STATUS[selectedRun.status].label}
               </span>
+              {selectedRun.mode === 'debug' && (
+                <span className="rounded-sm border border-jade-400/25 px-1 font-mono text-[0.44rem] uppercase tracking-[0.1em] text-jade-300">
+                  试跑
+                </span>
+              )}
               <span className="truncate font-mono text-[0.5rem] text-mist-600">
                 {selectedRun.graphId}@{selectedRun.graphVersion}
               </span>
@@ -117,8 +122,18 @@ export function PipelineRunPanel({
             {selectedRun.senderName ? `${selectedRun.senderName}：` : ''}
             {selectedRun.messagePreview || '（无文本消息）'}
           </p>
-          <p className="mt-1 font-mono text-[0.5rem] text-mist-600">
-            {selectedRun.conversationName} · {selectedRun.channelName}
+          <p className="mt-1 truncate font-mono text-[0.5rem] text-mist-600">
+            {selectedRun.mode === 'debug'
+              ? `试跑 · ${
+                  selectedRun.scope === 'channel'
+                    ? (selectedRun.channelName ?? '渠道')
+                    : selectedRun.scope === 'persona'
+                      ? `人格「${selectedRun.personaName ?? '未命名'}」`
+                      : '全局模板'
+                }`
+              : [selectedRun.conversationName, selectedRun.channelName]
+                  .filter(Boolean)
+                  .join(' · ')}
           </p>
           <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[0.5rem] text-mist-600">
             <span>{succeeded} 成功</span>
@@ -147,7 +162,7 @@ export function PipelineRunPanel({
           </div>
         ) : runs.length === 0 ? (
           <p className="rounded-lg border border-dashed border-mist-100/[0.1] px-3 py-5 text-center text-[0.58rem] leading-5 text-mist-600">
-            还没有运行记录，新的入站消息会在这里留下轨迹。
+            这个作用域还没有运行记录。新的入站消息或一次试跑都会在这里留下轨迹。
           </p>
         ) : (
           <div className="space-y-1.5">
@@ -170,6 +185,11 @@ export function PipelineRunPanel({
                     <span className="flex items-center gap-1.5 text-[0.56rem]">
                       <span className={cn('size-1.5 rounded-full', status.dot)} />
                       <span className={status.text}>{status.label}</span>
+                      {run.mode === 'debug' && (
+                        <span className="rounded-sm border border-jade-400/25 px-1 font-mono text-[0.42rem] uppercase tracking-[0.1em] text-jade-300">
+                          试跑
+                        </span>
+                      )}
                     </span>
                     <span className="font-mono text-[0.48rem] text-mist-600">
                       {formatRunTime(run.startedAt)} · {formatDuration(run.durationMs)}

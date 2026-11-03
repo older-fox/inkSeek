@@ -8,7 +8,7 @@ import type {
   ChatPipelineNodeType,
 } from '@inkseek/shared';
 import type { LucideIcon } from 'lucide-react';
-import { Braces, Cpu, GitBranch, Timer, Type } from 'lucide-react';
+import { Braces, Cpu, GitBranch, Images, Timer, Type } from 'lucide-react';
 
 export const CARD_WIDTH = 248;
 /** Fixed header band; port rows start right below it. */
@@ -52,6 +52,14 @@ export const CATEGORY_STYLE: Record<
     border: 'border-jade-400/25',
     background: 'bg-jade-400/[0.08]',
     dot: 'bg-jade-400',
+  },
+  media: {
+    label: '媒体',
+    icon: Images,
+    text: 'text-[#e9a8b8]',
+    border: 'border-[#d98ba0]/30',
+    background: 'bg-[#d98ba0]/[0.08]',
+    dot: 'bg-[#d98ba0]',
   },
   logic: {
     label: '逻辑',

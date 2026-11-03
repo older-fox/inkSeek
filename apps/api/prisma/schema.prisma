@@ -80,7 +80,8 @@ model PersonaCard {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  versions PersonaVersion[]
+  versions     PersonaVersion[]
+  pipelineRuns ChatPipelineRun[]
 
   @@index([name])
   @@index([updatedAt])
@@ -137,6 +138,20 @@ enum ChatPipelineNodeStatus {
   SKIPPED
   FAILED
   CANCELLED
+}
+
+/// Graph namespace. `GLOBAL` is the system template; channels and personas
+/// inherit it until they save their own copy.
+enum ChatPipelineScope {
+  GLOBAL
+  CHANNEL
+  PERSONA
+}
+
+/// `DEBUG` runs execute the real graph but never commit effects (no replies).
+enum ChatPipelineRunMode {
+  LIVE
+  DEBUG
 }
 
 /// Namespace root. Every contact, conversation, message and future persona
@@ -248,22 +263,22 @@ model ChatGroupMember {
 }
 
 model ChatMessageRecord {
-  id             String           @id @default(cuid())
-  channelId      String
-  channel        ChatChannel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversationId String
-  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  externalId     String?
-  senderId       String
-  sender         ChatContact      @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  senderName     String
-  senderCard     String?
-  isSelf         Boolean          @default(false)
-  kind           ChatMessageKind  @default(TEXT)
-  text           String           @default("")
-  segments       Json
-  sentAt         DateTime
-  receivedAt     DateTime         @default(now())
+  id                String              @id @default(cuid())
+  channelId         String
+  channel           ChatChannel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId    String
+  conversation      ChatConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  externalId        String?
+  senderId          String
+  sender            ChatContact         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderName        String
+  senderCard        String?
+  isSelf            Boolean             @default(false)
+  kind              ChatMessageKind     @default(TEXT)
+  text              String              @default("")
+  segments          Json
+  sentAt            DateTime
+  receivedAt        DateTime            @default(now())
   /// OneBot message_id from the reply segment, kept even when the target is not stored.
   replyToExternalId String?
   /// Local target row when the quoted message was already ingested; cleared on delete.
@@ -285,10 +300,32 @@ model ChatMessageRecord {
   @@index([replyToExternalId])
 }
 
+/// One blob on disk, keyed by the SHA-256 of its decoded bytes. Many message
+/// and forward-node mappings may point at the same row, so repeated images are
+/// stored and described once. Files live at `data/chat/images/<sha[0..2]>/...`.
+model ChatMediaObject {
+  id          String   @id @default(cuid())
+  sha256      String   @unique
+  /// Path relative to the image root, e.g. `ab/cd/ef/<sha256>.jpg`.
+  storagePath String
+  mimeType    String?
+  byteSize    Int
+  width       Int?
+  height      Int?
+  /// Vision description; null until the description job runs.
+  description String?
+  createdAt   DateTime @default(now())
+
+  images            ChatImageAsset[]
+  forwardNodeImages ChatForwardNodeImage[]
+}
+
 model ChatImageAsset {
   id        String            @id @default(cuid())
   messageId String
   message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaId   String?
+  media     ChatMediaObject?  @relation(fields: [mediaId], references: [id], onDelete: SetNull)
   url       String
   fileName  String?
   mimeType  String?
@@ -301,6 +338,7 @@ model ChatImageAsset {
   createdAt DateTime          @default(now())
 
   @@index([messageId, position])
+  @@index([mediaId])
 }
 
 /// Long-lived group persona state. Keyed by the conversation so two channels
@@ -412,9 +450,11 @@ model ChatForwardNode {
 }
 
 model ChatForwardNodeImage {
-  id        String          @id @default(cuid())
+  id        String           @id @default(cuid())
   nodeId    String
-  node      ChatForwardNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  node      ChatForwardNode  @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  mediaId   String?
+  media     ChatMediaObject? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
   url       String
   fileName  String?
   mimeType  String?
@@ -422,10 +462,11 @@ model ChatForwardNodeImage {
   width     Int?
   height    Int?
   remoteUrl String?
-  position  Int             @default(0)
-  createdAt DateTime        @default(now())
+  position  Int              @default(0)
+  createdAt DateTime         @default(now())
 
   @@index([nodeId, position])
+  @@index([mediaId])
 }
 
 model ChatForwardNodeVoice {
@@ -451,23 +492,34 @@ model ChatPipelineRun {
   graphId        String
   graphVersion   Int
   status         ChatPipelineRunStatus @default(RUNNING)
-  channelId      String
-  channel        ChatChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversationId String
-  conversation   ChatConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  scope          ChatPipelineScope     @default(GLOBAL)
+  scopeId        String?
+  mode           ChatPipelineRunMode   @default(LIVE)
+  channelId      String?
+  channel        ChatChannel?          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   ChatConversation?     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   messageId      String?
-  message        ChatMessageRecord?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  message        ChatMessageRecord?    @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  personaCardId  String?
+  persona        PersonaCard?          @relation(fields: [personaCardId], references: [id], onDelete: SetNull)
   startedAt      DateTime              @default(now())
   finishedAt     DateTime?
   durationMs     Int?
   error          String?
   /// Final namespaced node outputs, kept for debugging and future replay.
   variables      Json?
+  /// Effects requested by nodes. Debug runs store them here instead of committing.
+  effects        Json?
+  /// Simulated message for debug runs: `{ text, senderName }`.
+  debugInput     Json?
   nodes          ChatPipelineNodeRun[]
 
   @@index([channelId, startedAt])
   @@index([conversationId, startedAt])
   @@index([messageId])
+  @@index([personaCardId])
+  @@index([scope, scopeId, startedAt])
   @@index([startedAt])
 }
 
@@ -476,9 +528,9 @@ model ChatPipelineRun {
 /// node starts (RUNNING, no finish time) and updated when it settles, so long
 /// waits are visible while they happen.
 model ChatPipelineNodeRun {
-  id          String                  @id @default(cuid())
+  id          String                 @id @default(cuid())
   runId       String
-  run         ChatPipelineRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run         ChatPipelineRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
   nodeId      String
   nodeType    String
   nodeVersion Int
@@ -493,18 +545,25 @@ model ChatPipelineNodeRun {
   @@index([runId, startedAt])
 }
 
-/// Editable node graph. Single active row keyed by the built-in graph id; the
-/// version bumps only when the structure or configuration changes, not when a
-/// card is merely dragged around the canvas. Revision bumps on every write and
-/// is the optimistic-concurrency token for editors.
+/// Editable node graph, one row per namespace: the global template, a channel
+/// copy, or a persona copy. Channels and personas have no row while they simply
+/// follow their parent; saving creates the row (copy-on-write). The version
+/// bumps only when the structure or configuration changes, not when a card is
+/// merely dragged around the canvas. Revision bumps on every write and is the
+/// optimistic-concurrency token for editors.
 model ChatPipelineGraph {
-  id            String   @id
+  id            String            @id @default(cuid())
+  scope         ChatPipelineScope @default(GLOBAL)
+  /// Channel id or persona card id; empty string for the global template.
+  scopeId       String            @default("")
   name          String
-  version       Int      @default(1)
-  revision      Int      @default(0)
-  schemaVersion Int      @default(1)
+  version       Int               @default(1)
+  revision      Int               @default(0)
+  schemaVersion Int               @default(1)
   nodes         Json
   edges         Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([scope, scopeId])
 }

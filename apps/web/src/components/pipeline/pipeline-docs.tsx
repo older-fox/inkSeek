@@ -27,6 +27,7 @@ const CONFIG_KIND_LABEL: Record<ChatPipelineConfigFieldKind, string> = {
 const CATEGORY_ORDER: ChatPipelineNodeCategory[] = [
   'system',
   'data',
+  'media',
   'text',
   'logic',
   'flow',

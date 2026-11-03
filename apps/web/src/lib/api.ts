@@ -14,7 +14,9 @@ import type {
   ChatPipelineGraphSnapshot,
   ChatPipelineRunDetail,
   ChatPipelineRunSummary,
+  ChatPipelineScope,
   ChatSendMessageInput,
+  DebugChatPipelineRunInput,
   LoginInput,
   ModelProviderInput,
   ModelProviderSaveResult,
@@ -24,6 +26,7 @@ import type {
   PersonaRecord,
   PersonaSummary,
   PersonaVersionDetail,
+  PipelineScopeRef,
   RedisConnectionInput,
   RedisProbeResult,
   RedisSettingsInput,
@@ -180,16 +183,43 @@ export const api = {
         body: JSON.stringify(input),
       },
     ),
-  pipelineRuns: (limit = 30) =>
-    request<ChatPipelineRunSummary[]>(`/pipeline/runs?limit=${limit}`),
+  pipelineRuns: (limit = 30, filter?: PipelineRunFilter) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (filter?.scope) {
+      params.set('scope', filter.scope);
+      if (filter.scopeId) {
+        params.set('scopeId', filter.scopeId);
+      }
+    }
+    return request<ChatPipelineRunSummary[]>(`/pipeline/runs?${params.toString()}`);
+  },
   pipelineRun: (id: string) =>
     request<ChatPipelineRunDetail>(`/pipeline/runs/${encodeURIComponent(id)}`),
-  pipelineGraph: () => request<ChatPipelineGraphSnapshot>('/pipeline/graph'),
+  pipelineGraph: (ref: PipelineScopeRef) => {
+    const params = new URLSearchParams({ scope: ref.scope });
+    if (ref.scopeId) {
+      params.set('scopeId', ref.scopeId);
+    }
+    return request<ChatPipelineGraphSnapshot>(`/pipeline/graph?${params.toString()}`);
+  },
   savePipelineGraph: (input: SaveChatPipelineGraphInput) =>
     request<ChatPipelineGraphSnapshot>('/pipeline/graph', {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
-  resetPipelineGraph: () =>
-    request<ChatPipelineGraphSnapshot>('/pipeline/graph/reset', { method: 'POST' }),
+  followPipelineGraph: (ref: PipelineScopeRef) =>
+    request<ChatPipelineGraphSnapshot>('/pipeline/graph/follow', {
+      method: 'POST',
+      body: JSON.stringify(ref),
+    }),
+  debugPipelineRun: (input: DebugChatPipelineRunInput) =>
+    request<ChatPipelineRunDetail>('/pipeline/debug-runs', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 };
+
+export interface PipelineRunFilter {
+  scope?: ChatPipelineScope;
+  scopeId?: string | null;
+}

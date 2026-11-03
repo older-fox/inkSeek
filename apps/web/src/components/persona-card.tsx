@@ -1,5 +1,7 @@
+import { Link } from '@tanstack/react-router';
 import {
   AtSign,
+  FlaskConical,
   MessageSquareQuote,
   Plus,
   Quote,
@@ -71,11 +73,13 @@ function TraitMeter({ trait, tone }: { trait: PersonaTrait; tone: 'brass' | 'jad
 
 function CardFooter({
   hint,
+  personaId,
   personaName,
   active,
   onEdit,
 }: {
   hint: string;
+  personaId: string;
   personaName: string;
   active: boolean;
   onEdit?: () => void;
@@ -86,23 +90,39 @@ function CardFooter({
         <RotateCw className="size-3 shrink-0" strokeWidth={1.7} />
         <span className="truncate">{hint}</span>
       </p>
-      {onEdit && (
-        <button
-          type="button"
+      <div className="flex shrink-0 items-center gap-2.5">
+        <Link
+          to="/pipeline"
+          search={{ scope: 'persona', scopeId: personaId }}
           tabIndex={active ? 0 : -1}
-          onClick={(event) => {
-            event.stopPropagation();
-            onEdit();
-          }}
-          aria-label={`编辑 ${personaName} 的角色卡`}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`调试 ${personaName} 的默认消息管线`}
           className={cn(
-            'shrink-0 rounded-sm text-[0.66rem] tracking-[0.02em] text-brass-300/90 underline decoration-brass-400/40 decoration-1 underline-offset-4 transition hover:text-brass-200 hover:decoration-brass-300 focus-visible:outline-none focus-visible:text-brass-200 focus-visible:ring-2 focus-visible:ring-brass-400/40',
+            'flex items-center gap-1 rounded-sm text-[0.62rem] tracking-[0.02em] text-jade-300/90 transition hover:text-jade-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-jade-400/40',
             active ? 'pointer-events-auto' : 'pointer-events-none',
           )}
         >
-          编辑角色卡
-        </button>
-      )}
+          <FlaskConical className="size-3" strokeWidth={1.8} />
+          高级调试
+        </Link>
+        {onEdit && (
+          <button
+            type="button"
+            tabIndex={active ? 0 : -1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit();
+            }}
+            aria-label={`编辑 ${personaName} 的角色卡`}
+            className={cn(
+              'shrink-0 rounded-sm text-[0.66rem] tracking-[0.02em] text-brass-300/90 underline decoration-brass-400/40 decoration-1 underline-offset-4 transition hover:text-brass-200 hover:decoration-brass-300 focus-visible:outline-none focus-visible:text-brass-200 focus-visible:ring-2 focus-visible:ring-brass-400/40',
+              active ? 'pointer-events-auto' : 'pointer-events-none',
+            )}
+          >
+            编辑角色卡
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -252,6 +272,7 @@ function PersonaFront({
 
       <CardFooter
         hint={`点击翻面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+        personaId={persona.id}
         personaName={persona.name}
         active={active}
         onEdit={onEdit}
@@ -370,6 +391,7 @@ function PersonaBack({
 
       <CardFooter
         hint={`点击返回正面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+        personaId={persona.id}
         personaName={persona.name}
         active={active}
         onEdit={onEdit}

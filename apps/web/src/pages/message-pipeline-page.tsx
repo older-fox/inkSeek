@@ -4,14 +4,22 @@ import type {
   ChatPipelineGraphNode,
   ChatPipelineGraphSnapshot,
   ChatPipelineNodeType,
+  ChatPipelineRunDetail,
+  ChatPipelineScope,
+  PipelineScopeRef,
   SaveChatPipelineGraphInput,
 } from '@inkseek/shared';
 import { canConnectPipelineKinds } from '@inkseek/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import {
   AlertTriangle,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
+  CopyPlus,
+  FlaskConical,
+  Layers,
   LoaderCircle,
   Plus,
   RotateCcw,
@@ -23,6 +31,7 @@ import {
   PipelineCanvas,
   type PipelineCanvasHandle,
 } from '@/components/pipeline/pipeline-canvas';
+import { PipelineDebugPanel } from '@/components/pipeline/pipeline-debug-panel';
 import { PipelineDocs } from '@/components/pipeline/pipeline-docs';
 import { PipelineInspector } from '@/components/pipeline/pipeline-inspector';
 import { PipelineRunPanel } from '@/components/pipeline/pipeline-run-panel';
@@ -36,6 +45,8 @@ import {
 import { cn } from '@/lib/cn';
 import { ApiError, api } from '@/lib/api';
 import {
+  chatChannelsQuery,
+  personasQuery,
   pipelineGraphQuery,
   pipelineRunQuery,
   pipelineRunsQuery,
@@ -43,12 +54,15 @@ import {
 
 type SaveState = 'saved' | 'saving' | 'error' | 'conflict';
 
-function toInput(graph: ChatPipelineGraph): SaveChatPipelineGraphInput {
+function toInput(graph: ChatPipelineGraph, ref: PipelineScopeRef): SaveChatPipelineGraphInput {
   return {
+    scope: ref.scope,
+    scopeId: ref.scope === 'global' ? null : (ref.scopeId ?? null),
     name: graph.name.trim() || '未命名消息图',
     nodes: graph.nodes,
     edges: graph.edges,
     expectedRevision: graph.revision,
+    expectedGraphId: graph.id,
   };
 }
 
@@ -58,10 +72,28 @@ function readDegraded(snapshot: ChatPipelineGraphSnapshot): string | null {
     : null;
 }
 
+const SCOPE_LABEL: Record<ChatPipelineScope, string> = {
+  global: '全局模板',
+  channel: '渠道',
+  persona: '人格',
+};
+
 export function MessagePipelinePage() {
   const queryClient = useQueryClient();
-  const graphQuery = useQuery(pipelineGraphQuery);
-  const runsQuery = useQuery(pipelineRunsQuery);
+  const search = useSearch({ from: '/app/pipeline' });
+  const navigate = useNavigate();
+
+  const scope: ChatPipelineScope = search.scope ?? 'global';
+  const scopeId = scope === 'global' ? null : (search.scopeId ?? null);
+  const scopeRef = useMemo<PipelineScopeRef>(() => ({ scope, scopeId }), [scope, scopeId]);
+  const refKey = `${scope}:${scopeId ?? ''}`;
+  const refRef = useRef(scopeRef);
+  refRef.current = scopeRef;
+
+  const graphQuery = useQuery(pipelineGraphQuery(scopeRef));
+  const runsQuery = useQuery(pipelineRunsQuery(scopeRef));
+  const channelsQuery = useQuery(chatChannelsQuery);
+  const personaListQuery = useQuery(personasQuery);
 
   const [graph, setGraph] = useState<ChatPipelineGraph | null>(null);
   const [catalog, setCatalog] = useState<ChatPipelineNodeType[]>([]);
@@ -70,7 +102,11 @@ export function MessagePipelinePage() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [resetArmed, setResetArmed] = useState(false);
+  const [followArmed, setFollowArmed] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [inheritedFrom, setInheritedFrom] = useState<ChatPipelineScope | null>(null);
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
@@ -80,32 +116,77 @@ export function MessagePipelinePage() {
   const conflictRef = useRef(false);
   const editSeq = useRef(0);
   const saveLoopRef = useRef<Promise<void> | null>(null);
-  const initialized = useRef(false);
-  const runInitialized = useRef(false);
+  const loadedKeyRef = useRef<string | null>(null);
+  const autoRunKeyRef = useRef<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const canvasRef = useRef<PipelineCanvasHandle>(null);
 
-  useEffect(() => {
-    if (!graphQuery.data || initialized.current) {
-      return;
+  const currentScopeLabel = useMemo(() => {
+    if (scope === 'global') {
+      return '全局模板';
     }
-    initialized.current = true;
-    graphRef.current = graphQuery.data.graph;
-    setGraph(graphQuery.data.graph);
-    setCatalog(graphQuery.data.catalog);
-    setDegradedReason(readDegraded(graphQuery.data));
-  }, [graphQuery.data]);
+    if (scope === 'channel') {
+      return (
+        channelsQuery.data?.find((channel) => channel.id === scopeId)?.displayName ??
+        '未知渠道'
+      );
+    }
+    return personaListQuery.data?.find((persona) => persona.id === scopeId)?.name ?? '未知人格';
+  }, [scope, scopeId, channelsQuery.data, personaListQuery.data]);
+
+  const inheritedLabel = useMemo(() => {
+    if (inheritedFrom === 'persona') {
+      const bound = channelsQuery.data?.find((channel) => channel.id === scopeId)?.persona;
+      return bound ? `人格「${bound.name}」` : '已绑定人格';
+    }
+    if (inheritedFrom === 'global') {
+      return '全局模板';
+    }
+    return '父级';
+  }, [inheritedFrom, scopeId, channelsQuery.data]);
 
   useEffect(() => {
-    if (runInitialized.current) {
+    const data = graphQuery.data;
+    if (!data || loadedKeyRef.current === refKey) {
       return;
     }
-    const latest = runsQuery.data?.[0];
-    if (latest) {
-      runInitialized.current = true;
-      setSelectedRunId(latest.id);
+    loadedKeyRef.current = refKey;
+    conflictRef.current = false;
+    editSeq.current += 1;
+    dirtyRef.current = false;
+    setDirty(false);
+    graphRef.current = data.graph;
+    setGraph(data.graph);
+    setCatalog(data.catalog);
+    setDegradedReason(readDegraded(data));
+    setFollowing(data.following);
+    setInheritedFrom(data.inheritedFrom);
+    setSelection(null);
+    setSelectedRunId(null);
+    setSaveState('saved');
+    setSaveError(null);
+    window.requestAnimationFrame(() => canvasRef.current?.fit());
+  }, [graphQuery.data, refKey]);
+
+  useEffect(() => {
+    if (!runsQuery.data || autoRunKeyRef.current === refKey) {
+      return;
     }
-  }, [runsQuery.data]);
+    autoRunKeyRef.current = refKey;
+    setSelectedRunId(runsQuery.data[0]?.id ?? null);
+  }, [runsQuery.data, refKey]);
+
+  const switchScope = (nextScope: ChatPipelineScope, nextId: string | null) => {
+    setScopeMenuOpen(false);
+    setFollowArmed(false);
+    void navigate({
+      to: '/pipeline',
+      search: {
+        scope: nextScope,
+        scopeId: nextScope === 'global' ? undefined : (nextId ?? undefined),
+      },
+    });
+  };
 
   const detailQuery = useQuery(pipelineRunQuery(selectedRunId ?? ''));
   const nodeRuns = useMemo(
@@ -156,23 +237,34 @@ export function MessagePipelinePage() {
         return;
       }
 
+      const loopKey = loadedKeyRef.current;
       let failed = false;
       const loop = (async () => {
-        while (dirtyRef.current && graphRef.current) {
+        while (dirtyRef.current && graphRef.current && loadedKeyRef.current === loopKey) {
           dirtyRef.current = false;
           setDirty(false);
           setSaveState('saving');
           const seq = editSeq.current;
+          const targetRef = refRef.current;
           try {
-            const snapshot = await api.savePipelineGraph(toInput(graphRef.current));
+            const snapshot = await api.savePipelineGraph(
+              toInput(graphRef.current, targetRef),
+            );
+            if (loadedKeyRef.current !== loopKey) {
+              // The user switched namespaces while this save was in flight.
+              return;
+            }
             setCatalog(snapshot.catalog);
             setDegradedReason(readDegraded(snapshot));
+            setFollowing(snapshot.following);
+            setInheritedFrom(snapshot.inheritedFrom);
             // Merge only the write token synchronously: local nodes/edges may be
             // newer than the response, and the next save must send the new revision.
             const current = graphRef.current;
             if (current) {
               const next = {
                 ...current,
+                id: snapshot.graph.id,
                 version: snapshot.graph.version,
                 revision: snapshot.graph.revision,
                 schemaVersion: snapshot.graph.schemaVersion,
@@ -181,7 +273,7 @@ export function MessagePipelinePage() {
               graphRef.current = next;
               setGraph(next);
             }
-            queryClient.setQueryData(pipelineGraphQuery.queryKey, snapshot);
+            queryClient.setQueryData(pipelineGraphQuery(targetRef).queryKey, snapshot);
             setSaveError(null);
             setSaveState('saved');
             if (editSeq.current !== seq) {
@@ -189,6 +281,9 @@ export function MessagePipelinePage() {
               setDirty(true);
             }
           } catch (error) {
+            if (loadedKeyRef.current !== loopKey) {
+              return;
+            }
             failed = true;
             if (error instanceof ApiError && error.status === 409) {
               conflictRef.current = true;
@@ -209,7 +304,7 @@ export function MessagePipelinePage() {
 
       saveLoopRef.current = loop.finally(() => {
         saveLoopRef.current = null;
-        if (!failed && dirtyRef.current) {
+        if (!failed && dirtyRef.current && loadedKeyRef.current === loopKey) {
           requestSave();
         }
       });
@@ -436,20 +531,20 @@ export function MessagePipelinePage() {
     setSelection({ kind: 'node', id });
   };
 
-  const resetGraph = async () => {
-    if (!resetArmed) {
-      setResetArmed(true);
-      window.setTimeout(() => setResetArmed(false), 3200);
+  const followGraph = async () => {
+    if (!followArmed) {
+      setFollowArmed(true);
+      window.setTimeout(() => setFollowArmed(false), 3200);
       return;
     }
     if (saveState === 'saving') {
-      flash('正在保存，稍后再重置');
+      flash('正在保存，稍后再恢复');
       return;
     }
 
-    setResetArmed(false);
+    setFollowArmed(false);
     try {
-      const snapshot = await api.resetPipelineGraph();
+      const snapshot = await api.followPipelineGraph(scopeRef);
       conflictRef.current = false;
       editSeq.current += 1;
       dirtyRef.current = false;
@@ -458,14 +553,33 @@ export function MessagePipelinePage() {
       setGraph(snapshot.graph);
       setCatalog(snapshot.catalog);
       setDegradedReason(readDegraded(snapshot));
+      setFollowing(snapshot.following);
+      setInheritedFrom(snapshot.inheritedFrom);
       setSelection(null);
       setSaveState('saved');
       setSaveError(null);
-      queryClient.setQueryData(pipelineGraphQuery.queryKey, snapshot);
+      queryClient.setQueryData(pipelineGraphQuery(scopeRef).queryKey, snapshot);
+      void queryClient.invalidateQueries({ queryKey: ['pipeline', 'graph'] });
       window.requestAnimationFrame(() => canvasRef.current?.fit());
+      flash(scope === 'global' ? '已恢复内置默认图' : '已恢复跟随父级');
     } catch (error) {
       flash(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const createCopy = () => {
+    if (saveState === 'saving') {
+      flash('正在保存，稍后再创建副本');
+      return;
+    }
+    requestSave(true);
+    flash('正在为当前作用域建立独立副本');
+  };
+
+  const handleDebugCompleted = (run: ChatPipelineRunDetail) => {
+    setSelectedRunId(run.id);
+    queryClient.setQueryData(pipelineRunQuery(run.id).queryKey, run);
+    void queryClient.invalidateQueries({ queryKey: ['pipeline', 'runs'] });
   };
 
   const reloadLatest = async () => {
@@ -486,6 +600,8 @@ export function MessagePipelinePage() {
       setGraph(result.data.graph);
       setCatalog(result.data.catalog);
       setDegradedReason(readDegraded(result.data));
+      setFollowing(result.data.following);
+      setInheritedFrom(result.data.inheritedFrom);
       setSelection(null);
       setSaveState('saved');
       setSaveError(null);
@@ -516,7 +632,7 @@ export function MessagePipelinePage() {
     );
   }
 
-  if (graphQuery.isPending || !graph) {
+  if (graphQuery.isPending || !graph || loadedKeyRef.current !== refKey) {
     return <PipelineSkeleton />;
   }
 
@@ -545,6 +661,14 @@ export function MessagePipelinePage() {
         <div className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
+            onClick={() => setDebugOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-jade-400/25 bg-jade-400/[0.06] px-2.5 py-1.5 text-[0.62rem] text-jade-300 transition hover:bg-jade-400/[0.12]"
+          >
+            <FlaskConical className="size-3" strokeWidth={1.8} />
+            试跑
+          </button>
+          <button
+            type="button"
             onClick={() => setDocsOpen(true)}
             className="flex items-center gap-1.5 rounded-lg border border-mist-100/[0.1] px-2.5 py-1.5 text-[0.62rem] text-mist-400 transition hover:border-brass-400/30 hover:text-brass-200"
           >
@@ -566,21 +690,130 @@ export function MessagePipelinePage() {
               <Save className="size-3.5" strokeWidth={1.7} />
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => void resetGraph()}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.6rem] transition',
-              resetArmed
-                ? 'border-signal-400/40 bg-signal-400/[0.08] text-signal-400'
-                : 'border-mist-100/[0.1] text-mist-500 hover:border-mist-100/[0.2] hover:text-mist-200',
-            )}
-          >
-            <RotateCcw className="size-3" strokeWidth={1.8} />
-            {resetArmed ? '再次点击确认' : '重置'}
-          </button>
         </div>
       </header>
+
+      <div className="relative z-20 flex min-h-[2.65rem] shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-mist-100/[0.06] bg-ink-950/35 px-3 py-1.5 sm:px-4">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setScopeMenuOpen((open) => !open)}
+            aria-haspopup="listbox"
+            aria-expanded={scopeMenuOpen}
+            className={cn(
+              'flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[0.62rem] transition',
+              scopeMenuOpen
+                ? 'border-brass-400/45 bg-brass-400/[0.1] text-brass-200'
+                : 'border-mist-100/[0.12] bg-ink-900/40 text-mist-300 hover:border-brass-400/30 hover:text-brass-200',
+            )}
+          >
+            <Layers className="size-3 shrink-0 text-brass-300/80" strokeWidth={1.8} />
+            <span className="max-w-[9.5rem] truncate">{currentScopeLabel}</span>
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.1em] text-mist-600">
+              {SCOPE_LABEL[scope]}
+            </span>
+            <ChevronDown
+              className={cn('size-3 shrink-0 transition', scopeMenuOpen && 'rotate-180')}
+              strokeWidth={1.8}
+            />
+          </button>
+
+          {scopeMenuOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="关闭作用域菜单"
+                onClick={() => setScopeMenuOpen(false)}
+                className="fixed inset-0 z-40 cursor-default"
+              />
+              <div className="absolute left-0 top-full z-50 mt-1.5 max-h-[70vh] w-[19rem] overflow-y-auto rounded-xl border border-mist-100/[0.1] bg-ink-900/97 p-1.5 shadow-[0_24px_70px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl">
+                <ScopeOption
+                  label="全局模板"
+                  hint="所有作用域继承的默认管线"
+                  active={scope === 'global'}
+                  onClick={() => switchScope('global', null)}
+                />
+                <ScopeSection label="渠道" count={channelsQuery.data?.length ?? 0} />
+                {channelsQuery.data?.map((channel) => (
+                  <ScopeOption
+                    key={channel.id}
+                    label={channel.displayName}
+                    hint={
+                      channel.persona
+                        ? `${channel.accountId} · 人格 ${channel.persona.name}`
+                        : `${channel.accountId} · 未绑定人格`
+                    }
+                    active={scope === 'channel' && scopeId === channel.id}
+                    onClick={() => switchScope('channel', channel.id)}
+                  />
+                ))}
+                <ScopeSection label="人格卡" count={personaListQuery.data?.length ?? 0} />
+                {personaListQuery.data?.map((persona) => (
+                  <ScopeOption
+                    key={persona.id}
+                    label={persona.name}
+                    hint={`${persona.serial} · ${persona.occupation || '未填写职业'}`}
+                    active={scope === 'persona' && scopeId === persona.id}
+                    onClick={() => switchScope('persona', persona.id)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <span
+          className={cn(
+            'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.55rem]',
+            following
+              ? 'border-brass-400/30 bg-brass-400/[0.07] text-brass-200'
+              : 'border-jade-400/25 bg-jade-400/[0.06] text-jade-300',
+          )}
+        >
+          <span className={cn('size-1.5 rounded-full', following ? 'bg-brass-300' : 'bg-jade-400')} />
+          {following ? `跟随中 · ${inheritedLabel}` : '独立副本'}
+        </span>
+
+        <p className="hidden min-w-0 flex-1 truncate text-[0.55rem] text-mist-600 lg:block">
+          {scope === 'global'
+            ? '全局模板是所有未单独保存副本的渠道与人格卡继承的默认管线。'
+            : following
+              ? '当前没有独立副本；画布上的任何修改都会自动为这个作用域建立副本。'
+              : '这个作用域拥有自己的副本，修改不会影响其他渠道或人格卡。'}
+        </p>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {following && scope !== 'global' && (
+            <button
+              type="button"
+              onClick={createCopy}
+              className="flex items-center gap-1.5 rounded-lg border border-brass-400/25 bg-brass-400/[0.06] px-2.5 py-1.5 text-[0.58rem] text-brass-300 transition hover:bg-brass-400/[0.14]"
+            >
+              <CopyPlus className="size-3" strokeWidth={1.8} />
+              创建独立副本
+            </button>
+          )}
+          {(scope === 'global' || !following) && (
+            <button
+              type="button"
+              onClick={() => void followGraph()}
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.58rem] transition',
+                followArmed
+                  ? 'border-signal-400/40 bg-signal-400/[0.08] text-signal-400'
+                  : 'border-mist-100/[0.1] text-mist-500 hover:border-mist-100/[0.2] hover:text-mist-200',
+              )}
+            >
+              <RotateCcw className="size-3" strokeWidth={1.8} />
+              {followArmed
+                ? '再次点击确认'
+                : scope === 'global'
+                  ? '恢复默认'
+                  : '恢复跟随'}
+            </button>
+          )}
+        </div>
+      </div>
 
       {degradedReason && (
         <p className="border-b border-brass-400/20 bg-brass-400/[0.06] px-4 py-1.5 text-[0.58rem] text-brass-200">
@@ -650,6 +883,16 @@ export function MessagePipelinePage() {
 
       {docsOpen && <PipelineDocs catalog={catalog} onClose={() => setDocsOpen(false)} />}
 
+      {debugOpen && (
+        <PipelineDebugPanel
+          scope={scope}
+          scopeId={scopeId}
+          scopeLabel={currentScopeLabel}
+          onClose={() => setDebugOpen(false)}
+          onCompleted={handleDebugCompleted}
+        />
+      )}
+
       {notice && (
         <div className="pointer-events-none absolute left-1/2 top-[4.4rem] z-50 -translate-x-1/2 rounded-full border border-brass-400/30 bg-ink-900/95 px-3.5 py-1.5 text-[0.6rem] text-brass-200 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.9)]">
           {notice}
@@ -670,6 +913,61 @@ export function MessagePipelinePage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ScopeSection({ label, count }: { label: string; count: number }) {
+  return (
+    <p className="mt-1.5 flex items-center justify-between px-2 pb-1 pt-1 font-mono text-[0.46rem] uppercase tracking-[0.18em] text-mist-600">
+      <span>{label}</span>
+      <span>{count}</span>
+    </p>
+  );
+}
+
+function ScopeOption({
+  label,
+  hint,
+  active,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition',
+        active
+          ? 'bg-brass-400/[0.1] text-brass-100'
+          : 'text-mist-300 hover:bg-mist-100/[0.05]',
+      )}
+    >
+      <span
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded-md border',
+          active
+            ? 'border-brass-400/40 text-brass-300'
+            : 'border-mist-100/[0.12] text-mist-600',
+        )}
+      >
+        {active ? (
+          <CheckCircle2 className="size-3" strokeWidth={2} />
+        ) : (
+          <span className="size-1 rounded-full bg-mist-600" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[0.64rem]">{label}</span>
+        <span className="block truncate font-mono text-[0.48rem] text-mist-600">{hint}</span>
+      </span>
+    </button>
   );
 }
 
@@ -734,7 +1032,7 @@ function AddNodeMenu({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [open]);
 
-  const categories = (['system', 'data', 'text', 'logic', 'flow'] as const).map((category) => ({
+  const categories = (['system', 'data', 'media', 'text', 'logic', 'flow'] as const).map((category) => ({
     category,
     style: CATEGORY_STYLE[category],
     items: catalog.filter((entry) => entry.category === category && !entry.system),
