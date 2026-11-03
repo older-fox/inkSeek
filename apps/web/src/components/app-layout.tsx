@@ -5,11 +5,12 @@ import { motion } from 'motion/react';
 import { AppShell } from '@/components/app-shell';
 import { api } from '@/lib/api';
 import { meQuery } from '@/lib/queries';
+import { routeSection } from '@/lib/route-section';
 
 export function AppLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const section = useRouterState({ select: (state) => routeSection(state.location.pathname) });
   const { data: user } = useQuery(meQuery);
 
   const logoutMutation = useMutation({
@@ -35,7 +36,7 @@ export function AppLayout() {
       loggingOut={logoutMutation.isPending}
     >
       <motion.div
-        key={pathname}
+        key={section}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}

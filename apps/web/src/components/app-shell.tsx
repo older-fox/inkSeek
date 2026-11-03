@@ -17,6 +17,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { BrandMark } from '@/components/brand-mark';
 import { ThemeSwitcher } from '@/components/theme-switcher';
 import { cn } from '@/lib/cn';
+import { routeSection } from '@/lib/route-section';
 
 interface AppShellProps {
   user: AuthUser;
@@ -44,6 +45,7 @@ const navItems: NavItem[] = [
 export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps) {
   const initial = (user.displayName || user.username).slice(0, 1).toUpperCase();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const section = routeSection(pathname);
   const mainRef = useRef<HTMLElement>(null);
   const sectionLabel = pathname.startsWith('/connections')
     ? pathname === '/connections/private'
@@ -59,7 +61,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
-  }, [pathname]);
+  }, [section]);
 
   return (
     <div className="relative flex h-dvh overflow-hidden">
