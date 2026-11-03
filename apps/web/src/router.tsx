@@ -15,6 +15,7 @@ import { ConnectionsPage } from '@/pages/connections-page';
 import { GroupChatsPage } from '@/pages/group-chats-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
+import { MessagePipelinePage } from '@/pages/message-pipeline-page';
 import { PersonasPage } from '@/pages/personas-page';
 import { PrivateChatsPage } from '@/pages/private-chats-page';
 import { SettingsPage } from '@/pages/settings-page';
@@ -115,6 +116,12 @@ const personasRoute = createRoute({
   component: PersonasPage,
 });
 
+const messagePipelineRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/pipeline',
+  component: MessagePipelinePage,
+});
+
 const connectionsLayoutRoute = createRoute({
   getParentRoute: () => appRoute,
   id: 'connections',
@@ -181,6 +188,7 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     personasRoute,
+    messagePipelineRoute,
     connectionsLayoutRoute.addChildren([connectionsRoute, privateChatsRoute, groupChatsRoute]),
     settingsRoute,
   ]),
