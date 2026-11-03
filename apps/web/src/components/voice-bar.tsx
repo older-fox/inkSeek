@@ -68,66 +68,73 @@ export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self
   return (
     <div
       className={cn(
-        'flex w-[13.5rem] items-center gap-2.5 rounded-2xl px-3 py-2',
+        'flex w-[13.5rem] flex-col rounded-2xl px-3 py-2',
         self
           ? 'rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
           : 'rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
       )}
     >
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={failed}
-        aria-label={failed ? '语音加载失败' : playing ? '暂停语音' : '播放语音'}
-        className={cn(
-          'grid size-8 shrink-0 place-items-center rounded-full border transition disabled:opacity-40',
-          self
-            ? 'border-brass-400/30 bg-brass-400/15 text-brass-200 hover:bg-brass-400/25'
-            : 'border-mist-100/10 bg-mist-100/5 text-mist-200 hover:bg-mist-100/10',
-        )}
-      >
-        {playing ? (
-          <Pause className="size-3.5" fill="currentColor" />
-        ) : (
-          <Play className="ml-0.5 size-3.5" fill="currentColor" />
-        )}
-      </button>
-
-      <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2.5">
         <button
           type="button"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            if (rect.width > 0) seekTo((event.clientX - rect.left) / rect.width);
-          }}
-          aria-label="跳转播放位置"
-          className="flex h-6 w-full items-end gap-[2px]"
+          onClick={toggle}
+          disabled={failed}
+          aria-label={failed ? '语音加载失败' : playing ? '暂停语音' : '播放语音'}
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-full border transition disabled:opacity-40',
+            self
+              ? 'border-brass-400/30 bg-brass-400/15 text-brass-200 hover:bg-brass-400/25'
+              : 'border-mist-100/10 bg-mist-100/5 text-mist-200 hover:bg-mist-100/10',
+          )}
         >
-          {WAVE_BARS.map((height, index) => {
-            const active = (index + 0.5) / WAVE_BARS.length <= progress;
-            return (
-              <span
-                key={index}
-                style={{ height: `${Math.round(height * 100)}%` }}
-                className={cn(
-                  'flex-1 rounded-full transition-colors duration-150',
-                  active
-                    ? self
-                      ? 'bg-brass-300'
-                      : 'bg-jade-300'
-                    : 'bg-mist-100/20',
-                )}
-              />
-            );
-          })}
+          {playing ? (
+            <Pause className="size-3.5" fill="currentColor" />
+          ) : (
+            <Play className="ml-0.5 size-3.5" fill="currentColor" />
+          )}
         </button>
-        <p className="mt-1 flex items-center justify-between font-mono text-[0.48rem] text-mist-500">
-          <span>{formatClock(playing ? position : duration)}</span>
-          <span className="uppercase tracking-[0.14em]">
-            {failed ? '加载失败' : '语音'}
-          </span>
-        </p>
+
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              if (rect.width > 0) seekTo((event.clientX - rect.left) / rect.width);
+            }}
+            aria-label="跳转播放位置"
+            className="flex h-6 w-full items-end gap-[2px]"
+          >
+            {WAVE_BARS.map((height, index) => {
+              const active = (index + 0.5) / WAVE_BARS.length <= progress;
+              return (
+                <span
+                  key={index}
+                  style={{ height: `${Math.round(height * 100)}%` }}
+                  className={cn(
+                    'flex-1 rounded-full transition-colors duration-150',
+                    active ? (self ? 'bg-brass-300' : 'bg-jade-300') : 'bg-mist-100/20',
+                  )}
+                />
+              );
+            })}
+          </button>
+          <p className="mt-1 flex items-center justify-between font-mono text-[0.48rem] text-mist-500">
+            <span>{formatClock(playing ? position : duration)}</span>
+            <span className="uppercase tracking-[0.14em]">{failed ? '加载失败' : '语音'}</span>
+          </p>
+        </div>
       </div>
+
+      {voice.description ? (
+        <p
+          className={cn(
+            'mt-2 whitespace-pre-wrap break-words border-t pt-2 text-[0.62rem] leading-relaxed',
+            self ? 'border-brass-400/20 text-brass-100/85' : 'border-mist-100/10 text-mist-300',
+          )}
+        >
+          {voice.description}
+        </p>
+      ) : null}
 
       <audio
         ref={audioRef}

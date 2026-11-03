@@ -371,19 +371,21 @@ model ChatPrivatePersona {
 }
 
 model ChatVoiceAsset {
-  id        String            @id @default(cuid())
-  messageId String
-  message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  url       String
-  fileName  String?
-  mimeType  String?
-  byteSize  Int?
+  id          String            @id @default(cuid())
+  messageId   String
+  message     ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  url         String
+  fileName    String?
+  mimeType    String?
+  byteSize    Int?
   /// Duration in seconds when provided by the connector.
-  duration  Int?
-  remoteUrl String?
+  duration    Int?
+  /// Speech-to-text transcript from NapCat; null for silence or failed requests.
+  description String?
+  remoteUrl   String?
   /// Zero-based index of the source message segment, preserves render order.
-  position  Int               @default(0)
-  createdAt DateTime          @default(now())
+  position    Int               @default(0)
+  createdAt   DateTime          @default(now())
 
   @@index([messageId, position])
 }

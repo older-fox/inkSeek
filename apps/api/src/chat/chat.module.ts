@@ -12,6 +12,7 @@ import { ChatMessagesService } from './chat-messages.service.js';
 import { ChatPersonaService } from './chat-persona.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
 import { ChatService } from './chat.service.js';
+import { VoiceTranscriptionService } from './voice-transcription.service.js';
 import { PipelineController } from './pipeline/pipeline.controller.js';
 import { PipelineEffectsService } from './pipeline/pipeline-effects.service.js';
 import { PipelineGraphService } from './pipeline/pipeline-graph.service.js';
@@ -29,6 +30,7 @@ import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
     ChatPersonaService,
     ChatMediaService,
     ChatMessageProcessor,
+    VoiceTranscriptionService,
     ChatPipelineRunner,
     PipelineEffectsService,
     PipelineGraphService,

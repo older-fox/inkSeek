@@ -166,6 +166,8 @@ export interface ChatMessageVoiceSummary {
   position: number;
   /** Duration in seconds when NapCat provides it; otherwise null. */
   duration: number | null;
+  /** NapCat speech-to-text transcript; null when the audio is silent or untranscribed. */
+  description: string | null;
   mimeType: string | null;
   byteSize: number | null;
 }
@@ -561,7 +563,8 @@ export interface ChatGroupMemberSummary {
   avatarUrl: string | null;
 }
 
-export type ChatEventType = 'channel.updated' | 'conversation.updated' | 'message.created';
+export type ChatEventType =
+  'channel.updated' | 'conversation.updated' | 'message.created' | 'message.updated';
 
 export interface ChatEvent {
   type: ChatEventType;

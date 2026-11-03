@@ -43,6 +43,7 @@ import {
   type OneBotRequester,
   type OneBotSegment,
 } from './onebot.js';
+import { VoiceTranscriptionService } from './voice-transcription.service.js';
 
 const MEMBER_SYNC_CHUNK = 50;
 const PREVIEW_LENGTH = 120;
@@ -88,6 +89,7 @@ export class ChatMessagesService {
     private readonly events: ChatEventsService,
     private readonly processor: ChatMessageProcessor,
     private readonly forwards: ChatForwardService,
+    private readonly transcription: VoiceTranscriptionService,
   ) {}
 
   async ingest(
@@ -316,6 +318,21 @@ export class ChatMessagesService {
         channelId: channel.id,
         conversationId: conversation.id,
       });
+
+      if (voiceAssets.length > 0) {
+        void this.transcription
+          .transcribe(client, {
+            id: message.id,
+            externalId: message.externalId,
+            channelId: channel.id,
+            conversationId: conversation.id,
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `语音转写失败：${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+      }
 
       await this.triggerProcessing(
         channel,
@@ -1050,6 +1067,7 @@ export function toMessageSummary(record: MessageView): ChatMessageSummary {
       url: voice.url,
       position: voice.position,
       duration: voice.duration,
+      description: voice.description,
       mimeType: voice.mimeType,
       byteSize: voice.byteSize,
     }));

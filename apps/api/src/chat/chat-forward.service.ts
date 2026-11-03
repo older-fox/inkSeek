@@ -456,6 +456,7 @@ function toNodeSummary(
     url: voice.url,
     position: voice.position,
     duration: voice.duration,
+    description: null,
     mimeType: voice.mimeType,
     byteSize: voice.byteSize,
   }));

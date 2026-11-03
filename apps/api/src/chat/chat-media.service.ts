@@ -138,8 +138,9 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   /**
-   * Mirrors image handling for `record` segments. When the event only carries a
-   * local file name, NapCat's `get_record` action is asked for a playable mp3.
+   * Mirrors image handling for `record` segments. NapCat is always asked for an
+   * mp3 first: Tencent's record URLs serve AMR/SILK bytes while advertising
+   * `audio/mp3`, which no browser can decode.
    */
   async saveVoiceSegment(
     segment: OneBotSegment,
@@ -155,6 +156,7 @@ export class ChatMediaService implements OnModuleInit {
     const duration = readDurationSeconds(data);
     const directUrl =
       typeof data['url'] === 'string' && /^https?:\/\//i.test(data['url']) ? data['url'] : '';
+    const fileUrl = /^https?:\/\//i.test(file) ? file : '';
 
     if (file.startsWith('base64://')) {
       return this.saveBase64(
@@ -170,26 +172,25 @@ export class ChatMediaService implements OnModuleInit {
       return this.saveBase64(dataUrlMatch[2], null, VOICE_TARGET, duration, dataUrlMatch[1]);
     }
 
-    if (directUrl) {
-      return this.saveRemote(directUrl, VOICE_TARGET, duration);
-    }
+    if (client && !fileUrl && (file || fileId)) {
+      const params: Record<string, unknown> = { out_format: 'mp3' };
+      if (file) {
+        params['file'] = file;
+      }
+      if (fileId) {
+        params['file_id'] = fileId;
+      }
 
-    const fileUrl = /^https?:\/\//i.test(file) ? file : '';
-    if (fileUrl) {
-      return this.saveRemote(fileUrl, VOICE_TARGET, duration);
-    }
-
-    if (client && (file || fileId)) {
       try {
         const record = await client.call<{ url?: string; base64?: string; file?: string }>(
           'get_record',
-          { file, file_id: fileId, out_format: 'mp3' },
+          params,
           20_000,
         );
         const encoded =
           typeof record?.base64 === 'string' ? record.base64.replace(/^base64:\/\//i, '') : '';
         if (encoded) {
-          return this.saveBase64(encoded, null, VOICE_TARGET, duration);
+          return this.saveBase64(encoded, directUrl || null, VOICE_TARGET, duration);
         }
 
         const recordUrl =
@@ -206,6 +207,13 @@ export class ChatMediaService implements OnModuleInit {
           `get_record 获取语音失败：${error instanceof Error ? error.message : String(error)}`,
         );
       }
+    }
+
+    if (directUrl) {
+      return this.saveRemote(directUrl, VOICE_TARGET, duration);
+    }
+    if (fileUrl) {
+      return this.saveRemote(fileUrl, VOICE_TARGET, duration);
     }
 
     this.logger.warn(`收到无法定位的语音消息，仅保留原始消息段`);
@@ -457,22 +465,12 @@ export class ChatMediaService implements OnModuleInit {
         throw new Error('文件超过 64 MB');
       }
 
-      const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? null;
-      const fileName = this.writeMedia(buffer, mimeType, remoteUrl, target);
-      await writeFile(`${target.root}${fileName}`, buffer);
-
-      return {
-        url: `${target.urlPrefix}/${encodeURIComponent(fileName)}`,
-        fileName,
-        mimeType,
-        byteSize: buffer.byteLength,
-        width: null,
-        height: null,
-        duration,
-        remoteUrl,
-        mediaId: null,
-        sha256: null,
-      };
+      // Remote voice hosts label AMR payloads as audio/mp3; trust magic bytes.
+      const mimeType =
+        sniffMimeType(buffer) ??
+        response.headers.get('content-type')?.split(';')[0]?.trim() ??
+        null;
+      return await this.storeMedia(buffer, target, mimeType, remoteUrl, duration);
     } catch (error) {
       this.logger.warn(
         `媒体落盘失败，回退为远程地址：${error instanceof Error ? error.message : String(error)}`,
@@ -495,22 +493,8 @@ export class ChatMediaService implements OnModuleInit {
         return null;
       }
 
-      const mimeType = mimeTypeHint ?? sniffMimeType(buffer);
-      const fileName = this.writeMedia(buffer, mimeType, null, target);
-      await writeFile(`${target.root}${fileName}`, buffer);
-
-      return {
-        url: `${target.urlPrefix}/${encodeURIComponent(fileName)}`,
-        fileName,
-        mimeType,
-        byteSize: buffer.byteLength,
-        width: null,
-        height: null,
-        duration,
-        remoteUrl,
-        mediaId: null,
-        sha256: null,
-      };
+      const mimeType = sniffMimeType(buffer) ?? mimeTypeHint ?? null;
+      return await this.storeMedia(buffer, target, mimeType, remoteUrl, duration);
     } catch (error) {
       this.logger.warn(
         `Base64 媒体落盘失败：${error instanceof Error ? error.message : String(error)}`,
@@ -519,18 +503,35 @@ export class ChatMediaService implements OnModuleInit {
     }
   }
 
-  private writeMedia(
+  /**
+   * Persists voice bytes once per SHA-256 into `ab/cd/ef/<hash>.<ext>`, the
+   * same sharded layout images use, so a long-running inbox never turns the
+   * voice directory into one oversized flat listing.
+   */
+  private async storeMedia(
     buffer: Buffer,
+    target: MediaTarget,
     mimeType: string | null,
     sourceUrl: string | null,
-    target: MediaTarget,
-  ): string {
-    const fromMime = mimeType ? MIME_EXTENSIONS[mimeType.toLowerCase()] : undefined;
-    const fromUrl = sourceUrl
-      ? extname(new URL(sourceUrl).pathname).replace('.', '').toLowerCase()
-      : '';
-    const extension = sanitizeExtension(fromMime ?? fromUrl) ?? target.defaultExtension;
-    return `${Date.now().toString(36)}-${randomUUID()}.${extension}`;
+    duration: number | null,
+  ): Promise<StoredMedia> {
+    const extension = mediaExtension(mimeType, sourceUrl, target.defaultExtension);
+    const sha256 = createHash('sha256').update(buffer).digest('hex');
+    const storagePath = `${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256.slice(4, 6)}/${sha256}.${extension}`;
+    await this.writeBlob(resolve(target.root, ...storagePath.split('/')), buffer);
+
+    return {
+      url: `${target.urlPrefix}/${storagePath}`,
+      fileName: storagePath,
+      mimeType,
+      byteSize: buffer.byteLength,
+      width: null,
+      height: null,
+      duration,
+      remoteUrl: sourceUrl,
+      mediaId: null,
+      sha256,
+    };
   }
 }
 
@@ -610,6 +611,18 @@ function sanitizeExtension(value: string | undefined): string | null {
     return null;
   }
   return /^[a-z0-9]{1,5}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function mediaExtension(
+  mimeType: string | null,
+  sourceUrl: string | null,
+  fallback: string,
+): string {
+  const fromMime = mimeType ? MIME_EXTENSIONS[mimeType.toLowerCase()] : undefined;
+  const fromUrl = sourceUrl
+    ? extname(new URL(sourceUrl).pathname).replace('.', '').toLowerCase()
+    : '';
+  return sanitizeExtension(fromMime ?? fromUrl) ?? fallback;
 }
 
 function readDurationSeconds(data: Record<string, unknown>): number | null {
