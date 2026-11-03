@@ -1,22 +1,38 @@
+import { useQuery } from '@tanstack/react-query';
 import { Search, UserRoundSearch, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useMemo, useState } from 'react';
+import type { PersonaSummary } from '@inkseek/shared';
 import { InputShell } from '@/components/field';
 import { NewPersonaCard, PersonaCard } from '@/components/persona-card';
 import { PersonaWizard } from '@/components/persona-wizard';
-import { matchesPersona, PERSONAS } from '@/lib/personas';
+import { matchesPersona, personaViewOf } from '@/lib/personas';
+import { personasQuery } from '@/lib/queries';
 
 export function PersonasPage() {
-  const [query, setQuery] = useState('');
+  const query = useQuery(personasQuery);
+  const [search, setSearch] = useState('');
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [editing, setEditing] = useState<PersonaSummary | null>(null);
 
-  const personas = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+  const records = query.data ?? [];
+  const normalized = search.trim().toLowerCase();
 
-    return PERSONAS.filter((persona) => matchesPersona(persona, normalized));
-  }, [query]);
+  const personas = useMemo(
+    () =>
+      records
+        .map((record) => ({ record, view: personaViewOf(record) }))
+        .filter(({ view }) => matchesPersona(view, normalized)),
+    [records, normalized],
+  );
 
-  const searching = query.trim().length > 0;
+  const searching = normalized.length > 0;
+  const total = records.length;
+
+  const closeWizard = () => {
+    setWizardOpen(false);
+    setEditing(null);
+  };
 
   return (
     <>
@@ -34,9 +50,11 @@ export function PersonasPage() {
               </span>
               <span className="h-px w-12 bg-brass-400/25" />
               <span className="text-[0.72rem] text-mist-600">
-                {searching
-                  ? `匹配 ${personas.length} / ${PERSONAS.length}`
-                  : `已收录 ${PERSONAS.length} 位`}
+                {query.isPending
+                  ? '正在读取档案'
+                  : searching
+                    ? `匹配 ${personas.length} / ${total}`
+                    : `已收录 ${total} 位`}
               </span>
             </div>
 
@@ -44,7 +62,7 @@ export function PersonasPage() {
               人格中心
             </h1>
             <p className="mt-3 max-w-xl text-[0.9rem] leading-7 text-mist-500">
-              以卡牌归档人格设定。正面是公开档案，点击卡面翻到背面，查看背景、禁忌与更私密的参数。
+              以卡牌归档人格设定。正面是公开档案，点击卡面翻到背面，查看背景、禁忌与更私密的参数。右上角的铅笔可以重新编辑，每次保存都会生成新版本。
             </p>
           </div>
 
@@ -58,7 +76,7 @@ export function PersonasPage() {
                 searching ? (
                   <button
                     type="button"
-                    onClick={() => setQuery('')}
+                    onClick={() => setSearch('')}
                     className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
                     aria-label="清除搜索"
                   >
@@ -66,7 +84,7 @@ export function PersonasPage() {
                   </button>
                 ) : (
                   <span className="font-mono text-[0.52rem] uppercase tracking-[0.16em] text-mist-600">
-                    {PERSONAS.length} files
+                    {total} files
                   </span>
                 )
               }
@@ -77,15 +95,34 @@ export function PersonasPage() {
                 inputMode="search"
                 autoComplete="off"
                 spellCheck={false}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
                 placeholder="搜索姓名、职业、关键词…"
               />
             </InputShell>
           </div>
         </motion.header>
 
-        {personas.length === 0 && (
+        {query.isError && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-signal-400/25 bg-signal-400/[0.06] px-5 py-4"
+          >
+            <p className="min-w-0 flex-1 text-[0.8rem] text-signal-400">
+              读取人格档案失败，请检查登录状态后重试。
+            </p>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              className="rounded-lg border border-signal-400/30 bg-signal-400/[0.08] px-3 py-1.5 text-[0.7rem] text-signal-400 transition hover:bg-signal-400/[0.14]"
+            >
+              重新读取
+            </button>
+          </motion.div>
+        )}
+
+        {searching && !query.isPending && personas.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -93,11 +130,11 @@ export function PersonasPage() {
           >
             <UserRoundSearch className="size-4 shrink-0 text-mist-600" strokeWidth={1.7} />
             <p className="min-w-0 flex-1 text-[0.8rem] text-mist-500">
-              没有找到与「{query.trim()}」匹配的人格。
+              没有找到与「{search.trim()}」匹配的人格。
             </p>
             <button
               type="button"
-              onClick={() => setQuery('')}
+              onClick={() => setSearch('')}
               className="rounded-lg border border-brass-400/25 bg-brass-400/[0.06] px-3 py-1.5 text-[0.7rem] text-brass-300 transition hover:bg-brass-400/10"
             >
               清除搜索
@@ -106,9 +143,17 @@ export function PersonasPage() {
         )}
 
         <div className="mt-8 grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(19rem,1fr))]">
-          {personas.map((persona, index) => (
+          {query.isPending &&
+            Array.from({ length: 3 }, (_, index) => (
+              <div
+                key={`persona-skeleton-${index}`}
+                className="h-[33rem] animate-pulse rounded-[1.5rem] border border-mist-100/[0.06] bg-ink-900/30"
+              />
+            ))}
+
+          {personas.map(({ record, view }, index) => (
             <motion.div
-              key={persona.id}
+              key={record.id}
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{
@@ -117,25 +162,38 @@ export function PersonasPage() {
                 ease: [0.22, 1, 0.36, 1],
               }}
             >
-              <PersonaCard persona={persona} />
+              <PersonaCard persona={view} onEdit={() => setEditing(record)} />
             </motion.div>
           ))}
 
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.45,
-              delay: Math.min(personas.length * 0.05, 0.3),
-              ease: [0.22, 1, 0.36, 1],
-            }}
-          >
-            <NewPersonaCard onCreate={() => setWizardOpen(true)} />
-          </motion.div>
+          {!query.isPending && (
+            <motion.div
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.45,
+                delay: Math.min(personas.length * 0.05, 0.3),
+                ease: [0.22, 1, 0.36, 1],
+              }}
+            >
+              <NewPersonaCard onCreate={() => setWizardOpen(true)} />
+            </motion.div>
+          )}
         </div>
+
+        {query.isSuccess && total === 0 && !searching && (
+          <p className="mt-6 flex items-center justify-center gap-2 text-[0.72rem] text-mist-600">
+            <UserRoundSearch className="size-3.5" strokeWidth={1.7} />
+            还没有人格卡，从「新建人格」开始写下第一位。
+          </p>
+        )}
       </div>
 
-      <PersonaWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
+      <PersonaWizard
+        open={wizardOpen || editing !== null}
+        persona={editing}
+        onClose={closeWizard}
+      />
     </>
   );
 }

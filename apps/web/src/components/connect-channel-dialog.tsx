@@ -1,5 +1,5 @@
-import type { ChatChannelSummary } from '@inkseek/shared';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ChatChannelSummary, PersonaSummary } from '@inkseek/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Check,
@@ -31,8 +31,7 @@ import {
   type PlatformDefinition,
   type PlatformId,
 } from '@/lib/connections';
-import { personaSnapshotOf } from '@/lib/persona-snapshot';
-import { PERSONAS, type Persona } from '@/lib/personas';
+import { personasQuery } from '@/lib/queries';
 
 interface ConnectChannelDialogProps {
   open: boolean;
@@ -74,6 +73,8 @@ function initialsOf(name: string): string {
 
 export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChannelDialogProps) {
   const queryClient = useQueryClient();
+  const personaQuery = useQuery({ ...personasQuery, enabled: open });
+  const personas = personaQuery.data ?? [];
   const [phase, setPhase] = useState<Phase>('choose');
   const [progress, setProgress] = useState(0);
   const [activePlatform, setActivePlatform] = useState<PlatformId>('qq');
@@ -216,13 +217,13 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     setPhase('persona');
   };
 
-  const handlePersonaSelect = (persona: Persona) => {
+  const handlePersonaSelect = (persona: PersonaSummary) => {
     setPersonaId(persona.id);
     setPhase('configure');
   };
 
   const selectedPersona = personaId
-    ? (PERSONAS.find((persona) => persona.id === personaId) ?? null)
+    ? (personas.find((persona) => persona.id === personaId) ?? null)
     : null;
 
   const handleConnect = () => {
@@ -254,7 +255,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     connectMutation.mutate({
       serverUrl: trimmedServerUrl,
       accessToken: trimmedToken,
-      persona: personaSnapshotOf(selectedPersona),
+      personaId: selectedPersona.id,
     });
   };
 
@@ -423,14 +424,48 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
                             选择要接入的角色卡
                           </h2>
                           <p className="mt-1 max-w-lg text-[0.7rem] leading-5 text-mist-600">
-                            角色卡会在 {platform.connector} 渠道建立后完整复制到渠道命名空间，
-                            与源卡共存且互不影响。之后的修改只作用于渠道内的副本。
+                            渠道建立时，服务端会读取所选角色卡的最新版本，并完整复制到渠道命名空间。
+                            之后的修改只作用于渠道内的副本，源卡保持不变。
                           </p>
                         </div>
                       </div>
 
                       <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
-                        {PERSONAS.map((persona) => (
+                        {personaQuery.isPending &&
+                          Array.from({ length: 4 }, (_, index) => (
+                            <div
+                              key={`persona-loading-${index}`}
+                              className="h-[5.75rem] animate-pulse rounded-2xl border border-mist-100/[0.06] bg-ink-950/25"
+                            />
+                          ))}
+
+                        {personaQuery.isError && (
+                          <div className="col-span-full flex flex-wrap items-center gap-3 rounded-2xl border border-signal-400/25 bg-signal-400/[0.06] px-4 py-3">
+                            <p className="min-w-0 flex-1 text-[0.68rem] text-signal-400">
+                              读取人格卡失败，请稍后重试。
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void personaQuery.refetch()}
+                              className="rounded-lg border border-signal-400/30 bg-signal-400/[0.08] px-3 py-1.5 text-[0.66rem] text-signal-400 transition hover:bg-signal-400/[0.14]"
+                            >
+                              重新读取
+                            </button>
+                          </div>
+                        )}
+
+                        {!personaQuery.isPending &&
+                          !personaQuery.isError &&
+                          personas.length === 0 && (
+                            <div className="col-span-full rounded-2xl border border-dashed border-mist-100/15 bg-ink-950/20 px-4 py-5 text-center">
+                              <p className="text-[0.72rem] text-mist-400">人格中心还没有可用的角色卡。</p>
+                              <p className="mt-1 text-[0.62rem] leading-5 text-mist-600">
+                                先到人格中心创建或导入一张人格卡，再回来接入渠道。
+                              </p>
+                            </div>
+                          )}
+
+                        {personas.map((persona) => (
                           <button
                             key={persona.id}
                             type="button"
@@ -440,7 +475,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
                             <span
                               className={cn(
                                 'grid size-10 shrink-0 place-items-center rounded-xl border font-display text-[0.9rem] font-semibold',
-                                persona.accent === 'jade'
+                                persona.profile.accent === 'jade'
                                   ? 'border-jade-400/25 bg-gradient-to-br from-jade-400/25 to-transparent text-jade-300'
                                   : 'border-brass-400/25 bg-gradient-to-br from-brass-400/25 to-transparent text-brass-300',
                               )}
@@ -453,25 +488,30 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
                                   {persona.name}
                                 </span>
                                 <span className="font-mono text-[0.52rem] tracking-[0.1em] text-mist-600">
-                                  {persona.serial}
+                                  {persona.serial} · v{persona.currentVersion}
                                 </span>
                               </span>
                               <span className="mt-0.5 block truncate text-[0.62rem] text-mist-600">
-                                {persona.occupation} · {persona.age} 岁 · {persona.gender}
+                                {persona.occupation || '未设定职业'} · {persona.age} 岁 ·{' '}
+                                {persona.profile.gender}
                               </span>
-                              <span className="mt-1.5 flex flex-wrap gap-1">
-                                {persona.keywords.slice(0, 3).map((keyword) => (
-                                  <span
-                                    key={keyword}
-                                    className="rounded border border-mist-100/[0.07] bg-ink-950/40 px-1.5 py-0.5 text-[0.56rem] text-mist-500"
-                                  >
-                                    {keyword}
-                                  </span>
-                                ))}
-                              </span>
-                              <span className="mt-1.5 block text-[0.6rem] leading-5 text-mist-500">
-                                「{persona.quote}」
-                              </span>
+                              {persona.profile.keywords.length > 0 && (
+                                <span className="mt-1.5 flex flex-wrap gap-1">
+                                  {persona.profile.keywords.slice(0, 3).map((keyword) => (
+                                    <span
+                                      key={keyword}
+                                      className="rounded border border-mist-100/[0.07] bg-ink-950/40 px-1.5 py-0.5 text-[0.56rem] text-mist-500"
+                                    >
+                                      {keyword}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
+                              {persona.profile.quote && (
+                                <span className="mt-1.5 block text-[0.6rem] leading-5 text-mist-500">
+                                  「{persona.profile.quote}」
+                                </span>
+                              )}
                             </span>
                             <ChevronRight className="mt-1 size-4 shrink-0 text-mist-600 transition group-hover:text-brass-300" />
                           </button>
@@ -521,7 +561,8 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
                           {selectedPersona && (
                             <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-jade-400/20 bg-jade-400/[0.07] px-2 py-0.5 font-mono text-[0.56rem] tracking-[0.08em] text-jade-300">
                               <Fingerprint className="size-3" strokeWidth={1.8} />
-                              待复制 · {selectedPersona.name} · {selectedPersona.serial}
+                              待复制 · {selectedPersona.name} · {selectedPersona.serial} · v
+                              {selectedPersona.currentVersion}
                             </p>
                           )}
                         </div>

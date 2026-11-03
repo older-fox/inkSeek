@@ -89,20 +89,10 @@ const chatPersonaValueSchema = z.union([
   z.array(z.string().max(400)).max(100, '人格列表过长'),
 ]);
 
-export const chatChannelPersonaSchema = z.object({
-  cardId: z.string().trim().min(1, '请选择角色卡').max(64),
-  cardSerial: z.string().trim().min(1).max(64),
-  name: z.string().trim().min(1, '角色卡缺少名称').max(64),
-  identity: z.string().trim().max(160).default(''),
-  quote: z.string().trim().max(400).default(''),
-  accent: z.enum(['brass', 'jade']).default('brass'),
-  values: z.record(z.string().min(1).max(80), chatPersonaValueSchema),
-});
-
 export const connectChatChannelSchema = z.object({
   serverUrl: webSocketUrlSchema,
   accessToken: z.string().trim().max(512, '授权密钥过长').optional().default(''),
-  persona: chatChannelPersonaSchema,
+  personaId: z.string().trim().min(1, '请选择角色卡').max(64),
 });
 
 const chatImageDataUrlSchema = z
@@ -150,7 +140,6 @@ export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
-export type ChatChannelPersonaInput = z.infer<typeof chatChannelPersonaSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
 export type SaveConversationPersonaInput = z.infer<typeof saveConversationPersonaSchema>;

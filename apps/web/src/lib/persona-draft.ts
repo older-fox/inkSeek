@@ -1,10 +1,23 @@
-export type ConflictStyle =
-  '回避' | '对抗' | '讲理' | '冷战' | '先退后解释' | '先听完再划界' | '先降温再划界';
-export type HumorStyle = '冷幽默' | '自嘲' | '吐槽' | '不接梗' | '机锋';
-export type MemoryBias = '均衡' | '记细节' | '记仇' | '健忘' | '偏记人' | '偏记声音';
-export type SentenceLength = '短句' | '中句' | '长句' | '长短混用';
-export type PunctuationStyle = '极简' | '常规' | '柔软' | '严整' | '活泼' | '书卷' | '省略号偏多';
-export type OnlinePolicy = '常在线' | '按作息' | '自适应';
+import {
+  createDefaultPersonaDraft,
+  type ConflictStyle,
+  type HumorStyle,
+  type MemoryBias,
+  type OnlinePolicy,
+  type PersonaDraft,
+  type PunctuationStyle,
+  type SentenceLength,
+} from '@inkseek/shared';
+
+export type {
+  ConflictStyle,
+  HumorStyle,
+  MemoryBias,
+  OnlinePolicy,
+  PersonaDraft,
+  PunctuationStyle,
+  SentenceLength,
+} from '@inkseek/shared';
 
 export type NumericKey =
   | 'typo_level'
@@ -28,161 +41,9 @@ export type NumericKey =
   | 'recovery_rate'
   | 'sensitivity';
 
-export interface PersonaDraft {
-  name: string;
-  aliases: string[];
-  age: string;
-  identity: string;
-  occupation: string;
-  race: string;
-  height_cm: string;
-  weight_kg: string;
-  time_awareness: boolean;
-
-  body_type: string;
-  appearance: string;
-
-  hair: string;
-  outfit: string;
-
-  voice: string;
-
-  world_setting: string;
-  backstory: string;
-  knowledge_boundary: string;
-
-  core_values: string[];
-  taboos: string[];
-  fears: string[];
-  soft_spots: string[];
-  non_negotiable: string[];
-
-  long_term_motivation: string;
-  current_goal: string;
-  doing_now: string;
-  obstacle: string;
-
-  conflict_style: ConflictStyle;
-  humor_style: HumorStyle;
-  memory_bias: MemoryBias;
-  sentence_length: SentenceLength;
-  punctuation: PunctuationStyle;
-  typo_level: number;
-  split_level: number;
-
-  particles: string[];
-  openers: string[];
-
-  banned_words: string[];
-
-  emoji_level: number;
-  typing_level: number;
-  time_zone: string;
-
-  sleep_window: string;
-  awake_window: string;
-  online_policy: OnlinePolicy;
-  sleep_depth: number;
-
-  confidence: number;
-  self_control: number;
-  shame: number;
-  trust_bias: number;
-
-  attachment_style: number;
-  possessiveness_base: number;
-  agreeableness: number;
-  proactivity: number;
-
-  curiosity: number;
-  stamina_max: number;
-  strength: number;
-  agility: number;
-
-  pain_tolerance: number;
-  recovery_rate: number;
-  sensitivity: number;
-}
-
 export const DRAFT_STORAGE_KEY = 'inkseek-persona-draft';
 
-export function createDefaultDraft(): PersonaDraft {
-  return {
-    name: '',
-    aliases: [''],
-    age: '',
-    identity: '',
-    occupation: '',
-    race: '',
-    height_cm: '',
-    weight_kg: '',
-    time_awareness: true,
-
-    body_type: '',
-    appearance: '',
-
-    hair: '',
-    outfit: '',
-
-    voice: '',
-
-    world_setting: '',
-    backstory: '',
-    knowledge_boundary: '',
-
-    core_values: [''],
-    taboos: [''],
-    fears: [''],
-    soft_spots: [''],
-    non_negotiable: [''],
-
-    long_term_motivation: '',
-    current_goal: '',
-    doing_now: '',
-    obstacle: '',
-
-    conflict_style: '讲理',
-    humor_style: '冷幽默',
-    memory_bias: '均衡',
-    sentence_length: '长短混用',
-    punctuation: '常规',
-    typo_level: 0,
-    split_level: 2,
-
-    particles: [''],
-    openers: [''],
-
-    banned_words: [''],
-
-    emoji_level: 1,
-    typing_level: 2,
-    time_zone: '北京时间',
-
-    sleep_window: '23:00-07:00',
-    awake_window: '09:00-18:00',
-    online_policy: '按作息',
-    sleep_depth: 2,
-
-    confidence: 50,
-    self_control: 50,
-    shame: 50,
-    trust_bias: 50,
-
-    attachment_style: 50,
-    possessiveness_base: 50,
-    agreeableness: 50,
-    proactivity: 50,
-
-    curiosity: 50,
-    stamina_max: 50,
-    strength: 50,
-    agility: 50,
-
-    pain_tolerance: 50,
-    recovery_rate: 50,
-    sensitivity: 30,
-  };
-}
+export const createDefaultDraft = createDefaultPersonaDraft;
 
 export interface PhaseMeta {
   name: string;

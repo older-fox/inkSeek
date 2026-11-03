@@ -1,0 +1,263 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  createDefaultPersonaDraft,
+  derivedLanguageStyle,
+  personaDraftSchema,
+  personaProfileSchema,
+  type PersonaDraft,
+  type PersonaProfile,
+  type PersonaRecord,
+  type PersonaSummary,
+  type PersonaVersionDetail,
+  type PersonaVersionSummary,
+  type SavePersonaInput,
+} from '@inkseek/shared';
+import { PrismaService } from '../database/prisma.service.js';
+import type {
+  PersonaCard,
+  PersonaVersion,
+  Prisma,
+} from '../generated/prisma/client.js';
+
+type PersonaWithVersions = PersonaCard & { versions: PersonaVersion[] };
+
+const SERIAL_PATTERN = /^PSN-(\d+)$/;
+
+@Injectable()
+export class PersonasService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async list(): Promise<PersonaSummary[]> {
+    const rows = await this.prisma.personaCard.findMany({
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return rows.map(toSummary);
+  }
+
+  async get(id: string): Promise<PersonaRecord> {
+    const row = await this.prisma.personaCard.findUnique({
+      where: { id },
+      include: { versions: { orderBy: { version: 'desc' } } },
+    });
+
+    if (!row) {
+      throw personaNotFound();
+    }
+
+    return toRecord(row);
+  }
+
+  async getVersion(id: string, version: number): Promise<PersonaVersionDetail> {
+    const row = await this.prisma.personaVersion.findUnique({
+      where: { personaId_version: { personaId: id, version } },
+    });
+
+    if (!row) {
+      throw new NotFoundException({
+        code: 'PERSONA_VERSION_NOT_FOUND',
+        message: '该版本不存在或已被移除',
+      });
+    }
+
+    return {
+      version: row.version,
+      createdAt: row.createdAt.toISOString(),
+      changedFields: readStringArray(row.changedFields),
+      changedCount: row.changedCount,
+      data: readDraft(row.data),
+    };
+  }
+
+  /**
+   * Reads the current term for a channel snapshot. Called at connect time so the
+   * copy always reflects the latest saved version of the card.
+   */
+  async latestForSnapshot(id: string): Promise<PersonaSummary> {
+    const row = await this.prisma.personaCard.findUnique({ where: { id } });
+
+    if (!row) {
+      throw personaNotFound();
+    }
+
+    return toSummary(row);
+  }
+
+  async create(input: SavePersonaInput): Promise<PersonaRecord> {
+    const data = input.data;
+    const name = data.name.trim();
+
+    if (!name) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: '请填写姓名',
+        fieldErrors: { 'data.name': ['请填写姓名'] },
+      });
+    }
+
+    const profile = createProfile(data);
+    const changedFields = Object.keys(data);
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      const serial = await nextSerial(tx);
+
+      return tx.personaCard.create({
+        data: {
+          serial,
+          name,
+          occupation: data.occupation.trim(),
+          age: parseAge(data.age) ?? 0,
+          profile: profile as unknown as Prisma.InputJsonValue,
+          data: data as unknown as Prisma.InputJsonValue,
+          currentVersion: 1,
+          versions: {
+            create: {
+              version: 1,
+              data: data as unknown as Prisma.InputJsonValue,
+              changedFields: changedFields as unknown as Prisma.InputJsonValue,
+              changedCount: changedFields.length,
+            },
+          },
+        },
+        include: { versions: { orderBy: { version: 'desc' } } },
+      });
+    });
+
+    return toRecord(row);
+  }
+
+  async update(id: string, input: SavePersonaInput): Promise<PersonaRecord> {
+    const existing = await this.prisma.personaCard.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw personaNotFound();
+    }
+
+    const previous = readDraft(existing.data);
+    const data = input.data;
+    const changedFields = diffFields(previous, data);
+    const version = existing.currentVersion + 1;
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      return tx.personaCard.update({
+        where: { id },
+        data: {
+          name: data.name.trim() || existing.name,
+          occupation: data.occupation.trim(),
+          age: parseAge(data.age) ?? existing.age,
+          data: data as unknown as Prisma.InputJsonValue,
+          currentVersion: version,
+          versions: {
+            create: {
+              version,
+              data: data as unknown as Prisma.InputJsonValue,
+              changedFields: changedFields as unknown as Prisma.InputJsonValue,
+              changedCount: changedFields.length,
+            },
+          },
+        },
+        include: { versions: { orderBy: { version: 'desc' } } },
+      });
+    });
+
+    return toRecord(row);
+  }
+}
+
+function createProfile(data: PersonaDraft): PersonaProfile {
+  return {
+    gender: '未设定',
+    quote: '',
+    keywords: [],
+    accent: 'brass',
+    experienceLevel: 'Ⅰ',
+    experienceLabel: '初识',
+    languageStyle: derivedLanguageStyle(data),
+    addressStyle: '',
+  };
+}
+
+function toSummary(row: PersonaCard): PersonaSummary {
+  return {
+    id: row.id,
+    serial: row.serial,
+    name: row.name,
+    occupation: row.occupation,
+    age: row.age,
+    profile: readProfile(row.profile),
+    data: readDraft(row.data),
+    currentVersion: row.currentVersion,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function toRecord(row: PersonaWithVersions): PersonaRecord {
+  return {
+    ...toSummary(row),
+    versions: row.versions.map(toVersionSummary),
+  };
+}
+
+function toVersionSummary(row: PersonaVersion): PersonaVersionSummary {
+  return {
+    version: row.version,
+    createdAt: row.createdAt.toISOString(),
+    changedFields: readStringArray(row.changedFields),
+    changedCount: row.changedCount,
+  };
+}
+
+function readProfile(value: Prisma.JsonValue): PersonaProfile {
+  const parsed = personaProfileSchema.safeParse(value);
+  return parsed.success ? parsed.data : personaProfileSchema.parse({});
+}
+
+function readDraft(value: Prisma.JsonValue): PersonaDraft {
+  const parsed = personaDraftSchema.safeParse(value);
+
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  const fallback = {
+    ...createDefaultPersonaDraft(),
+    ...(value && typeof value === 'object' && !Array.isArray(value) ? value : {}),
+  };
+  const merged = personaDraftSchema.safeParse(fallback);
+
+  return merged.success ? merged.data : createDefaultPersonaDraft();
+}
+
+function readStringArray(value: Prisma.JsonValue): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function diffFields(previous: PersonaDraft, next: PersonaDraft): string[] {
+  return (Object.keys(next) as (keyof PersonaDraft)[]).filter(
+    (key) => JSON.stringify(previous[key]) !== JSON.stringify(next[key]),
+  );
+}
+
+function parseAge(value: string): number | null {
+  const parsed = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 999 ? parsed : null;
+}
+
+async function nextSerial(tx: Prisma.TransactionClient): Promise<string> {
+  const latest = await tx.personaCard.findFirst({
+    orderBy: { serial: 'desc' },
+    select: { serial: true },
+  });
+  const match = latest?.serial.match(SERIAL_PATTERN);
+  const next = (match?.[1] ? Number.parseInt(match[1], 10) : 0) + 1;
+
+  return `PSN-${String(next).padStart(4, '0')}`;
+}
+
+function personaNotFound(): NotFoundException {
+  return new NotFoundException({
+    code: 'PERSONA_NOT_FOUND',
+    message: '人格卡不存在或已被删除',
+  });
+}

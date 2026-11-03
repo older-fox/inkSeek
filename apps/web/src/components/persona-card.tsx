@@ -1,6 +1,7 @@
 import {
   AtSign,
   MessageSquareQuote,
+  Pencil,
   Plus,
   Quote,
   RotateCw,
@@ -10,6 +11,7 @@ import {
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { cn } from '@/lib/cn';
+import { formatPersonaTimestamp } from '@/lib/persona-metadata';
 import type { Persona, PersonaAccent, PersonaTrait } from '@/lib/personas';
 
 const CARD_HEIGHT = 'h-[33rem]';
@@ -84,7 +86,7 @@ function PersonaFront({ persona }: { persona: Persona }) {
             {persona.name}
           </h3>
           <p className="mt-1 font-mono text-[0.55rem] uppercase tracking-[0.18em] text-brass-400/70">
-            {persona.serial}
+            {persona.serial} · v{persona.currentVersion}
           </p>
           <p className="mt-1 text-[0.7rem] text-mist-500">
             {persona.occupation}
@@ -96,21 +98,27 @@ function PersonaFront({ persona }: { persona: Persona }) {
       </div>
 
       <div className="mt-4 border-l-2 border-brass-400/40 pl-3">
-        <p className="line-clamp-2 font-display text-[0.92rem] leading-6 text-mist-200">
-          「{persona.quote}」
-        </p>
+        {persona.quote ? (
+          <p className="line-clamp-2 font-display text-[0.92rem] leading-6 text-mist-200">
+            「{persona.quote}」
+          </p>
+        ) : (
+          <p className="text-[0.8rem] leading-6 text-mist-600">尚未登记台词锚点。</p>
+        )}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {persona.keywords.map((keyword) => (
-          <span
-            key={keyword}
-            className="rounded-full border border-mist-100/10 bg-ink-950/30 px-2 py-0.5 text-[0.62rem] text-mist-500"
-          >
-            {keyword}
-          </span>
-        ))}
-      </div>
+      {persona.keywords.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {persona.keywords.map((keyword) => (
+            <span
+              key={keyword}
+              className="rounded-full border border-mist-100/10 bg-ink-950/30 px-2 py-0.5 text-[0.62rem] text-mist-500"
+            >
+              {keyword}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 flex items-center justify-between">
         <span className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
@@ -135,7 +143,7 @@ function PersonaFront({ persona }: { persona: Persona }) {
               语言风格
             </p>
             <p className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400">
-              {persona.languageStyle}
+              {persona.languageStyle || '尚未设定'}
             </p>
           </div>
         </div>
@@ -146,13 +154,15 @@ function PersonaFront({ persona }: { persona: Persona }) {
               称呼
             </p>
             <p className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400">
-              {persona.addressStyle}
+              {persona.addressStyle || '尚未设定'}
             </p>
           </div>
         </div>
       </div>
 
-      <CardFooter hint="点击翻面 · 查看档案" />
+      <CardFooter
+        hint={`点击翻面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+      />
     </div>
   );
 }
@@ -178,7 +188,7 @@ function PersonaBack({ persona }: { persona: Persona }) {
           </p>
         </div>
         <span className="shrink-0 font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
-          {persona.serial}
+          {persona.serial} · v{persona.currentVersion}
         </span>
       </div>
 
@@ -186,7 +196,9 @@ function PersonaBack({ persona }: { persona: Persona }) {
         <span className="grid size-3.5 place-items-center">
           <Quote className="size-3.5 text-brass-400/70" strokeWidth={1.7} />
         </span>
-        <p className="mt-1.5 text-[0.76rem] leading-6 text-mist-300">{persona.story}</p>
+        <p className="mt-1.5 text-[0.76rem] leading-6 text-mist-300">
+          {persona.story || '尚未补全背景故事。'}
+        </p>
       </div>
 
       <div className="mt-4">
@@ -199,14 +211,18 @@ function PersonaBack({ persona }: { persona: Persona }) {
           </span>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {persona.taboos.map((taboo) => (
-            <span
-              key={taboo}
-              className="rounded-full border border-signal-400/20 bg-signal-400/[0.06] px-2 py-0.5 text-[0.62rem] text-signal-400"
-            >
-              {taboo}
-            </span>
-          ))}
+          {persona.taboos.length > 0 ? (
+            persona.taboos.map((taboo) => (
+              <span
+                key={taboo}
+                className="rounded-full border border-signal-400/20 bg-signal-400/[0.06] px-2 py-0.5 text-[0.62rem] text-signal-400"
+              >
+                {taboo}
+              </span>
+            ))
+          ) : (
+            <span className="text-[0.62rem] text-mist-600">尚未登记禁忌。</span>
+          )}
         </div>
       </div>
 
@@ -236,48 +252,64 @@ function PersonaBack({ persona }: { persona: Persona }) {
         </span>
       </div>
 
-      <CardFooter hint="点击返回正面" />
+      <CardFooter
+        hint={`点击返回正面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
+      />
     </div>
   );
 }
 
-export function PersonaCard({ persona }: { persona: Persona }) {
+export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: () => void }) {
   const [flipped, setFlipped] = useState(false);
 
   return (
-    <button
-      type="button"
-      aria-pressed={flipped}
-      aria-label={
-        flipped
-          ? `${persona.name} 的人格档案，当前为背面，点击返回正面`
-          : `${persona.name} 的人格档案，点击查看背面`
-      }
-      onClick={() => setFlipped((value) => !value)}
-      className={cn(
-        CARD_HEIGHT,
-        'group block w-full cursor-pointer text-left [perspective:1600px] transition-transform duration-300 hover:-translate-y-1 focus-visible:outline-none',
+    <div className="group relative">
+      <button
+        type="button"
+        aria-pressed={flipped}
+        aria-label={
+          flipped
+            ? `${persona.name} 的人格档案，当前为背面，点击返回正面`
+            : `${persona.name} 的人格档案，点击查看背面`
+        }
+        onClick={() => setFlipped((value) => !value)}
+        className={cn(
+          CARD_HEIGHT,
+          'block w-full cursor-pointer text-left [perspective:1600px] transition-transform duration-300 hover:-translate-y-1 focus-visible:outline-none',
+        )}
+      >
+        <div className="relative h-full w-full [transform-style:preserve-3d]">
+          <motion.div
+            initial={false}
+            animate={{ rotateY: flipped ? 180 : 0 }}
+            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+            className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+          >
+            <PersonaFront persona={persona} />
+          </motion.div>
+          <motion.div
+            initial={false}
+            animate={{ rotateY: flipped ? 0 : -180 }}
+            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+            className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+          >
+            <PersonaBack persona={persona} />
+          </motion.div>
+        </div>
+      </button>
+
+      {onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={`编辑 ${persona.name} 的人格档案`}
+          title="编辑人格"
+          className="absolute -right-2 -top-2 z-10 grid size-8 place-items-center rounded-full border border-mist-100/10 bg-ink-950/85 text-mist-500 shadow-[0_10px_24px_-12px_rgba(0,0,0,0.9)] backdrop-blur transition hover:border-brass-400/40 hover:text-brass-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+        >
+          <Pencil className="size-3.5" strokeWidth={1.8} />
+        </button>
       )}
-    >
-      <div className="relative h-full w-full [transform-style:preserve-3d]">
-        <motion.div
-          initial={false}
-          animate={{ rotateY: flipped ? 180 : 0 }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
-        >
-          <PersonaFront persona={persona} />
-        </motion.div>
-        <motion.div
-          initial={false}
-          animate={{ rotateY: flipped ? 0 : -180 }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
-        >
-          <PersonaBack persona={persona} />
-        </motion.div>
-      </div>
-    </button>
+    </div>
   );
 }
 

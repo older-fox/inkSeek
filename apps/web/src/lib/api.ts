@@ -14,11 +14,15 @@ import type {
   LoginInput,
   ModelProviderInput,
   ModelProviderSaveResult,
+  PersonaRecord,
+  PersonaSummary,
+  PersonaVersionDetail,
   RedisConnectionInput,
   RedisProbeResult,
   RedisSettingsInput,
   RedisSettingsResult,
   SaveConversationPersonaInput,
+  SavePersonaInput,
   SettingsOverview,
 } from '@inkseek/shared';
 
@@ -113,6 +117,22 @@ export const api = {
     }),
   deleteChatChannel: (id: string) =>
     request<void>(`/chat/channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  personas: () => request<PersonaSummary[]>('/personas'),
+  persona: (id: string) => request<PersonaRecord>(`/personas/${encodeURIComponent(id)}`),
+  personaVersion: (id: string, version: number) =>
+    request<PersonaVersionDetail>(
+      `/personas/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}`,
+    ),
+  createPersona: (input: SavePersonaInput) =>
+    request<PersonaRecord>('/personas', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updatePersona: (id: string, input: SavePersonaInput) =>
+    request<PersonaRecord>(`/personas/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   chatConversations: (kind: ChatConversationKind) =>
     request<ChatConversationSummary[]>(`/chat/conversations?kind=${kind}`),
   chatMessages: (conversationId: string, cursor?: string, limit = 100) => {

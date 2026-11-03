@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { PersonasModule } from '../personas/personas.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatMediaService } from './chat-media.service.js';
@@ -10,7 +11,7 @@ import { ChatRuntimeService } from './chat-runtime.service.js';
 import { ChatService } from './chat.service.js';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, PersonasModule],
   controllers: [ChatController],
   providers: [
     ChatService,

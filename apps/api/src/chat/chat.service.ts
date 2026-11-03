@@ -18,12 +18,14 @@ import type {
   ChatPersonaValue,
   ChatSendMessageInput,
 } from '@inkseek/shared';
+import { buildChannelPersonaSnapshot } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   ChatChannel,
   ChatChannelPersona,
   Prisma,
 } from '../generated/prisma/client.js';
+import { PersonasService } from '../personas/personas.service.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatMessagesService, toMessageSummary } from './chat-messages.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
@@ -47,6 +49,7 @@ export class ChatService {
     private readonly runtime: ChatRuntimeService,
     private readonly messages: ChatMessagesService,
     private readonly events: ChatEventsService,
+    private readonly personas: PersonasService,
   ) {}
 
   async listChannels(): Promise<ChatChannelSummary[]> {
@@ -85,6 +88,9 @@ export class ChatService {
   }
 
   async connect(input: ChatChannelConnectInput): Promise<ChatChannelSummary> {
+    const persona = buildChannelPersonaSnapshot(
+      await this.personas.latestForSnapshot(input.personaId),
+    );
     const client = new NapCatClient(input.serverUrl, input.accessToken, 'NapCat 探测连接');
 
     try {
@@ -150,13 +156,13 @@ export class ChatService {
           lastConnectedAt: new Date(),
           persona: {
             create: {
-              cardId: input.persona.cardId,
-              cardSerial: input.persona.cardSerial,
-              name: input.persona.name,
-              identity: input.persona.identity,
-              quote: input.persona.quote,
-              accent: input.persona.accent,
-              values: input.persona.values as Prisma.InputJsonValue,
+              cardId: persona.cardId,
+              cardSerial: persona.cardSerial,
+              name: persona.name,
+              identity: persona.identity,
+              quote: persona.quote,
+              accent: persona.accent,
+              values: persona.values as Prisma.InputJsonValue,
             },
           },
         },

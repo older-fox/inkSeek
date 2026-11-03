@@ -65,6 +65,43 @@ model ModelProvider {
   updatedAt    DateTime         @updatedAt
 }
 
+/// Persona Center card. `data` holds the full creation draft and is the single
+/// editable source; `profile` keeps the card-face fields the wizard does not
+/// collect. Channel snapshots are frozen copies and never follow later edits.
+model PersonaCard {
+  id             String   @id @default(cuid())
+  serial         String   @unique
+  name           String
+  occupation     String   @default("")
+  age            Int      @default(0)
+  profile        Json
+  data           Json
+  currentVersion Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  versions PersonaVersion[]
+
+  @@index([name])
+  @@index([updatedAt])
+}
+
+/// Immutable snapshot of one save. Versions are never rewritten, so the
+/// current term can always be compared with its predecessors.
+model PersonaVersion {
+  id            String      @id @default(cuid())
+  personaId     String
+  persona       PersonaCard @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  version       Int
+  data          Json
+  changedFields Json
+  changedCount  Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@unique([personaId, version])
+  @@index([personaId, version])
+}
+
 enum ChatChannelStatus {
   CONNECTING
   ONLINE

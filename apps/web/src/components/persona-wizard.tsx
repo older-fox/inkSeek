@@ -1,7 +1,20 @@
-import { ArrowLeft, ArrowRight, Check, Sparkles, Trash2, TriangleAlert, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  History,
+  LoaderCircle,
+  Save,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import type { PersonaRecord, PersonaSummary } from '@inkseek/shared';
 import { GhostButton, PrimaryButton } from '@/components/button';
 import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
@@ -16,7 +29,9 @@ import {
   TimeRangeControl,
   TimeZonePicker,
 } from '@/components/persona-form-controls';
+import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { formatPersonaTimestamp } from '@/lib/persona-metadata';
 import {
   clearDraft,
   CONFLICT_OPTIONS,
@@ -45,6 +60,7 @@ import {
 interface PersonaWizardProps {
   open: boolean;
   onClose: () => void;
+  persona?: PersonaSummary | null;
 }
 
 type View = 'intro' | 'step' | 'milestone' | 'ai' | 'success';
@@ -92,7 +108,15 @@ function formatMoment(iso: string): string {
   });
 }
 
-function PhaseRail({ activePhase, step }: { activePhase: number; step: number }) {
+function PhaseRail({
+  activePhase,
+  step,
+  onSelectPhase,
+}: {
+  activePhase: number;
+  step: number;
+  onSelectPhase?: (phase: number) => void;
+}) {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-mist-100/[0.07] px-5 py-7 lg:flex">
       <p className="font-mono text-[0.54rem] uppercase tracking-[0.26em] text-mist-600">
@@ -104,45 +128,61 @@ function PhaseRail({ activePhase, step }: { activePhase: number; step: number })
           const done = index < activePhase;
           const active = index === activePhase;
 
-          return (
-            <li key={phase.name}>
-              <div
+          const body = (
+            <div
+              className={cn(
+                'flex items-start gap-3 rounded-xl px-2.5 py-2.5 transition-colors duration-300',
+                active && 'bg-brass-400/[0.07]',
+                !active && !done && 'opacity-50',
+                onSelectPhase && 'group/phase hover:bg-mist-100/[0.04]',
+              )}
+            >
+              <span
                 className={cn(
-                  'flex items-start gap-3 rounded-xl px-2.5 py-2.5 transition-colors duration-300',
-                  active && 'bg-brass-400/[0.07]',
-                  !active && !done && 'opacity-50',
+                  'mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border font-mono text-[0.54rem] transition-colors duration-300',
+                  active
+                    ? 'border-brass-400/50 bg-brass-400/15 text-brass-300'
+                    : done
+                      ? 'border-jade-400/35 bg-jade-400/10 text-jade-300'
+                      : 'border-mist-100/15 text-mist-600',
                 )}
               >
+                {done ? (
+                  <Check className="size-3" strokeWidth={2.4} />
+                ) : (
+                  String(index + 1).padStart(2, '0')
+                )}
+              </span>
+              <span className="min-w-0">
                 <span
                   className={cn(
-                    'mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border font-mono text-[0.54rem] transition-colors duration-300',
-                    active
-                      ? 'border-brass-400/50 bg-brass-400/15 text-brass-300'
-                      : done
-                        ? 'border-jade-400/35 bg-jade-400/10 text-jade-300'
-                        : 'border-mist-100/15 text-mist-600',
+                    'block text-[0.76rem] transition-colors duration-300',
+                    active ? 'text-mist-100' : 'text-mist-400',
                   )}
                 >
-                  {done ? (
-                    <Check className="size-3" strokeWidth={2.4} />
-                  ) : (
-                    String(index + 1).padStart(2, '0')
-                  )}
+                  {phase.name}
                 </span>
-                <span className="min-w-0">
-                  <span
-                    className={cn(
-                      'block text-[0.76rem] transition-colors duration-300',
-                      active ? 'text-mist-100' : 'text-mist-400',
-                    )}
-                  >
-                    {phase.name}
-                  </span>
-                  <span className="mt-0.5 block text-[0.57rem] leading-4 text-mist-600">
-                    {phase.caption}
-                  </span>
+                <span className="mt-0.5 block text-[0.57rem] leading-4 text-mist-600">
+                  {phase.caption}
                 </span>
-              </div>
+              </span>
+            </div>
+          );
+
+          return (
+            <li key={phase.name}>
+              {onSelectPhase ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectPhase(index)}
+                  aria-label={`跳转到${phase.name}`}
+                  className="block w-full cursor-pointer text-left"
+                >
+                  {body}
+                </button>
+              ) : (
+                body
+              )}
             </li>
           );
         })}
@@ -171,7 +211,16 @@ function PhaseRail({ activePhase, step }: { activePhase: number; step: number })
   );
 }
 
-export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
+export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
+  const queryClient = useQueryClient();
+  const editing = Boolean(persona);
+  const editingId = persona?.id ?? '';
+  const recordQuery = useQuery({
+    queryKey: ['personas', editingId],
+    queryFn: () => api.persona(editingId),
+    enabled: open && editing,
+    staleTime: 10_000,
+  });
   const [data, setData] = useState<PersonaDraft>(createDefaultDraft);
   const [view, setView] = useState<View>('intro');
   const [step, setStep] = useState(1);
@@ -181,29 +230,63 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
   const [resume, setResume] = useState<ResumeState | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [result, setResult] = useState<PersonaRecord | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const saveMutation = useMutation({
+    mutationFn: (draft: PersonaDraft) =>
+      persona ? api.updatePersona(persona.id, { data: draft }) : api.createPersona({ data: draft }),
+    onSuccess: (record) => {
+      setResult(record);
+      setSaveError(null);
+
+      if (!editing) {
+        clearDraft();
+        setSavedAt(null);
+        setResume(null);
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ['personas'] });
+      setView('success');
+    },
+    onError: (error) => {
+      setSaveError(error instanceof ApiError ? error.message : '保存失败，请稍后重试');
+    },
+  });
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
-    const draft = loadDraft();
-    setData(draft?.data ?? createDefaultDraft());
-    setStep(draft?.step ?? 1);
-    setSavedAt(draft?.updatedAt ?? null);
-    setResume(draft ? { step: draft.step, updatedAt: draft.updatedAt } : null);
-    setView('intro');
     setDirection(1);
     setErrors({});
     setConfirmDiscard(false);
     setAiPrompt('');
+    setResult(null);
+    setSaveError(null);
+
+    if (persona) {
+      setData(persona.data);
+      setStep(1);
+      setSavedAt(null);
+      setResume(null);
+      setView('intro');
+    } else {
+      const draft = loadDraft();
+      setData(draft?.data ?? createDefaultDraft());
+      setStep(draft?.step ?? 1);
+      setSavedAt(draft?.updatedAt ?? null);
+      setResume(draft ? { step: draft.step, updatedAt: draft.updatedAt } : null);
+      setView('intro');
+    }
 
     const frame = window.requestAnimationFrame(() => panelRef.current?.focus());
 
     return () => window.cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, persona]);
 
   useEffect(() => {
     if (!open) {
@@ -289,8 +372,26 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
     setConfirmDiscard(false);
   };
 
+  const handleSave = () => {
+    setSaveError(null);
+
+    if (!editing) {
+      const nextErrors = validateStep(step, data);
+
+      if (Object.keys(nextErrors).length > 0) {
+        setErrors(nextErrors);
+        focusFirstError();
+        return;
+      }
+
+      setErrors({});
+    }
+
+    saveMutation.mutate(data);
+  };
+
   const handleNext = () => {
-    const nextErrors = validateStep(step, data);
+    const nextErrors = editing ? {} : validateStep(step, data);
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -301,26 +402,38 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
     setErrors({});
 
     if (step === TOTAL_STEPS) {
-      clearDraft();
-      setSavedAt(null);
-      setResume(null);
-      setView('success');
+      handleSave();
       return;
     }
 
-    const snapshot = saveDraft(data, step + 1);
-    if (snapshot) {
-      setSavedAt(snapshot.updatedAt);
+    if (!editing) {
+      const snapshot = saveDraft(data, step + 1);
+      if (snapshot) {
+        setSavedAt(snapshot.updatedAt);
+      }
     }
 
     setDirection(1);
 
-    if (current.milestone) {
+    if (!editing && current.milestone) {
       setView('milestone');
       return;
     }
 
     setStep(step + 1);
+  };
+
+  const handleSelectPhase = (phaseIndex: number) => {
+    const target = STEPS.find((item) => item.phase === phaseIndex);
+
+    if (!target) {
+      return;
+    }
+
+    setDirection(target.id >= step ? 1 : -1);
+    setStep(target.id);
+    setView('step');
+    setErrors({});
   };
 
   const handleBack = () => {
@@ -353,6 +466,11 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
   };
 
   const handleCancel = () => {
+    if (editing) {
+      onClose();
+      return;
+    }
+
     if ((view === 'step' || view === 'milestone') && (step > 1 || hasDraftContent(data))) {
       saveDraft(data, view === 'milestone' ? Math.min(TOTAL_STEPS, step + 1) : step);
     }
@@ -1040,20 +1158,22 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                 >
                   <div className="flex items-center justify-between gap-4 px-6 pt-6 sm:px-10">
                     <span className="font-mono text-[0.58rem] uppercase tracking-[0.3em] text-brass-400/75">
-                      Persona Creation
+                      {editing ? 'Persona Revision' : 'Persona Creation'}
                     </span>
                     <div className="flex items-center gap-1">
+                      {!editing && (
+                        <button
+                          type="button"
+                          onClick={handleCancel}
+                          className="rounded-lg px-2.5 py-1.5 text-[0.66rem] text-mist-500 transition hover:bg-mist-100/5 hover:text-mist-200"
+                        >
+                          稍后再填
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={handleCancel}
-                        className="rounded-lg px-2.5 py-1.5 text-[0.66rem] text-mist-500 transition hover:bg-mist-100/5 hover:text-mist-200"
-                      >
-                        稍后再填
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        aria-label="取消并保存草稿"
+                        aria-label={editing ? '取消编辑' : '取消并保存草稿'}
                         className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
                       >
                         <X className="size-4" />
@@ -1070,21 +1190,42 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       id="persona-wizard-title"
                       className="mt-7 font-display text-[clamp(1.9rem,4vw,2.6rem)] font-semibold leading-tight tracking-[-0.02em] text-mist-100"
                     >
-                      一起写下 TA 的一生
+                      {editing ? `重新整理「${persona?.name ?? 'TA'}」的档案` : '一起写下 TA 的一生'}
                     </h2>
                     <p className="mt-4 text-[0.88rem] leading-7 text-mist-400">
-                      这不是一张需要一次填完的问卷，更像是把一个人的轮廓慢慢描出来。共{' '}
-                      <span className="text-brass-300">{TOTAL_STEPS} 步</span>，分为{' '}
-                      <span className="text-brass-300">{PHASES.length} 个阶段</span>，大约需要 10–15
-                      分钟。中途离开也没关系，草稿会留在这台设备上。慢慢来，TA 会因此更完整。
+                      {editing ? (
+                        <>
+                          这张卡已有{' '}
+                          <span className="text-brass-300">{TOTAL_STEPS} 步</span> 的完整字段。
+                          你可以直接跳转阶段补充或改写，历史留空的项不会阻止保存；每次保存都会生成一个新版本。
+                        </>
+                      ) : (
+                        <>
+                          这不是一张需要一次填完的问卷，更像是把一个人的轮廓慢慢描出来。共{' '}
+                          <span className="text-brass-300">{TOTAL_STEPS} 步</span>，分为{' '}
+                          <span className="text-brass-300">{PHASES.length} 个阶段</span>，大约需要
+                          10–15 分钟。中途离开也没关系，草稿会留在这台设备上。慢慢来，TA
+                          会因此更完整。
+                        </>
+                      )}
                     </p>
 
                     <div className="mt-7 grid gap-2.5 sm:grid-cols-3">
-                      {[
-                        { value: `${TOTAL_STEPS}`, label: '步 · 分阶段填写' },
-                        { value: `${PHASES.length}`, label: '个阶段 · 阶段小结' },
-                        { value: '自动', label: '保存至本机草稿' },
-                      ].map((item) => (
+                      {(editing && persona
+                        ? [
+                            { value: persona.serial, label: '档案编号' },
+                            { value: `v${persona.currentVersion}`, label: '当前版本' },
+                            {
+                              value: formatPersonaTimestamp(persona.updatedAt, false),
+                              label: '最近更新',
+                            },
+                          ]
+                        : [
+                            { value: `${TOTAL_STEPS}`, label: '步 · 分阶段填写' },
+                            { value: `${PHASES.length}`, label: '个阶段 · 阶段小结' },
+                            { value: '自动', label: '保存至本机草稿' },
+                          ]
+                      ).map((item) => (
                         <div
                           key={item.label}
                           className="rounded-xl border border-mist-100/[0.07] bg-ink-950/25 px-4 py-3"
@@ -1097,7 +1238,57 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       ))}
                     </div>
 
-                    {resume && (
+                    {editing && (
+                      <div className="mt-5 rounded-xl border border-mist-100/[0.07] bg-ink-950/25">
+                        <div className="flex items-center justify-between gap-3 border-b border-mist-100/[0.06] px-4 py-2.5">
+                          <span className="flex items-center gap-1.5 text-[0.68rem] text-mist-400">
+                            <History className="size-3.5 text-brass-400/75" strokeWidth={1.7} />
+                            版本历史
+                          </span>
+                          <span className="font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
+                            {recordQuery.isPending
+                              ? '读取中'
+                              : `${recordQuery.data?.versions.length ?? 0} 个版本`}
+                          </span>
+                        </div>
+
+                        <div className="max-h-44 overflow-y-auto px-4 py-2">
+                          {recordQuery.isPending ? (
+                            <p className="py-2 text-[0.64rem] text-mist-600">正在读取版本记录…</p>
+                          ) : (recordQuery.data?.versions ?? []).length === 0 ? (
+                            <p className="py-2 text-[0.64rem] text-mist-600">暂无版本记录。</p>
+                          ) : (
+                            <ul className="divide-y divide-mist-100/[0.05]">
+                              {(recordQuery.data?.versions ?? []).slice(0, 8).map((version) => (
+                                <li
+                                  key={version.version}
+                                  className="flex items-center justify-between gap-3 py-1.5"
+                                >
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className="shrink-0 rounded border border-brass-400/25 bg-brass-400/[0.08] px-1.5 py-0.5 font-mono text-[0.52rem] text-brass-300">
+                                      v{version.version}
+                                    </span>
+                                    <span className="truncate font-mono text-[0.56rem] text-mist-600">
+                                      {formatPersonaTimestamp(version.createdAt, false)}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 text-[0.58rem] text-mist-500">
+                                    {version.changedCount} 项变更
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
+                        <p className="border-t border-mist-100/[0.06] px-4 py-2 text-[0.56rem] leading-4 text-mist-600">
+                          创建于 {formatPersonaTimestamp(persona?.createdAt ?? '', false)} ·
+                          更新于 {formatPersonaTimestamp(persona?.updatedAt ?? '', false)}
+                        </p>
+                      </div>
+                    )}
+
+                    {!editing && resume && (
                       <div className="mt-5 rounded-xl border border-jade-400/20 bg-jade-400/[0.06] px-4 py-3">
                         <AnimatePresence mode="wait" initial={false}>
                           {confirmDiscard ? (
@@ -1177,28 +1368,34 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                         onClick={handleStart}
                         className="h-12 w-full px-8 text-[0.82rem] sm:w-auto"
                       >
-                        {resume ? '继续填写' : '开始填写'}
+                        {editing ? '继续编辑' : resume ? '继续填写' : '开始填写'}
                         <ArrowRight className="size-4" />
                       </PrimaryButton>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmDiscard(false);
-                          setView('ai');
-                        }}
-                        className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
-                      >
-                        <Sparkles className="size-4 text-brass-300 transition group-hover:rotate-12" />
-                        AI 编写
-                      </button>
+                      {!editing && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmDiscard(false);
+                            setView('ai');
+                          }}
+                          className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
+                        >
+                          <Sparkles className="size-4 text-brass-300 transition group-hover:rotate-12" />
+                          AI 编写
+                        </button>
+                      )}
                     </div>
 
                     <p className="mt-3 text-[0.62rem] leading-5 text-mist-600">
-                      也可以让 AI 根据一段描述先生成全部属性，再逐项修改。
+                      {editing
+                        ? '编辑时可自由跳转阶段，保存不会强制补齐历史空白项。'
+                        : '也可以让 AI 根据一段描述先生成全部属性，再逐项修改。'}
                     </p>
 
                     <p className="mt-4 text-[0.6rem] leading-5 text-mist-600">
-                      带 * 的信息为必填；其余可以留空。所有字数均按中文字符计算。
+                      {editing
+                        ? '带 * 的信息是创建时的必填项；编辑保存不强制补齐。所有字数均按中文字符计算。'
+                        : '带 * 的信息为必填；其余可以留空。所有字数均按中文字符计算。'}
                     </p>
                   </div>
                 </motion.div>
@@ -1213,7 +1410,11 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                   transition={VIEW_TRANSITION}
                   className="relative flex min-h-0 flex-1"
                 >
-                  <PhaseRail activePhase={current.phase} step={step} />
+                  <PhaseRail
+                    activePhase={current.phase}
+                    step={step}
+                    onSelectPhase={editing ? handleSelectPhase : undefined}
+                  />
 
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     {view === 'milestone' ? (
@@ -1224,7 +1425,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                         <button
                           type="button"
                           onClick={handleCancel}
-                          aria-label="取消并保存草稿"
+                          aria-label={editing ? '取消编辑' : '取消并保存草稿'}
                           className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
                         >
                           <X className="size-4" />
@@ -1256,7 +1457,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                           <button
                             type="button"
                             onClick={handleCancel}
-                            aria-label="取消并保存草稿"
+                            aria-label={editing ? '取消编辑' : '取消并保存草稿'}
                             className="shrink-0 rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
                           >
                             <X className="size-4" />
@@ -1358,6 +1559,13 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                       </div>
                     </div>
 
+                    {view === 'step' && saveError && (
+                      <p className="flex items-start gap-2 border-t border-signal-400/20 bg-signal-400/[0.06] px-5 py-2.5 text-[0.68rem] leading-5 text-signal-400 sm:px-8">
+                        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.8} />
+                        <span className="min-w-0 break-words">{saveError}</span>
+                      </p>
+                    )}
+
                     {view === 'step' && (
                       <footer className="flex items-center justify-between gap-3 border-t border-mist-100/[0.07] px-5 py-4 sm:px-8">
                         <div className="flex min-w-0 items-center gap-2">
@@ -1381,25 +1589,60 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                             <span
                               className={cn(
                                 'size-1.5 shrink-0 rounded-full',
-                                savedAt ? 'bg-jade-400' : 'bg-mist-100/20',
+                                editing || savedAt ? 'bg-jade-400' : 'bg-mist-100/20',
                               )}
                             />
-                            {savedLabel ? `草稿已保存 ${savedLabel}` : '草稿自动保存在本机'}
+                            {editing
+                              ? `${persona?.serial ?? ''} · v${persona?.currentVersion ?? 1} · 保存后生成新版本`
+                              : savedLabel
+                                ? `草稿已保存 ${savedLabel}`
+                                : '草稿自动保存在本机'}
                           </span>
                         </div>
 
-                        <PrimaryButton
-                          type="button"
-                          onClick={handleNext}
-                          className="h-10 w-auto shrink-0 px-5 text-[0.76rem]"
-                        >
-                          {step === TOTAL_STEPS ? '保存人格' : '下一步'}
-                          {step === TOTAL_STEPS ? (
-                            <Check className="size-4" />
-                          ) : (
-                            <ArrowRight className="size-4" />
-                          )}
-                        </PrimaryButton>
+                        {editing ? (
+                          <div className="flex shrink-0 items-center gap-2">
+                            {step < TOTAL_STEPS && (
+                              <GhostButton
+                                type="button"
+                                onClick={handleNext}
+                                className="h-10 px-4 text-[0.74rem]"
+                              >
+                                下一步
+                                <ArrowRight className="size-3.5" />
+                              </GhostButton>
+                            )}
+                            <PrimaryButton
+                              type="button"
+                              onClick={handleSave}
+                              disabled={saveMutation.isPending}
+                              className="h-10 w-auto px-5 text-[0.76rem]"
+                            >
+                              {saveMutation.isPending ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : (
+                                <Save className="size-4" />
+                              )}
+                              保存修改
+                            </PrimaryButton>
+                          </div>
+                        ) : (
+                          <PrimaryButton
+                            type="button"
+                            onClick={handleNext}
+                            disabled={saveMutation.isPending}
+                            className="h-10 w-auto shrink-0 px-5 text-[0.76rem]"
+                          >
+                            {saveMutation.isPending ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : step === TOTAL_STEPS ? (
+                              <Check className="size-4" />
+                            ) : (
+                              <ArrowRight className="size-4" />
+                            )}
+                            {step === TOTAL_STEPS ? '保存人格' : '下一步'}
+                          </PrimaryButton>
+                        )}
                       </footer>
                     )}
                   </div>
@@ -1437,7 +1680,7 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                 >
                   <div className="flex items-center justify-between gap-4 px-6 pt-6 sm:px-10">
                     <span className="font-mono text-[0.58rem] uppercase tracking-[0.3em] text-brass-400/75">
-                      Dossier Complete
+                      {editing ? 'Revision Filed' : 'Dossier Complete'}
                     </span>
                     <button
                       type="button"
@@ -1460,16 +1703,22 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                     </motion.span>
 
                     <p className="mt-6 font-mono text-[0.56rem] uppercase tracking-[0.28em] text-brass-400/70">
-                      25 / 25 · All Filed
+                      {editing
+                        ? `${result?.serial ?? persona?.serial ?? ''} · v${result?.currentVersion ?? persona?.currentVersion ?? 1}`
+                        : '25 / 25 · All Filed'}
                     </p>
                     <h2
                       id="persona-wizard-title"
                       className="mt-3 font-display text-[clamp(1.7rem,3.4vw,2.3rem)] font-semibold leading-tight tracking-tight text-mist-100"
                     >
-                      「{data.name.trim() || 'TA'}」已经写好了
+                      {editing
+                        ? `「${data.name.trim() || 'TA'}」已更新到 v${result?.currentVersion ?? ''}`
+                        : `「${data.name.trim() || 'TA'}」已经写好了`}
                     </h2>
                     <p className="mt-3 max-w-md text-[0.8rem] leading-7 text-mist-500">
-                      基础档案、世界与来处、价值内核、表达方式与性格参数都已归档。后端接入后，这张卡就会正式出现在人格中心。
+                      {editing
+                        ? '修改已写入人格卡，并作为新版本归档。之前的版本仍可在档案的版本历史里查看。'
+                        : '基础档案、世界与来处、价值内核、表达方式与性格参数都已归档，这张卡已经出现在人格中心。'}
                     </p>
 
                     <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
@@ -1494,17 +1743,21 @@ export function PersonaWizard({ open, onClose }: PersonaWizardProps) {
                         完成
                         <Check className="size-4" />
                       </PrimaryButton>
-                      <GhostButton
-                        type="button"
-                        onClick={handleRestart}
-                        className="h-12 w-full px-5 text-[0.78rem] sm:w-auto"
-                      >
-                        再创建一位
-                      </GhostButton>
+                      {!editing && (
+                        <GhostButton
+                          type="button"
+                          onClick={handleRestart}
+                          className="h-12 w-full px-5 text-[0.78rem] sm:w-auto"
+                        >
+                          再创建一位
+                        </GhostButton>
+                      )}
                     </div>
 
                     <p className="mt-6 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
-                      本次草稿已从浏览器清除
+                      {editing
+                        ? `版本归档于 ${formatPersonaTimestamp(result?.updatedAt ?? '', false)}`
+                        : '本次草稿已从浏览器清除'}
                     </p>
                   </div>
                 </motion.div>

@@ -27,6 +27,20 @@ export const chatChannelsQuery = queryOptions({
   staleTime: 10_000,
 });
 
+export const personasQuery = queryOptions({
+  queryKey: ['personas'],
+  queryFn: api.personas,
+  staleTime: 10_000,
+});
+
+export const personaRecordQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['personas', id],
+    queryFn: () => api.persona(id),
+    enabled: Boolean(id),
+    staleTime: 10_000,
+  });
+
 export const chatConversationsQuery = (kind: ChatConversationKind) =>
   queryOptions({
     queryKey: ['chat', 'conversations', kind],
