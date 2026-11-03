@@ -1,12 +1,12 @@
-import type { PersonaDraft } from './persona-draft';
+import { TOTAL_STEPS, type PersonaDraft } from './persona-draft';
 
 export const AI_PROMPT_MAX = 10000;
 
 export const AI_GENERATION_STAGES = [
   { label: '读取设定与语气', delay: 620 },
   { label: '归纳身份、世界与边界', delay: 760 },
-  { label: '校准价值、表达与作息', delay: 760 },
-  { label: '归档为 25 步字段', delay: 620 },
+  { label: '校准价值、表达与在线习惯', delay: 760 },
+  { label: `归档为 ${TOTAL_STEPS} 步字段`, delay: 620 },
 ] as const;
 
 export const AI_PROMPT_EXAMPLE =
@@ -72,8 +72,18 @@ export function describeGeneratedDraft(draft: PersonaDraft): AiPreviewSection[] 
       ],
     },
     {
+      title: '动机与行动',
+      caption: '13',
+      rows: [
+        { label: '长期目标', value: textOrEmpty(draft.long_term_motivation) },
+        { label: '当前目标', value: textOrEmpty(draft.current_goal) },
+        { label: '正在做的事', value: textOrEmpty(draft.doing_now) },
+        { label: '面临的困难', value: textOrEmpty(draft.obstacle) },
+      ],
+    },
+    {
       title: '表达方式',
-      caption: '17 — 19',
+      caption: '14 — 16',
       rows: [
         {
           label: '冲突 · 幽默',
@@ -91,17 +101,16 @@ export function describeGeneratedDraft(draft: PersonaDraft): AiPreviewSection[] 
       ],
     },
     {
-      title: '作息与在线',
-      caption: '20 — 21',
+      title: '在线与位置',
+      caption: '17 — 18',
       rows: [
-        { label: '睡眠', value: draft.sleep_window.replace('-', ' – ') },
-        { label: '清醒', value: draft.awake_window.replace('-', ' – ') },
         { label: '在线策略', value: draft.online_policy },
+        { label: '当前位置', value: textOrEmpty(draft.location) },
       ],
     },
     {
       title: '性格参数',
-      caption: '22 — 25',
+      caption: '19 — 22',
       rows: [
         {
           label: '自我',
@@ -123,20 +132,15 @@ export function describeGeneratedDraft(draft: PersonaDraft): AiPreviewSection[] 
     },
     {
       title: '进阶档案',
-      caption: '20 fields',
+      caption: '15 fields',
       rows: [
         {
           label: '称呼',
           value: `陌生 ${draft.advanced.address_for_stranger} · 亲近 ${draft.advanced.address_for_close}`,
         },
-        { label: '社交圈', value: listOrEmpty(draft.advanced.social_circle) },
-        { label: '技能', value: listOrEmpty(draft.advanced.skills) },
         { label: '防破面', value: textOrEmpty(draft.advanced.in_character_principle) },
-        {
-          label: '工作 · 免打扰',
-          value: `${draft.advanced.work_window} · ${draft.advanced.do_not_disturb}`,
-        },
         { label: '敏感点', value: listOrEmpty(draft.advanced.sensitivity_map) },
+        { label: '触碰偏好', value: textOrEmpty(draft.advanced.touch_preference) },
         { label: '格调尺度', value: draft.advanced.explicit_level_char },
       ],
     },

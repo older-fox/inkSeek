@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, Plus, TriangleAlert, X } from 'lucide-react';
+import { Check, ChevronDown, Plus, TriangleAlert, X } from 'lucide-react';
 import {
   useEffect,
   useLayoutEffect,
@@ -10,14 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
-import {
-  charCount,
-  clampChars,
-  filledLines,
-  minutesLabel,
-  rangeDurationMinutes,
-  type ChoiceOption,
-} from '@/lib/persona-draft';
+import { charCount, clampChars, filledLines, type ChoiceOption } from '@/lib/persona-draft';
 
 interface FieldFrameProps {
   id?: string;
@@ -718,56 +711,7 @@ export function CommaListControl({
   );
 }
 
-interface TimeRangeControlProps {
-  label: string;
-  start: string;
-  end: string;
-  onStartChange: (value: string) => void;
-  onEndChange: (value: string) => void;
-  required?: boolean;
-  hint?: string;
-  error?: string;
-}
-
-export function TimeRangeControl({
-  label,
-  start,
-  end,
-  onStartChange,
-  onEndChange,
-  required,
-  hint,
-  error,
-}: TimeRangeControlProps) {
-  const duration = rangeDurationMinutes(start, end);
-
-  return (
-    <FieldFrame label={label} required={required} hint={hint} error={error}>
-      <div className="flex items-center gap-2">
-        <TimeField
-          value={start}
-          onChange={onStartChange}
-          ariaLabel={`${label}开始时间`}
-          invalid={Boolean(error)}
-        />
-        <span className="shrink-0 text-[0.7rem] text-mist-600">→</span>
-        <TimeField
-          value={end}
-          onChange={onEndChange}
-          ariaLabel={`${label}结束时间`}
-          invalid={Boolean(error)}
-        />
-      </div>
-      <p className="font-mono text-[0.55rem] uppercase tracking-[0.14em] text-mist-600">
-        {duration === null ? '跨度 —' : `跨度 ${minutesLabel(duration)}`}
-      </p>
-    </FieldFrame>
-  );
-}
-
 const POPOVER_MAX_HEIGHT = 300;
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
-const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
 
 interface PickerPopoverProps {
   open: boolean;
@@ -870,140 +814,6 @@ function PickerPopover({
       {children}
     </div>,
     document.body,
-  );
-}
-
-interface TimeFieldProps {
-  value: string;
-  onChange: (value: string) => void;
-  ariaLabel: string;
-  invalid?: boolean;
-}
-
-export function TimeField({ value, onChange, ariaLabel, invalid }: TimeFieldProps) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const selectedHourRef = useRef<HTMLButtonElement>(null);
-  const selectedMinuteRef = useRef<HTMLButtonElement>(null);
-  const [hour = '00', minute = '00'] = value.split(':');
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      selectedHourRef.current?.scrollIntoView({ block: 'nearest' });
-      selectedMinuteRef.current?.scrollIntoView({ block: 'nearest' });
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
-
-  return (
-    <>
-      <button
-        ref={anchorRef}
-        type="button"
-        aria-label={ariaLabel}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-invalid={invalid ? 'true' : 'false'}
-        onClick={() => setOpen((current) => !current)}
-        className={cn(
-          'wizard-input wizard-time flex items-center justify-between gap-2 text-left',
-          open &&
-            'border-[var(--field-focus-border)] bg-[var(--field-bg-focus)] shadow-[0_0_0_4px_var(--field-focus-shadow)]',
-        )}
-      >
-        <span className="font-mono tracking-[0.06em]">
-          {hour}:{minute}
-        </span>
-        <Clock className="size-3.5 shrink-0 text-mist-600" strokeWidth={1.7} />
-      </button>
-
-      <PickerPopover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchorRef={anchorRef}
-        minWidth={280}
-        maxWidth={340}
-      >
-        <div className="flex items-center justify-between gap-3 px-1 pb-2.5">
-          <span className="font-mono text-[0.54rem] uppercase tracking-[0.2em] text-mist-600">
-            Select Time
-          </span>
-          <span className="font-mono text-[0.72rem] text-brass-300">
-            {hour}:{minute}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div
-            role="listbox"
-            aria-label="小时"
-            className="h-48 overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-1"
-          >
-            {HOUR_OPTIONS.map((option) => (
-              <button
-                key={option}
-                ref={option === hour ? selectedHourRef : undefined}
-                type="button"
-                role="option"
-                aria-selected={option === hour}
-                onClick={() => onChange(`${option}:${minute}`)}
-                className={cn(
-                  'flex h-8 w-full items-center justify-center rounded-lg font-mono text-[0.72rem] transition',
-                  option === hour
-                    ? 'bg-brass-400/15 text-brass-200'
-                    : 'text-mist-500 hover:bg-mist-100/[0.06] hover:text-mist-100',
-                )}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-
-          <div
-            role="listbox"
-            aria-label="分钟"
-            className="h-48 overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-1"
-          >
-            {MINUTE_OPTIONS.map((option) => (
-              <button
-                key={option}
-                ref={option === minute ? selectedMinuteRef : undefined}
-                type="button"
-                role="option"
-                aria-selected={option === minute}
-                onClick={() => onChange(`${hour}:${option}`)}
-                className={cn(
-                  'flex h-8 w-full items-center justify-center rounded-lg font-mono text-[0.72rem] transition',
-                  option === minute
-                    ? 'bg-brass-400/15 text-brass-200'
-                    : 'text-mist-500 hover:bg-mist-100/[0.06] hover:text-mist-100',
-                )}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-2.5 flex items-center justify-between gap-3">
-          <span className="pl-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
-            24 小时制
-          </span>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="rounded-lg border border-brass-400/30 bg-brass-400/10 px-3 py-1.5 text-[0.68rem] text-brass-200 transition hover:bg-brass-400/20"
-          >
-            完成
-          </button>
-        </div>
-      </PickerPopover>
-    </>
   );
 }
 

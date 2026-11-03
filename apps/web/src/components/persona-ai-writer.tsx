@@ -20,7 +20,7 @@ import {
   AI_PROMPT_MAX,
   describeGeneratedDraft,
 } from '@/lib/persona-ai';
-import { charCount, clampChars, type PersonaDraft } from '@/lib/persona-draft';
+import { charCount, clampChars, TOTAL_STEPS, type PersonaDraft } from '@/lib/persona-draft';
 
 interface PersonaAiWriterProps {
   prompt: string;
@@ -264,7 +264,7 @@ export function PersonaAiWriter({
                 让 AI 先写一版
               </h2>
               <p className="mt-0.5 text-[0.7rem] text-mist-500">
-                写一段角色描述，AI 会整理成 25 步档案，再逐项修改。
+                写一段角色描述，AI 会整理成 {TOTAL_STEPS} 步档案，再逐项修改。
               </p>
             </div>
             <span className="ml-auto rounded-full border border-jade-400/25 bg-jade-400/[0.08] px-2.5 py-1 font-mono text-[0.52rem] uppercase tracking-[0.14em] text-jade-300">
@@ -320,14 +320,14 @@ export function PersonaAiWriter({
               </p>
             ) : (
               <p id="persona-ai-prompt-hint" className="text-[0.64rem] leading-5 text-mist-600">
-                建议覆盖：身份 / 世界观 / 性格与禁忌 / 语言习惯 / 作息。最多 10,000
+                建议覆盖：身份 / 世界观 / 性格与禁忌 / 语言习惯 / 在线习惯。最多 10,000
                 字，按中文字符计算。
               </p>
             )}
           </div>
 
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {['身份与外貌', '世界与来处', '价值与禁忌', '语言习惯', '作息与在线'].map((item) => (
+            {['身份与外貌', '世界与来处', '价值与禁忌', '语言习惯', '在线与位置'].map((item) => (
               <span
                 key={item}
                 className="rounded-full border border-mist-100/[0.08] bg-ink-950/25 px-2.5 py-1 text-[0.6rem] text-mist-600"
@@ -507,7 +507,7 @@ export function PersonaAiWriter({
                 </div>
 
                 <p className="mt-2 text-[0.64rem] leading-5 text-mist-600">
-                  模型已根据提示词生成 25 步档案、性格参数与 20 项进阶字段。带入后仍可逐项修改。
+                  模型已根据提示词生成 {TOTAL_STEPS} 步档案、性格参数与 15 项进阶字段。带入后仍可逐项修改。
                 </p>
 
                 <div className="mt-4 grid gap-2.5 sm:grid-cols-2">

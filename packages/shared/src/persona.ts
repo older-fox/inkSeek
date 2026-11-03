@@ -1,98 +1,21 @@
 import { z } from 'zod';
 
-export type ConflictStyle =
-  | '回避'
-  | '对抗'
-  | '讲理'
-  | '冷战'
-  | '先退后解释'
-  | '先听完再划界'
-  | '先降温再划界';
-
-export type HumorStyle = '冷幽默' | '自嘲' | '吐槽' | '不接梗' | '机锋';
-
-export type MemoryBias = '均衡' | '记细节' | '记仇' | '健忘' | '偏记人' | '偏记声音';
-
-export type SentenceLength = '短句' | '中句' | '长句' | '长短混用';
-
-export type PunctuationStyle =
-  | '极简'
-  | '常规'
-  | '柔软'
-  | '严整'
-  | '活泼'
-  | '书卷'
-  | '省略号偏多';
-
-export type OnlinePolicy = '常在线' | '按作息' | '自适应';
-
-export const CONFLICT_STYLES = [
-  '回避',
-  '对抗',
-  '讲理',
-  '冷战',
-  '先退后解释',
-  '先听完再划界',
-  '先降温再划界',
-] as const satisfies readonly ConflictStyle[];
-
-export const HUMOR_STYLES = [
-  '冷幽默',
-  '自嘲',
-  '吐槽',
-  '不接梗',
-  '机锋',
-] as const satisfies readonly HumorStyle[];
-
-export const MEMORY_BIASES = [
-  '均衡',
-  '记细节',
-  '记仇',
-  '健忘',
-  '偏记人',
-  '偏记声音',
-] as const satisfies readonly MemoryBias[];
-
-export const SENTENCE_LENGTHS = [
-  '短句',
-  '中句',
-  '长句',
-  '长短混用',
-] as const satisfies readonly SentenceLength[];
-
-export const PUNCTUATION_STYLES = [
-  '极简',
-  '常规',
-  '柔软',
-  '严整',
-  '活泼',
-  '书卷',
-  '省略号偏多',
-] as const satisfies readonly PunctuationStyle[];
-
-export const ONLINE_POLICIES = [
-  '常在线',
-  '按作息',
-  '自适应',
-] as const satisfies readonly OnlinePolicy[];
-
 const listSchema = (maxItems: number, perItem: number) =>
   z.array(z.string().max(perItem, '列表条目过长')).max(maxItems, '列表条目过多');
 
+const openListSchema = (perItem: number) => z.array(z.string().max(perItem, '列表条目过长'));
+
 const numberField = z.number().int('需要填写整数').min(0).max(100);
 
-export const PERSONA_EXPLICIT_LEVELS = ['无', '含蓄', '明确', '深入'] as const;
-
-export type PersonaExplicitLevel = (typeof PERSONA_EXPLICIT_LEVELS)[number];
+const sentenceField = (label: string, fallback = '') =>
+  z.string().max(200, `${label}最多 200 个字符`).default(fallback);
 
 /**
- * Static persona settings that live outside the 25-step narrative flow. They
+ * Static persona settings that live outside the step-by-step narrative flow. They
  * describe how a character behaves rather than what happens in a conversation,
  * so they are authored per card and versioned with the rest of the draft.
  */
 export const personaAdvancedSchema = z.object({
-  social_circle: listSchema(20, 40).default([]),
-  skills: listSchema(20, 40).default([]),
   address_for_stranger: z.string().max(40, '称呼最多 40 个字符').default('您'),
   address_for_close: z.string().max(40, '称呼最多 40 个字符').default('你'),
   forbidden_addresses: listSchema(10, 20).default([]),
@@ -109,12 +32,9 @@ export const personaAdvancedSchema = z.object({
     .max(300, '收场方式最多 300 个字符')
     .default('用一句符合人设的话自然带过，不解释机制。'),
   in_character_allowed_meta: listSchema(10, 40).default([]),
-  work_window: z.string().max(20).default('09:00-18:00'),
-  do_not_disturb: z.string().max(20).default('22:00-08:00'),
-  proactive_triggers: listSchema(10, 40).default([]),
   sensitivity_map: listSchema(20, 40).default([]),
-  touch_preference: z.string().max(200, '触碰偏好最多 200 个字符').default(''),
-  explicit_level_char: z.enum(PERSONA_EXPLICIT_LEVELS).default('无'),
+  touch_preference: sentenceField('触碰偏好'),
+  explicit_level_char: sentenceField('角色尺度上限', '不主动展开相关话题，保持克制。'),
   aftercare_need_base: numberField.default(50),
   decline_response_style: z
     .string()
@@ -126,8 +46,6 @@ export type PersonaAdvanced = z.infer<typeof personaAdvancedSchema>;
 
 export function createDefaultPersonaAdvanced(): PersonaAdvanced {
   return {
-    social_circle: [],
-    skills: [],
     address_for_stranger: '您',
     address_for_close: '你',
     forbidden_addresses: [],
@@ -138,12 +56,9 @@ export function createDefaultPersonaAdvanced(): PersonaAdvanced {
     in_character_never: [],
     in_character_recovery: '用一句符合人设的话自然带过，不解释机制。',
     in_character_allowed_meta: [],
-    work_window: '09:00-18:00',
-    do_not_disturb: '22:00-08:00',
-    proactive_triggers: [],
     sensitivity_map: [],
     touch_preference: '',
-    explicit_level_char: '无',
+    explicit_level_char: '不主动展开相关话题，保持克制。',
     aftercare_need_base: 50,
     decline_response_style: '直接说明不方便，并给出一个可接受的替代。',
   };
@@ -173,36 +88,36 @@ export const personaDraftSchema = z.object({
   knowledge_boundary: z.string().max(500, '知识边界最多 500 个字符'),
 
   core_values: listSchema(200, 20),
-  taboos: listSchema(5, 20),
-  fears: listSchema(5, 20),
-  soft_spots: listSchema(5, 20),
-  non_negotiable: listSchema(5, 20),
+  taboos: openListSchema(20),
+  fears: openListSchema(20),
+  soft_spots: openListSchema(20),
+  non_negotiable: openListSchema(20),
 
   long_term_motivation: z.string().max(60, '长期目标最多 60 个字符'),
   current_goal: z.string().max(60, '当前目标最多 60 个字符'),
   doing_now: z.string().max(100, '正在做的事最多 100 个字符'),
   obstacle: z.string().max(60, '面临的困难最多 60 个字符'),
+  location: z.string().max(40, '当前位置最多 40 个字符').default(''),
 
-  conflict_style: z.enum(CONFLICT_STYLES),
-  humor_style: z.enum(HUMOR_STYLES),
-  memory_bias: z.enum(MEMORY_BIASES),
-  sentence_length: z.enum(SENTENCE_LENGTHS),
-  punctuation: z.enum(PUNCTUATION_STYLES),
+  language_style: sentenceField('说话风格'),
+  conflict_style: sentenceField('冲突风格', '先听完对方把话说完，再把自己的界线讲清楚。'),
+  humor_style: sentenceField('幽默风格', '冷不丁来一句冷幽默，不刻意逗笑。'),
+  memory_bias: sentenceField('记忆倾向', '记住重要的承诺与细节，小事就让它过去。'),
+  sentence_length: sentenceField('句长偏好', '句子长短混着来，随情绪自然变化。'),
+  punctuation: sentenceField('标点习惯', '标点常规，句末收稳，不堆叠符号。'),
   typo_level: numberField,
   split_level: numberField,
 
-  particles: listSchema(10, 10),
-  openers: listSchema(5, 10),
+  particles: openListSchema(10),
+  openers: openListSchema(10),
 
-  banned_words: listSchema(20, 20),
+  banned_words: openListSchema(20),
 
   emoji_level: numberField,
   typing_level: numberField,
   time_zone: z.string().max(40),
 
-  sleep_window: z.string().max(20),
-  awake_window: z.string().max(20),
-  online_policy: z.enum(ONLINE_POLICIES),
+  online_policy: sentenceField('在线策略', '按作息在线，睡着时先不回，醒来再补上。'),
   sleep_depth: numberField,
 
   confidence: numberField,
@@ -263,12 +178,14 @@ export function createDefaultPersonaDraft(): PersonaDraft {
     current_goal: '',
     doing_now: '',
     obstacle: '',
+    location: '',
 
-    conflict_style: '讲理',
-    humor_style: '冷幽默',
-    memory_bias: '均衡',
-    sentence_length: '长短混用',
-    punctuation: '常规',
+    language_style: '',
+    conflict_style: '先听完对方把话说完，再把自己的界线讲清楚。',
+    humor_style: '冷不丁来一句冷幽默，不刻意逗笑。',
+    memory_bias: '记住重要的承诺与细节，小事就让它过去。',
+    sentence_length: '句子长短混着来，随情绪自然变化。',
+    punctuation: '标点常规，句末收稳，不堆叠符号。',
     typo_level: 0,
     split_level: 2,
 
@@ -281,9 +198,7 @@ export function createDefaultPersonaDraft(): PersonaDraft {
     typing_level: 2,
     time_zone: '北京时间',
 
-    sleep_window: '23:00-07:00',
-    awake_window: '09:00-18:00',
-    online_policy: '按作息',
+    online_policy: '按作息在线，睡着时先不回，醒来再补上。',
     sleep_depth: 2,
 
     confidence: 50,
@@ -356,6 +271,7 @@ export const personaProfileSchema = z.object({
 export const personaProfileUpdateSchema = z.object({
   gender: z.enum(PERSONA_GENDERS).optional(),
   experienceLevel: z.enum(PERSONA_EXPERIENCE_LEVELS),
+  quote: z.string().max(400, '台词锚点最多 400 个字符').optional(),
 });
 
 export interface PersonaVersionSummary {

@@ -1,22 +1,12 @@
 import { ChevronDown, RotateCcw } from 'lucide-react';
+import { createDefaultPersonaAdvanced, type PersonaAdvanced } from '@inkseek/shared';
 import {
-  createDefaultPersonaAdvanced,
-  type PersonaAdvanced,
-  type PersonaExplicitLevel,
-} from '@inkseek/shared';
-import {
-  ChoiceControl,
   CommaListControl,
   SliderControl,
   TextAreaControl,
   TextControl,
-  TimeRangeControl,
 } from '@/components/persona-form-controls';
-import {
-  joinWindow,
-  parseWindow,
-  type ChoiceOption,
-} from '@/lib/persona-draft';
+import { TOTAL_STEPS } from '@/lib/persona-draft';
 
 type AdvancedKey = keyof PersonaAdvanced;
 type AdvancedValue = PersonaAdvanced[AdvancedKey];
@@ -53,18 +43,6 @@ export const ADVANCED_GROUPS: readonly AdvancedGroup[] = [
     keys: ['explicit_level_char', 'aftercare_need_base', 'decline_response_style'],
   },
   {
-    id: 'network',
-    title: '关系网与技能',
-    caption: '叙事时可以引用的其他人，以及 TA 会什么。',
-    keys: ['social_circle', 'skills'],
-  },
-  {
-    id: 'rhythm',
-    title: '作息与主动',
-    caption: '在岗与勿扰时段，以及什么条件下会主动开口。',
-    keys: ['work_window', 'do_not_disturb', 'proactive_triggers'],
-  },
-  {
     id: 'body',
     title: '身体偏好',
     caption: '敏感部位映射与触碰偏好，仅作叙事参考。',
@@ -72,34 +50,14 @@ export const ADVANCED_GROUPS: readonly AdvancedGroup[] = [
   },
 ];
 
-const EXPLICIT_OPTIONS: readonly ChoiceOption<PersonaExplicitLevel>[] = [
-  { value: '无', label: '无', hint: '不主动展开相关话题' },
-  { value: '含蓄', label: '含蓄', hint: '点到为止，依赖对方推进' },
-  { value: '明确', label: '明确', hint: '能直接回应相关话题' },
-  { value: '深入', label: '深入', hint: '在同意范围内可详细描写' },
-];
-
-function splitRange(
-  value: string,
-  fallbackStart: string,
-  fallbackEnd: string,
-): [string, string] {
-  const parsed = parseWindow(value);
-  return parsed ? [parsed.start, parsed.end] : [fallbackStart, fallbackEnd];
-}
-
 export function PersonaAdvancedPanel({
   value,
   onChange,
-  onJumpToStep,
 }: {
   value: PersonaAdvanced;
   onChange: (key: AdvancedKey, value: AdvancedValue) => void;
-  onJumpToStep: (step: number) => void;
 }) {
   const defaults = createDefaultPersonaAdvanced();
-  const [workStart, workEnd] = splitRange(value.work_window, '09:00', '18:00');
-  const [disturbStart, disturbEnd] = splitRange(value.do_not_disturb, '22:00', '08:00');
 
   const restore = (keys: readonly AdvancedKey[]) => {
     keys.forEach((key) => onChange(key, defaults[key]));
@@ -213,14 +171,17 @@ export function PersonaAdvancedPanel({
       case 'boundaries':
         return (
           <>
-            <ChoiceControl
-              label="角色尺度上限"
-              value={value.explicit_level_char}
-              options={EXPLICIT_OPTIONS}
-              onChange={(next) => onChange('explicit_level_char', next)}
-              required={false}
-              hint="角色自身可承载的内容尺度，不改变同意规则。"
-            />
+            <div className="sm:col-span-2">
+              <TextControl
+                id="advanced-explicit-level"
+                label="角色尺度上限"
+                value={value.explicit_level_char}
+                onChange={(next) => onChange('explicit_level_char', next)}
+                max={200}
+                placeholder="不主动展开相关话题，对方推进时点到为止。"
+                hint="一句话描述角色自身可承载的内容尺度，不改变同意规则。"
+              />
+            </div>
             <SliderControl
               label="事后照护基线"
               value={value.aftercare_need_base}
@@ -239,80 +200,6 @@ export function PersonaAdvancedPanel({
                 hint="拒绝或被拒时的表现方式。"
               />
             </div>
-            <div className="rounded-xl border border-brass-400/20 bg-brass-400/[0.05] px-3.5 py-3 sm:col-span-2">
-              <p className="text-[0.72rem] leading-6 text-mist-300">
-                全局硬限制沿用第 12 步的「绝对红线」，这里不重复维护；渠道与私聊只能在此基础上加严。
-              </p>
-              <button
-                type="button"
-                onClick={() => onJumpToStep(12)}
-                className="mt-1.5 rounded-md text-[0.68rem] text-brass-300 underline decoration-brass-400/40 underline-offset-4 transition hover:text-brass-200"
-              >
-                去第 12 步 · 绝对红线
-              </button>
-            </div>
-          </>
-        );
-
-      case 'network':
-        return (
-          <>
-            <CommaListControl
-              id="advanced-social-circle"
-              label="关系网"
-              lines={value.social_circle}
-              onChange={(next) => onChange('social_circle', next)}
-              max={20}
-              perLineMax={40}
-              placeholder="旧书铺的房东，隔壁咖啡师"
-              hint="其他 NPC 与关系，供叙事引用。"
-            />
-            <CommaListControl
-              id="advanced-skills"
-              label="技能清单"
-              lines={value.skills}
-              onChange={(next) => onChange('skills', next)}
-              max={20}
-              perLineMax={40}
-              placeholder="古籍修复，辨认旧报纸年代"
-              hint="会什么，以及做不到时如何表达。"
-            />
-          </>
-        );
-
-      case 'rhythm':
-        return (
-          <>
-            <TimeRangeControl
-              label="工作时段"
-              start={workStart}
-              end={workEnd}
-              onStartChange={(next) => onChange('work_window', joinWindow(next, workEnd))}
-              onEndChange={(next) => onChange('work_window', joinWindow(workStart, next))}
-              required={false}
-              hint="在岗时段，忙碌判定依据。"
-            />
-            <TimeRangeControl
-              label="勿扰时段"
-              start={disturbStart}
-              end={disturbEnd}
-              onStartChange={(next) => onChange('do_not_disturb', joinWindow(next, disturbEnd))}
-              onEndChange={(next) => onChange('do_not_disturb', joinWindow(disturbStart, next))}
-              required={false}
-              hint="明确不被打扰的时段。"
-            />
-            <div className="sm:col-span-2">
-              <CommaListControl
-                id="advanced-proactive-triggers"
-                label="主动触发规则"
-                lines={value.proactive_triggers}
-                onChange={(next) => onChange('proactive_triggers', next)}
-                max={10}
-                perLineMax={40}
-                placeholder="连续三天没说话：先发一张旧书照片"
-                hint="什么条件下主动开口。"
-              />
-            </div>
           </>
         );
 
@@ -329,18 +216,15 @@ export function PersonaAdvancedPanel({
               placeholder="后颈 80，手腕 60"
               hint="具体部位或情境的强度表。"
             />
-            <div className="sm:col-span-2">
-              <TextAreaControl
-                id="advanced-touch-preference"
-                label="触碰偏好"
-                value={value.touch_preference}
-                onChange={(next) => onChange('touch_preference', next)}
-                max={200}
-                rows={3}
-                placeholder="喜欢被轻轻碰手腕，不喜欢突然从背后靠近。"
-                hint="喜欢、排斥或需确认的接触类别。"
-              />
-            </div>
+            <TextControl
+              id="advanced-touch-preference"
+              label="触碰偏好"
+              value={value.touch_preference}
+              onChange={(next) => onChange('touch_preference', next)}
+              max={200}
+              placeholder="喜欢被轻轻碰手腕，不喜欢突然从背后靠近。"
+              hint="一句话描述喜欢、排斥或需要确认的接触。"
+            />
           </>
         );
 
@@ -353,8 +237,8 @@ export function PersonaAdvancedPanel({
     <div className="space-y-3">
       <div className="rounded-xl border border-mist-100/[0.07] bg-ink-950/25 px-4 py-3">
         <p className="text-[0.72rem] leading-6 text-mist-400">
-          这 20 项只描述 TA 的行为方式，不随对话变化。未改动的项使用推荐默认，保存后与 25
-          步内容一起生成新版本。
+          这 15 项只描述 TA 的行为方式，不随对话变化。未改动的项使用推荐默认，保存后与{' '}
+          {TOTAL_STEPS} 步内容一起生成新版本。
         </p>
       </div>
 

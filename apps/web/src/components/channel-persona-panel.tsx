@@ -17,7 +17,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
-import { TimeField, TimeZonePicker } from '@/components/persona-form-controls';
+import { TimeZonePicker } from '@/components/persona-form-controls';
 import { PersonaRevisionList } from '@/components/persona-revision-list';
 import { cn } from '@/lib/cn';
 import {
@@ -31,7 +31,7 @@ import {
   type PersonaValue,
 } from '@/lib/channel-persona';
 import type { Channel } from '@/lib/connections';
-import { minutesLabel, PERSONA_TIMEZONE_OPTIONS, rangeDurationMinutes } from '@/lib/persona-draft';
+import { PERSONA_TIMEZONE_OPTIONS } from '@/lib/persona-draft';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -422,41 +422,6 @@ function TimezoneFieldControl({
   );
 }
 
-function TimeRangeFieldControl({
-  field,
-  value,
-  onChange,
-}: {
-  field: PersonaField;
-  value: PersonaValue | undefined;
-  onChange: (value: PersonaValue) => void;
-}) {
-  const raw = typeof value === 'string' ? value : '';
-  const [start = '00:00', end = '00:00'] = raw.split('-');
-  const duration = rangeDurationMinutes(start, end);
-
-  return (
-    <div className="mt-2.5">
-      <div className="flex items-center gap-1.5">
-        <TimeField
-          value={start}
-          onChange={(next) => onChange(`${next}-${end}`)}
-          ariaLabel={`${field.label}开始时间`}
-        />
-        <span className="shrink-0 text-[0.68rem] text-mist-600">→</span>
-        <TimeField
-          value={end}
-          onChange={(next) => onChange(`${start}-${next}`)}
-          ariaLabel={`${field.label}结束时间`}
-        />
-      </div>
-      <p className="mt-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
-        {duration === null ? '跨度 —' : `跨度 ${minutesLabel(duration)}`}
-      </p>
-    </div>
-  );
-}
-
 function PersonaFieldValue({
   field,
   value,
@@ -599,10 +564,7 @@ function PersonaFieldCard({
 }) {
   const [editing, setEditing] = useState(false);
   const inlineControl =
-    field.kind === 'boolean' ||
-    field.kind === 'level' ||
-    field.kind === 'timezone' ||
-    field.kind === 'time-range';
+    field.kind === 'boolean' || field.kind === 'level' || field.kind === 'timezone';
 
   return (
     <div
@@ -638,8 +600,6 @@ function PersonaFieldCard({
         <LevelFieldControl field={field} value={value} onChange={onChange} />
       ) : field.kind === 'timezone' ? (
         <TimezoneFieldControl field={field} value={value} onChange={onChange} />
-      ) : field.kind === 'time-range' ? (
-        <TimeRangeFieldControl field={field} value={value} onChange={onChange} />
       ) : editing ? (
         <PersonaFieldEditor
           field={field}

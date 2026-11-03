@@ -1,24 +1,10 @@
 import {
   createDefaultPersonaDraft,
   personaAdvancedSchema,
-  type ConflictStyle,
-  type HumorStyle,
-  type MemoryBias,
-  type OnlinePolicy,
   type PersonaDraft,
-  type PunctuationStyle,
-  type SentenceLength,
 } from '@inkseek/shared';
 
-export type {
-  ConflictStyle,
-  HumorStyle,
-  MemoryBias,
-  OnlinePolicy,
-  PersonaDraft,
-  PunctuationStyle,
-  SentenceLength,
-} from '@inkseek/shared';
+export type { PersonaDraft } from '@inkseek/shared';
 
 export type NumericKey =
   | 'typo_level'
@@ -57,7 +43,7 @@ export const PHASES: readonly PhaseMeta[] = [
   { name: '价值内核', caption: '价值 · 禁忌 · 红线' },
   { name: '动机与行动', caption: '目标 · 当下 · 困难' },
   { name: '表达方式', caption: '冲突 · 幽默 · 口癖' },
-  { name: '在线习惯', caption: '禁用词 · 作息 · 节奏' },
+  { name: '在线习惯', caption: '禁用词 · 在线 · 节奏' },
   { name: '性格参数', caption: '自我 · 依恋 · 身体' },
 ];
 
@@ -141,7 +127,7 @@ export const STEPS: readonly StepMeta[] = [
     id: 10,
     phase: 2,
     title: '恐惧来源',
-    caption: '越靠近，TA 越会退到哪里。',
+    caption: '越靠近这些事，TA 越会害怕。',
   },
   {
     id: 11,
@@ -162,39 +148,21 @@ export const STEPS: readonly StepMeta[] = [
   {
     id: 13,
     phase: 3,
-    title: '长期目标',
-    caption: '给所有行为一个总方向，避免长对话后失去焦点。',
-  },
-  {
-    id: 14,
-    phase: 3,
-    title: '当前目标',
-    caption: '近期的紧迫感与话题。完成或失败后应被替换。',
-  },
-  {
-    id: 15,
-    phase: 3,
-    title: '正在做的事',
-    caption: '决定被打扰时，是短回还是多话。',
-  },
-  {
-    id: 16,
-    phase: 3,
-    title: '面临的困难',
-    caption: '让烦躁、疲惫与欲言又止有具体来源。',
+    title: '动机与行动',
+    caption: 'TA 想去哪、此刻在做什么，又被什么绊住。',
     milestone: {
-      title: '行动方向和基本信息完成',
+      title: '行动方向完成',
       description: 'TA 知道自己要去哪，也知道此刻在做什么。接下来定义 TA 的说话方式。',
     },
   },
   {
-    id: 17,
+    id: 14,
     phase: 4,
     title: '表达倾向',
     caption: 'TA 如何冲突、如何幽默、如何记忆，以及如何断句。',
   },
   {
-    id: 18,
+    id: 15,
     phase: 4,
     title: '口癖与开场',
     caption: '让 TA 开口的第一秒就像 TA。',
@@ -204,47 +172,47 @@ export const STEPS: readonly StepMeta[] = [
     },
   },
   {
-    id: 19,
+    id: 16,
     phase: 5,
     title: '禁用词汇',
     caption: '这些词，TA 不会说。',
   },
   {
-    id: 20,
+    id: 17,
     phase: 5,
     title: '线上节奏',
     caption: '表情、打字速度与时差，决定消息落地的质感。',
   },
   {
-    id: 21,
+    id: 18,
     phase: 5,
-    title: '作息与在线',
-    caption: 'TA 什么时候睡、什么时候醒、什么时候在线。',
+    title: '在线与位置',
+    caption: 'TA 在哪里、如何在线，被打扰时是什么反应。',
     milestone: {
       title: '交互风格定义完成',
-      description: '作息与在线节奏已设定。最后，校准 TA 的性格参数。',
+      description: '在线节奏与当前位置已设定。最后，校准 TA 的性格参数。',
     },
   },
   {
-    id: 22,
+    id: 19,
     phase: 6,
     title: '自我与信任',
     caption: 'TA 如何看待自己，也如何看待陌生人。',
   },
   {
-    id: 23,
+    id: 20,
     phase: 6,
     title: '依恋与主动',
     caption: 'TA 如何靠近，如何让位，如何开口。',
   },
   {
-    id: 24,
+    id: 21,
     phase: 6,
     title: '行动能力',
     caption: 'TA 能走多远、扛多重、有多灵活。',
   },
   {
-    id: 25,
+    id: 22,
     phase: 6,
     title: '身体反馈',
     caption: '疼痛、恢复与感受，决定 TA 的反应强度。',
@@ -259,56 +227,6 @@ export interface ChoiceOption<T extends string = string> {
   hint?: string;
   example?: string;
 }
-
-export const CONFLICT_OPTIONS: readonly ChoiceOption<ConflictStyle>[] = [
-  { value: '回避', label: '回避', hint: '先退开，避开正面冲突' },
-  { value: '对抗', label: '对抗', hint: '正面顶回去，不轻易让步' },
-  { value: '讲理', label: '讲理', hint: '把逻辑与事实摆出来' },
-  { value: '冷战', label: '冷战', hint: '不吵，但态度明显降温' },
-  { value: '先退后解释', label: '先退后解释', hint: '先离开现场，冷静后再说明' },
-  { value: '先听完再划界', label: '先听完再划界', hint: '先让对方说完，再明确边界' },
-  { value: '先降温再划界', label: '先降温再划界', hint: '先把气氛缓下来，再谈边界' },
-];
-
-export const HUMOR_OPTIONS: readonly ChoiceOption<HumorStyle>[] = [
-  { value: '冷幽默', label: '冷幽默', hint: '冷不丁来一句' },
-  { value: '自嘲', label: '自嘲', hint: '先拿自己开刀' },
-  { value: '吐槽', label: '吐槽', hint: '嘴上不饶人' },
-  { value: '不接梗', label: '不接梗', hint: '很少开玩笑' },
-  { value: '机锋', label: '机锋', hint: '话里带钩，点到为止' },
-];
-
-export const MEMORY_OPTIONS: readonly ChoiceOption<MemoryBias>[] = [
-  { value: '均衡', label: '均衡', hint: '记住重要的，也放过琐碎的' },
-  { value: '记细节', label: '记细节', hint: '你说过的小事 TA 都会记得' },
-  { value: '记仇', label: '记仇', hint: '被冒犯的事会留很久' },
-  { value: '健忘', label: '健忘', hint: '需要你提醒，才想得起来' },
-  { value: '偏记人', label: '偏记人', hint: '更记得人与关系，而不是事件细节' },
-  { value: '偏记声音', label: '偏记声音', hint: '更记得语气、声线与说话方式' },
-];
-
-export const SENTENCE_OPTIONS: readonly ChoiceOption<SentenceLength>[] = [
-  { value: '短句', label: '短句', hint: '一句一口气，少用连接词' },
-  { value: '中句', label: '中句', hint: '长度适中，表达完整' },
-  { value: '长句', label: '长句', hint: '习惯把话讲透' },
-  { value: '长短混用', label: '长短混用', hint: '随情绪与场景变化' },
-];
-
-export const PUNCTUATION_OPTIONS: readonly ChoiceOption<PunctuationStyle>[] = [
-  { value: '极简', label: '极简', example: '「在」「嗯 你说」' },
-  { value: '常规', label: '常规', example: '「在的，你说吧。」' },
-  { value: '柔软', label: '柔软', example: '「在的～」「你说吧…」' },
-  { value: '严整', label: '严整', example: '「在。你说吧，我听着。」' },
-  { value: '活泼', label: '活泼', example: '「在在在！！」「你说你说？」' },
-  { value: '书卷', label: '书卷', example: '「在——你说吧；我这边正好空着。」' },
-  { value: '省略号偏多', label: '省略号偏多', example: '「在的……你说吧……」' },
-];
-
-export const ONLINE_OPTIONS: readonly ChoiceOption<OnlinePolicy>[] = [
-  { value: '常在线', label: '常在线', hint: '消息几乎总能及时收到' },
-  { value: '按作息', label: '按作息', hint: '醒着就在，睡后不回' },
-  { value: '自适应', label: '自适应', hint: '根据对话与关系调整上线频率' },
-];
 
 export const PERSONA_TIMEZONE_OPTIONS = [
   { value: '北京时间', label: '北京时间 · 东八区' },
@@ -336,7 +254,7 @@ export interface SliderMeta {
 }
 
 export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
-  22: [
+  19: [
     {
       key: 'confidence',
       label: '自信',
@@ -358,7 +276,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       hint: '对陌生对象的初始信任，关系值未设时的回退。',
     },
   ],
-  23: [
+  20: [
     {
       key: 'attachment_style',
       label: '粘人程度',
@@ -380,7 +298,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       hint: '低：等待与回应；高：主动开场、提问。',
     },
   ],
-  24: [
+  21: [
     {
       key: 'curiosity',
       label: '好奇程度',
@@ -402,7 +320,7 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
       hint: '身体协调与反应速度。',
     },
   ],
-  25: [
+  22: [
     {
       key: 'pain_tolerance',
       label: '疼痛耐受度',
@@ -453,101 +371,6 @@ export function hasDraftContent(draft: PersonaDraft): boolean {
 
     return value !== fallback;
   });
-}
-
-export function rangeDurationMinutes(start: string, end: string): number | null {
-  const from = toMinutes(start);
-  const to = toMinutes(end);
-
-  if (from === null || to === null) {
-    return null;
-  }
-
-  const duration = to - from;
-  return duration <= 0 ? duration + 24 * 60 : duration;
-}
-
-export function parseWindow(value: string): { start: string; end: string } | null {
-  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(value.trim());
-
-  if (!match) {
-    return null;
-  }
-
-  const [, startHour, startMinute, endHour, endMinute] = match;
-
-  if (!startHour || !startMinute || !endHour || !endMinute) {
-    return null;
-  }
-
-  const start = `${startHour}:${startMinute}`;
-  const end = `${endHour}:${endMinute}`;
-
-  if (toMinutes(start) === null || toMinutes(end) === null) {
-    return null;
-  }
-
-  return { start, end };
-}
-
-export function joinWindow(start: string, end: string): string {
-  return `${start}-${end}`;
-}
-
-export function minutesLabel(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
-}
-
-function toMinutes(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
-
-  if (!match) {
-    return null;
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-
-  if (hours > 23 || minutes > 59) {
-    return null;
-  }
-
-  return hours * 60 + minutes;
-}
-
-function windowSegments(start: string, duration: number): Array<[number, number]> {
-  const from = toMinutes(start);
-
-  if (from === null) {
-    return [];
-  }
-
-  const to = from + duration;
-
-  if (to <= 24 * 60) {
-    return [[from, to]];
-  }
-
-  return [
-    [from, 24 * 60],
-    [0, to - 24 * 60],
-  ];
-}
-
-function windowsOverlap(
-  startA: string,
-  durationA: number,
-  startB: string,
-  durationB: number,
-): boolean {
-  const segmentsA = windowSegments(startA, durationA);
-  const segmentsB = windowSegments(startB, durationB);
-
-  return segmentsA.some(([aStart, aEnd]) =>
-    segmentsB.some(([bStart, bEnd]) => aStart < bEnd && bStart < aEnd),
-  );
 }
 
 export type StepErrors = Record<string, string>;
@@ -680,82 +503,53 @@ export function validateStep(step: number, draft: PersonaDraft): StepErrors {
       break;
 
     case 9:
-      checkList(errors, draft.taboos, 'taboos', '禁忌', 5, 20, 1);
+      checkList(errors, draft.taboos, 'taboos', '禁忌', null, 20, 1);
       break;
 
     case 10:
-      checkList(errors, draft.fears, 'fears', '恐惧来源', 5, 20);
+      checkList(errors, draft.fears, 'fears', '恐惧来源', null, 20);
       break;
 
     case 11:
-      checkList(errors, draft.soft_spots, 'soft_spots', '软肋', 5, 20);
+      checkList(errors, draft.soft_spots, 'soft_spots', '软肋', null, 20);
       break;
 
     case 12:
-      checkList(errors, draft.non_negotiable, 'non_negotiable', '绝对红线', 5, 20);
+      checkList(errors, draft.non_negotiable, 'non_negotiable', '绝对红线', null, 20);
       break;
 
     case 13:
       checkText(errors, draft.long_term_motivation, 'long_term_motivation', '长期目标', 60);
+      checkText(errors, draft.current_goal, 'current_goal', '当前目标', 60);
+      checkText(errors, draft.doing_now, 'doing_now', '正在做的事', 100);
+      checkText(errors, draft.obstacle, 'obstacle', '面临的困难', 60);
       break;
 
     case 14:
-      checkText(errors, draft.current_goal, 'current_goal', '当前目标', 60);
+      checkText(errors, draft.language_style, 'language_style', '说话风格', 200);
+      checkText(errors, draft.conflict_style, 'conflict_style', '冲突风格', 200);
+      checkText(errors, draft.humor_style, 'humor_style', '幽默风格', 200);
+      checkText(errors, draft.memory_bias, 'memory_bias', '记忆倾向', 200);
+      checkText(errors, draft.sentence_length, 'sentence_length', '句长偏好', 200);
+      checkText(errors, draft.punctuation, 'punctuation', '标点习惯', 200);
       break;
 
     case 15:
-      checkText(errors, draft.doing_now, 'doing_now', '正在做的事', 100);
+      checkList(errors, draft.particles, 'particles', '语气词', null, 10);
+      checkList(errors, draft.openers, 'openers', '常用开头', null, 10);
       break;
 
     case 16:
-      checkText(errors, draft.obstacle, 'obstacle', '面临的困难', 60);
+      checkList(errors, draft.banned_words, 'banned_words', '禁用语', null, 20);
       break;
 
     case 17:
       break;
 
     case 18:
-      checkList(errors, draft.particles, 'particles', '语气词', 10, 10);
-      checkList(errors, draft.openers, 'openers', '常用开头', 5, 10);
+      checkText(errors, draft.location, 'location', '当前位置', 40);
+      checkText(errors, draft.online_policy, 'online_policy', '在线策略', 200);
       break;
-
-    case 19:
-      checkList(errors, draft.banned_words, 'banned_words', '禁用语', 20, 20);
-      break;
-
-    case 20:
-      break;
-
-    case 21: {
-      const sleep = parseWindow(draft.sleep_window);
-      if (!sleep) {
-        errors.sleep_window = '请填写完整的睡眠时间段';
-      } else {
-        const sleepDuration = rangeDurationMinutes(sleep.start, sleep.end);
-        if (sleepDuration === null || sleepDuration < 180 || sleepDuration > 720) {
-          errors.sleep_window = '睡眠跨度需在 3–12 小时之间';
-        }
-      }
-
-      const awake = parseWindow(draft.awake_window);
-      if (!awake) {
-        errors.awake_window = '请填写完整的清醒时间段';
-      } else {
-        const awakeDuration = rangeDurationMinutes(awake.start, awake.end);
-        if (awakeDuration === null || awakeDuration < 180 || awakeDuration > 720) {
-          errors.awake_window = '清醒跨度需在 3–12 小时之间';
-        } else if (sleep) {
-          const sleepDuration = rangeDurationMinutes(sleep.start, sleep.end);
-          if (
-            sleepDuration !== null &&
-            windowsOverlap(sleep.start, sleepDuration, awake.start, awakeDuration)
-          ) {
-            errors.awake_window = '清醒时段不能与睡眠时段重叠';
-          }
-        }
-      }
-      break;
-    }
 
     default:
       break;
@@ -940,18 +734,6 @@ function migrateLegacyDraft(source: Record<string, unknown>): Record<string, unk
       .map((item) => item.trim())
       .filter(Boolean);
     next.banned_words = words.length > 0 ? words : [''];
-  }
-
-  if (next.sleep_window === undefined) {
-    const start = typeof next.sleepStart === 'string' ? next.sleepStart : '23:00';
-    const end = typeof next.sleepEnd === 'string' ? next.sleepEnd : '07:00';
-    next.sleep_window = joinWindow(start, end);
-  }
-
-  if (next.awake_window === undefined) {
-    const start = typeof next.awakeStart === 'string' ? next.awakeStart : '09:00';
-    const end = typeof next.awakeEnd === 'string' ? next.awakeEnd : '18:00';
-    next.awake_window = joinWindow(start, end);
   }
 
   if (next.time_zone === undefined && typeof next.timeOffset === 'number') {

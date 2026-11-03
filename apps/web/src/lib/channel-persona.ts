@@ -13,8 +13,7 @@ export type PersonaValueKind =
   | 'boolean'
   | 'code'
   | 'level'
-  | 'timezone'
-  | 'time-range';
+  | 'timezone';
 
 export type PersonaValue = string | number | boolean | readonly string[];
 
@@ -170,20 +169,6 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
             wide: true,
           },
           {
-            key: 'social_circle',
-            label: '关系网',
-            hint: '其他 NPC 与关系，供叙事引用',
-            kind: 'tags',
-            wide: true,
-          },
-          {
-            key: 'skills',
-            label: '技能清单',
-            hint: '会什么，以及做不到时如何表达',
-            kind: 'tags',
-            wide: true,
-          },
-          {
             key: 'knowledge_boundary',
             label: '知识边界',
             hint: '知道什么、不知道什么',
@@ -275,15 +260,23 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'conflict_style',
             label: '冲突风格',
-            hint: '被冒犯时的行为方式',
-            kind: 'code',
+            hint: '一句话描述被冒犯时的反应方式',
+            kind: 'paragraph',
+            wide: true,
           },
-          { key: 'humor_style', label: '幽默风格', hint: '开玩笑的方式与频率', kind: 'code' },
+          {
+            key: 'humor_style',
+            label: '幽默风格',
+            hint: '一句话描述开玩笑的方式与频率',
+            kind: 'paragraph',
+            wide: true,
+          },
           {
             key: 'memory_bias',
             label: '记忆倾向',
-            hint: '记住什么、忘记什么',
-            kind: 'code',
+            hint: '一句话描述记住什么、忘记什么',
+            kind: 'paragraph',
+            wide: true,
           },
         ],
       },
@@ -301,21 +294,23 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'language_style',
             label: '说话风格',
-            hint: '来自角色卡的说话方式摘要',
-            kind: 'code',
+            hint: '一句话描述 TA 的消息读起来是什么感觉',
+            kind: 'paragraph',
             wide: true,
           },
           {
             key: 'sentence_length',
             label: '句长偏好',
-            hint: '回复的句子长短倾向',
-            kind: 'code',
+            hint: '一句话描述回复的句子长短倾向',
+            kind: 'paragraph',
+            wide: true,
           },
           {
             key: 'punctuation',
             label: '标点习惯',
-            hint: '标点使用风格，区分度极高',
-            kind: 'code',
+            hint: '一句话描述标点使用习惯，区分度极高',
+            kind: 'paragraph',
+            wide: true,
           },
           {
             key: 'particles',
@@ -363,13 +358,6 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
         id: 'voice-address',
         title: '称呼规则',
         fields: [
-          {
-            key: 'address_style',
-            label: '称呼风格',
-            hint: '来自角色卡的称呼规则摘要',
-            kind: 'code',
-            wide: true,
-          },
           {
             key: 'address_for_stranger',
             label: '对陌生人的称呼',
@@ -467,8 +455,8 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
   },
   {
     id: 'rhythm',
-    title: '作息与主动',
-    description: '在线时间、勿扰窗口与主动开口的条件，决定 TA 何时出现。',
+    title: '在线状态',
+    description: '时区、在线策略与主动性，决定 TA 何时出现、如何回应。',
     sections: [
       {
         id: 'rhythm-core',
@@ -477,46 +465,22 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'time_zone',
             label: '时区',
-            hint: '决定作息计算的基准时区',
+            hint: '决定时间判断的基准时区',
             kind: 'timezone',
-          },
-          {
-            key: 'sleep_window',
-            label: '睡眠时段',
-            hint: '该时段内回复变短或不回',
-            kind: 'time-range',
-          },
-          {
-            key: 'work_window',
-            label: '工作时段',
-            hint: '在岗时段，忙碌判定依据',
-            kind: 'time-range',
           },
           {
             key: 'online_policy',
             label: '在线策略',
-            hint: '在线状态如何计算',
-            kind: 'code',
-          },
-          {
-            key: 'do_not_disturb',
-            label: '勿扰时段',
-            hint: '明确不被打扰的时段',
-            kind: 'time-range',
+            hint: '一句话描述在线状态如何计算',
+            kind: 'paragraph',
+            wide: true,
           },
           {
             key: 'sleep_depth',
             label: '睡眠深度',
-            hint: '睡眠时段被消息吵醒的概率与反应',
+            hint: '被消息吵醒的概率与反应',
             kind: 'level',
             levels: LEVEL_OPTIONS.sleepDepth,
-          },
-          {
-            key: 'proactive_triggers',
-            label: '主动触发规则',
-            hint: '什么条件下主动开口',
-            kind: 'tags',
-            wide: true,
           },
           {
             key: 'proactivity',
@@ -632,8 +596,9 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'touch_preference',
             label: '触碰偏好',
-            hint: '喜欢、排斥或需确认的接触类别',
-            kind: 'code',
+            hint: '一句话描述喜欢、排斥或需确认的接触',
+            kind: 'paragraph',
+            wide: true,
           },
           {
             key: 'physique_effect_cap',
@@ -737,8 +702,9 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'explicit_level_char',
             label: '角色尺度上限',
-            hint: '角色自身可承载的内容尺度',
-            kind: 'code',
+            hint: '一句话描述角色自身可承载的内容尺度',
+            kind: 'paragraph',
+            wide: true,
           },
           {
             key: 'experience_level',

@@ -10,6 +10,7 @@ import {
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { cn } from '@/lib/cn';
+import { TOTAL_STEPS } from '@/lib/persona-draft';
 import { formatPersonaTimestamp } from '@/lib/persona-metadata';
 import type { Persona, PersonaAccent, PersonaTrait } from '@/lib/personas';
 import { ExpandButton, PersonaTextDialog, useClampedOverflow } from './persona-card-text';
@@ -435,7 +436,7 @@ export function NewPersonaCard({ onCreate }: { onCreate: () => void }) {
     <button
       type="button"
       onClick={onCreate}
-      aria-label="新建人格，共 25 步"
+      aria-label={`新建人格，共 ${TOTAL_STEPS} 步`}
       title="新建人格"
       className={cn(
         CARD_HEIGHT,
@@ -448,7 +449,7 @@ export function NewPersonaCard({ onCreate }: { onCreate: () => void }) {
       </span>
       <span className="text-[0.8rem]">新建人格</span>
       <span className="font-mono text-[0.55rem] uppercase tracking-[0.18em] text-mist-600">
-        25 steps · create
+        {TOTAL_STEPS} steps · create
       </span>
     </button>
   );

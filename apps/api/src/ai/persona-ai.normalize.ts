@@ -1,11 +1,4 @@
 import {
-  CONFLICT_STYLES,
-  HUMOR_STYLES,
-  MEMORY_BIASES,
-  ONLINE_POLICIES,
-  PERSONA_EXPLICIT_LEVELS,
-  PUNCTUATION_STYLES,
-  SENTENCE_LENGTHS,
   createDefaultPersonaAdvanced,
   createDefaultPersonaDraft,
   personaDraftSchema,
@@ -57,36 +50,36 @@ export function normalizePersonaDraft(input: unknown): PersonaDraft {
     knowledge_boundary: text(root.knowledge_boundary, 500),
 
     core_values: strings(root.core_values, 20, 20),
-    taboos: strings(root.taboos, 5, 20),
-    fears: strings(root.fears, 5, 20),
-    soft_spots: strings(root.soft_spots, 5, 20),
-    non_negotiable: strings(root.non_negotiable, 5, 20),
+    taboos: strings(root.taboos, null, 20),
+    fears: strings(root.fears, null, 20),
+    soft_spots: strings(root.soft_spots, null, 20),
+    non_negotiable: strings(root.non_negotiable, null, 20),
 
     long_term_motivation: text(root.long_term_motivation, 60),
     current_goal: text(root.current_goal, 60),
     doing_now: text(root.doing_now, 100),
     obstacle: text(root.obstacle, 60),
+    location: text(root.location, 40),
 
-    conflict_style: choice(root.conflict_style, CONFLICT_STYLES, defaults.conflict_style),
-    humor_style: choice(root.humor_style, HUMOR_STYLES, defaults.humor_style),
-    memory_bias: choice(root.memory_bias, MEMORY_BIASES, defaults.memory_bias),
-    sentence_length: choice(root.sentence_length, SENTENCE_LENGTHS, defaults.sentence_length),
-    punctuation: choice(root.punctuation, PUNCTUATION_STYLES, defaults.punctuation),
+    language_style: text(root.language_style, 200),
+    conflict_style: text(root.conflict_style, 200) || defaults.conflict_style,
+    humor_style: text(root.humor_style, 200) || defaults.humor_style,
+    memory_bias: text(root.memory_bias, 200) || defaults.memory_bias,
+    sentence_length: text(root.sentence_length, 200) || defaults.sentence_length,
+    punctuation: text(root.punctuation, 200) || defaults.punctuation,
     typo_level: level(root.typo_level, defaults.typo_level),
     split_level: level(root.split_level, defaults.split_level),
 
-    particles: strings(root.particles, 10, 10),
-    openers: strings(root.openers, 5, 10),
+    particles: strings(root.particles, null, 10),
+    openers: strings(root.openers, null, 10),
 
-    banned_words: strings(root.banned_words, 20, 20),
+    banned_words: strings(root.banned_words, null, 20),
 
     emoji_level: level(root.emoji_level, defaults.emoji_level),
     typing_level: level(root.typing_level, defaults.typing_level),
     time_zone: text(root.time_zone, 40) || defaults.time_zone,
 
-    sleep_window: windowText(root.sleep_window, defaults.sleep_window),
-    awake_window: windowText(root.awake_window, defaults.awake_window),
-    online_policy: choice(root.online_policy, ONLINE_POLICIES, defaults.online_policy),
+    online_policy: text(root.online_policy, 200) || defaults.online_policy,
     sleep_depth: level(root.sleep_depth, defaults.sleep_depth),
 
     confidence: slider(root.confidence, defaults.confidence),
@@ -109,8 +102,6 @@ export function normalizePersonaDraft(input: unknown): PersonaDraft {
     sensitivity: slider(root.sensitivity, defaults.sensitivity),
 
     advanced: {
-      social_circle: strings(advancedInput.social_circle, 20, 40),
-      skills: strings(advancedInput.skills, 20, 40),
       address_for_stranger:
         text(advancedInput.address_for_stranger, 40) || advancedDefaults.address_for_stranger,
       address_for_close:
@@ -125,16 +116,10 @@ export function normalizePersonaDraft(input: unknown): PersonaDraft {
       in_character_recovery:
         text(advancedInput.in_character_recovery, 300) || advancedDefaults.in_character_recovery,
       in_character_allowed_meta: strings(advancedInput.in_character_allowed_meta, 10, 40),
-      work_window: windowText(advancedInput.work_window, advancedDefaults.work_window),
-      do_not_disturb: windowText(advancedInput.do_not_disturb, advancedDefaults.do_not_disturb),
-      proactive_triggers: strings(advancedInput.proactive_triggers, 10, 40),
       sensitivity_map: strings(advancedInput.sensitivity_map, 20, 40),
       touch_preference: text(advancedInput.touch_preference, 200),
-      explicit_level_char: choice(
-        advancedInput.explicit_level_char,
-        PERSONA_EXPLICIT_LEVELS,
-        advancedDefaults.explicit_level_char,
-      ),
+      explicit_level_char:
+        text(advancedInput.explicit_level_char, 200) || advancedDefaults.explicit_level_char,
       aftercare_need_base: slider(
         advancedInput.aftercare_need_base,
         advancedDefaults.aftercare_need_base,
@@ -163,7 +148,7 @@ function text(value: unknown, max: number): string {
   return '';
 }
 
-function strings(value: unknown, maxItems: number, perItem: number): string[] {
+function strings(value: unknown, maxItems: number | null, perItem: number): string[] {
   const list = Array.isArray(value)
     ? value
     : typeof value === 'string'
@@ -184,17 +169,12 @@ function strings(value: unknown, maxItems: number, perItem: number): string[] {
 
     result.push(item);
 
-    if (result.length >= maxItems) {
+    if (maxItems !== null && result.length >= maxItems) {
       break;
     }
   }
 
   return result;
-}
-
-function choice<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
-  const textValue = typeof value === 'string' ? value.trim() : '';
-  return (options as readonly string[]).includes(textValue) ? (textValue as T) : fallback;
 }
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -233,21 +213,4 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   }
 
   return Math.min(max, Math.max(min, Math.round(numeric)));
-}
-
-function windowText(value: unknown, fallback: string): string {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-
-  const match = value.match(/(\d{1,2})[:：](\d{2})\s*[-–—~～至到]\s*(\d{1,2})[:：](\d{2})/);
-
-  if (!match) {
-    const plain = value.trim().slice(0, 20);
-    return plain || fallback;
-  }
-
-  const pad = (hour: string | undefined, minute: string | undefined) =>
-    `${(hour ?? '0').padStart(2, '0')}:${minute ?? '00'}`;
-  return `${pad(match[1], match[2])}-${pad(match[3], match[4])}`;
 }

@@ -37,7 +37,6 @@ import {
   SwitchControl,
   TextAreaControl,
   TextControl,
-  TimeRangeControl,
   TimeZonePicker,
 } from '@/components/persona-form-controls';
 import { api, ApiError } from '@/lib/api';
@@ -45,21 +44,13 @@ import { cn } from '@/lib/cn';
 import { formatPersonaTimestamp } from '@/lib/persona-metadata';
 import {
   clearDraft,
-  CONFLICT_OPTIONS,
   createDefaultDraft,
   hasDraftContent,
-  HUMOR_OPTIONS,
-  joinWindow,
   LEVEL_OPTIONS,
   loadDraft,
-  MEMORY_OPTIONS,
-  ONLINE_OPTIONS,
-  parseWindow,
   PERSONA_TIMEZONE_OPTIONS,
   PHASES,
-  PUNCTUATION_OPTIONS,
   saveDraft,
-  SENTENCE_OPTIONS,
   SLIDER_GROUPS,
   STEPS,
   TOTAL_STEPS,
@@ -94,11 +85,6 @@ const GENDER_OPTIONS: readonly ChoiceOption<PersonaGender>[] = [
   { value: '男', label: '男性', hint: '称呼与卡面按男性展示' },
   { value: '未设定', label: '未设定', hint: '保持中性，不标注性别' },
 ];
-
-function splitWindow(value: string, fallbackStart: string, fallbackEnd: string): [string, string] {
-  const parsed = parseWindow(value);
-  return parsed ? [parsed.start, parsed.end] : [fallbackStart, fallbackEnd];
-}
 
 function formatClock(iso: string | null): string | null {
   if (!iso) {
@@ -245,6 +231,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   const [data, setData] = useState<PersonaDraft>(createDefaultDraft);
   const [experienceLevel, setExperienceLevel] = useState<PersonaExperienceLevel>('Ⅰ');
   const [gender, setGender] = useState<PersonaGender>('未设定');
+  const [quote, setQuote] = useState('');
   const [view, setView] = useState<View>('intro');
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -263,10 +250,15 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       draft: PersonaDraft;
       experienceLevel: PersonaExperienceLevel;
       gender: PersonaGender;
+      quote: string;
     }) => {
       const payload = {
         data: input.draft,
-        profile: { experienceLevel: input.experienceLevel, gender: input.gender },
+        profile: {
+          experienceLevel: input.experienceLevel,
+          gender: input.gender,
+          quote: input.quote.trim(),
+        },
       };
 
       return persona ? api.updatePersona(persona.id, payload) : api.createPersona(payload);
@@ -305,6 +297,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       setData(persona.data);
       setExperienceLevel(persona.profile.experienceLevel);
       setGender(persona.profile.gender);
+      setQuote(persona.profile.quote);
       setStep(1);
       setSavedAt(null);
       setResume(null);
@@ -314,6 +307,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       setData(draft?.data ?? createDefaultDraft());
       setExperienceLevel('Ⅰ');
       setGender('未设定');
+      setQuote('');
       setStep(draft?.step ?? 1);
       setSavedAt(draft?.updatedAt ?? null);
       setResume(draft ? { step: draft.step, updatedAt: draft.updatedAt } : null);
@@ -446,7 +440,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       setErrors({});
     }
 
-    saveMutation.mutate({ draft: data, experienceLevel, gender });
+    saveMutation.mutate({ draft: data, experienceLevel, gender, quote });
   };
 
   const handleNext = () => {
@@ -686,6 +680,16 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
               hint="用于称呼与卡面展示，不改变互动规则。"
             />
 
+            <TextControl
+              id="persona-quote"
+              label="一句话人格台词"
+              value={quote}
+              onChange={setQuote}
+              max={400}
+              placeholder="门开着，雨太大就晚点来。"
+              hint="一句话立住人设，显示在角色卡正面的台词位，也会进入渠道台词锚点。"
+            />
+
             <SwitchControl
               label="时间感知"
               description="TA 能感知现实中的当前时间，并据此判断日夜、日期与季节。"
@@ -837,7 +841,6 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
             label="禁忌"
             lines={data.taboos}
             onChange={(lines) => update('taboos', lines)}
-            max={5}
             perLineMax={20}
             required
             error={errors.taboos}
@@ -853,11 +856,10 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
             label="恐惧来源"
             lines={data.fears}
             onChange={(lines) => update('fears', lines)}
-            max={5}
             perLineMax={20}
             error={errors.fears}
             placeholder="被证明自己毫无价值"
-            hint="越靠近这些事，TA 越会退回到哪里。"
+            hint="越靠近这些事，TA 越会害怕。"
           />
         );
 
@@ -868,7 +870,6 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
             label="软肋"
             lines={data.soft_spots}
             onChange={(lines) => update('soft_spots', lines)}
-            max={5}
             perLineMax={20}
             error={errors.soft_spots}
             placeholder="被人认真认可手艺"
@@ -883,7 +884,6 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
             label="绝对红线"
             lines={data.non_negotiable}
             onChange={(lines) => update('non_negotiable', lines)}
-            max={5}
             perLineMax={20}
             error={errors.non_negotiable}
             placeholder="不接受当众羞辱"
@@ -893,101 +893,116 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
 
       case 13:
         return (
-          <TextAreaControl
-            id="persona-long-term-motivation"
-            label="长期目标"
-            value={data.long_term_motivation}
-            onChange={(value) => update('long_term_motivation', value)}
-            max={60}
-            rows={3}
-            error={errors.long_term_motivation}
-            placeholder="把旧书店重新开成街角最安静的据点。"
-            hint="一句话即可，给所有行为一个总方向。"
-          />
+          <div className="space-y-6">
+            <TextAreaControl
+              id="persona-long-term-motivation"
+              label="长期目标"
+              value={data.long_term_motivation}
+              onChange={(value) => update('long_term_motivation', value)}
+              max={60}
+              rows={3}
+              error={errors.long_term_motivation}
+              placeholder="把旧书店重新开成街角最安静的据点。"
+              hint="一句话即可，给所有行为一个总方向。"
+            />
+            <TextAreaControl
+              id="persona-current-goal"
+              label="当前目标"
+              value={data.current_goal}
+              onChange={(value) => update('current_goal', value)}
+              max={60}
+              rows={3}
+              error={errors.current_goal}
+              placeholder="在本周结束前凑齐下个月的房租。"
+              hint="近期最想完成的事；完成或失败后应被替换。"
+            />
+            <TextAreaControl
+              id="persona-doing-now"
+              label="正在做的事"
+              value={data.doing_now}
+              onChange={(value) => update('doing_now', value)}
+              max={100}
+              rows={4}
+              error={errors.doing_now}
+              placeholder="清点刚到的一批旧书，手边放着一杯凉掉的茶。"
+              hint="决定 TA 被打扰时是短回还是多话。"
+            />
+            <TextAreaControl
+              id="persona-obstacle"
+              label="面临的困难"
+              value={data.obstacle}
+              onChange={(value) => update('obstacle', value)}
+              max={60}
+              rows={3}
+              error={errors.obstacle}
+              placeholder="账目一直对不上，又不想开口向家里求助。"
+              hint="让烦躁、疲惫与欲言又止有具体来源。"
+            />
+          </div>
         );
 
       case 14:
         return (
-          <TextAreaControl
-            id="persona-current-goal"
-            label="当前目标"
-            value={data.current_goal}
-            onChange={(value) => update('current_goal', value)}
-            max={60}
-            rows={3}
-            error={errors.current_goal}
-            placeholder="在本周结束前凑齐下个月的房租。"
-            hint="近期最想完成的事；完成或失败后应被替换。"
-          />
-        );
-
-      case 15:
-        return (
-          <TextAreaControl
-            id="persona-doing-now"
-            label="正在做的事"
-            value={data.doing_now}
-            onChange={(value) => update('doing_now', value)}
-            max={100}
-            rows={4}
-            error={errors.doing_now}
-            placeholder="清点刚到的一批旧书，手边放着一杯凉掉的茶。"
-            hint="决定 TA 被打扰时是短回还是多话。"
-          />
-        );
-
-      case 16:
-        return (
-          <TextAreaControl
-            id="persona-obstacle"
-            label="面临的困难"
-            value={data.obstacle}
-            onChange={(value) => update('obstacle', value)}
-            max={60}
-            rows={3}
-            error={errors.obstacle}
-            placeholder="账目一直对不上，又不想开口向家里求助。"
-            hint="让烦躁、疲惫与欲言又止有具体来源。"
-          />
-        );
-
-      case 17:
-        return (
           <div className="space-y-7">
-            <ChoiceControl
+            <TextControl
+              id="persona-language-style"
+              label="说话风格"
+              value={data.language_style}
+              onChange={(value) => update('language_style', value)}
+              max={200}
+              error={errors.language_style}
+              placeholder="句子偏短，先回应情绪，再讲事情。"
+              hint="一句话描述 TA 的消息读起来是什么感觉。"
+            />
+            <TextControl
+              id="persona-conflict-style"
               label="冲突风格"
               value={data.conflict_style}
-              options={CONFLICT_OPTIONS}
               onChange={(value) => update('conflict_style', value)}
-              required
+              max={200}
+              error={errors.conflict_style}
+              placeholder="先听完对方把话说完，再把自己的界线讲清楚。"
+              hint="一句话描述被冒犯时的反应方式。"
             />
-            <ChoiceControl
+            <TextControl
+              id="persona-humor-style"
               label="幽默风格"
               value={data.humor_style}
-              options={HUMOR_OPTIONS}
               onChange={(value) => update('humor_style', value)}
-              required
+              max={200}
+              error={errors.humor_style}
+              placeholder="冷不丁来一句冷幽默，不刻意逗笑。"
+              hint="一句话描述开玩笑的方式与频率。"
             />
-            <ChoiceControl
+            <TextControl
+              id="persona-memory-bias"
               label="记忆倾向"
               value={data.memory_bias}
-              options={MEMORY_OPTIONS}
               onChange={(value) => update('memory_bias', value)}
-              required
+              max={200}
+              error={errors.memory_bias}
+              placeholder="记住重要的承诺与细节，小事就让它过去。"
+              hint="一句话描述记住什么、忘记什么。"
             />
-            <ChoiceControl
+            <TextControl
+              id="persona-sentence-length"
               label="句长偏好"
               value={data.sentence_length}
-              options={SENTENCE_OPTIONS}
               onChange={(value) => update('sentence_length', value)}
-              required
+              max={200}
+              error={errors.sentence_length}
+              placeholder="句子长短混着来，随情绪自然变化。"
+              hint="一句话描述句子的长短倾向。"
             />
-            <ChoiceControl
-              label="标点偏好"
+            <TextControl
+              id="persona-punctuation"
+              label="标点习惯"
               value={data.punctuation}
-              options={PUNCTUATION_OPTIONS}
               onChange={(value) => update('punctuation', value)}
-              required
+              max={200}
+              error={errors.punctuation}
+              placeholder="标点常规，句末收稳，不堆叠符号。"
+              hint="一句话描述标点使用习惯，区分度很高。"
             />
             <LevelControl
               label="口胡概率"
@@ -1008,7 +1023,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
           </div>
         );
 
-      case 18:
+      case 15:
         return (
           <div className="space-y-6">
             <LinesControl
@@ -1016,42 +1031,39 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
               label="语气词"
               lines={data.particles}
               onChange={(lines) => update('particles', lines)}
-              max={10}
               perLineMax={10}
               error={errors.particles}
               placeholder="嗯 / 就是 / 算了"
-              hint="每行一个，最多 10 个。TA 会在句首或句尾自然带出来。"
+              hint="每行一个，数量不限。TA 会在句首或句尾自然带出来。"
             />
             <LinesControl
               id="persona-openers"
               label="常用开头"
               lines={data.openers}
               onChange={(lines) => update('openers', lines)}
-              max={5}
               perLineMax={10}
               error={errors.openers}
               placeholder="那个 / 你听我说"
-              hint="每行一个，最多 5 个。让 TA 开口的第一秒就像 TA。"
+              hint="每行一个，数量不限。让 TA 开口的第一秒就像 TA。"
             />
           </div>
         );
 
-      case 19:
+      case 16:
         return (
           <LinesControl
             id="persona-banned-words"
             label="禁用语"
             lines={data.banned_words}
             onChange={(lines) => update('banned_words', lines)}
-            max={20}
             perLineMax={20}
             error={errors.banned_words}
             placeholder="亲爱的"
-            hint="每行一个词或短语，最多 20 条。这些词不会从 TA 口中出现。"
+            hint="每行一个词或短语，数量不限。这些词不会从 TA 口中出现。"
           />
         );
 
-      case 20:
+      case 17:
         return (
           <div className="space-y-7">
             <LevelControl
@@ -1076,63 +1088,33 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
               options={PERSONA_TIMEZONE_OPTIONS}
               onChange={(value) => update('time_zone', value)}
               required
-              hint="TA 所在时区，影响作息判断与在线状态。"
+              hint="TA 所在时区，影响时间判断与在线状态。"
             />
           </div>
         );
 
-      case 21: {
-        const [sleepStart, sleepEnd] = splitWindow(data.sleep_window, '23:00', '07:00');
-        const [awakeStart, awakeEnd] = splitWindow(data.awake_window, '09:00', '18:00');
-
+      case 18:
         return (
           <div className="space-y-7">
-            <TimeRangeControl
-              label="睡眠时间段"
-              start={sleepStart}
-              end={sleepEnd}
-              onStartChange={(value) =>
-                update(
-                  'sleep_window',
-                  joinWindow(value, data.sleep_window.split('-')[1] ?? '07:00'),
-                )
-              }
-              onEndChange={(value) =>
-                update(
-                  'sleep_window',
-                  joinWindow(data.sleep_window.split('-')[0] ?? '23:00', value),
-                )
-              }
-              required
-              hint="跨度需在 3–12 小时之间，可跨越午夜。"
-              error={errors.sleep_window}
-            />
-            <TimeRangeControl
-              label="清醒时间段"
-              start={awakeStart}
-              end={awakeEnd}
-              onStartChange={(value) =>
-                update(
-                  'awake_window',
-                  joinWindow(value, data.awake_window.split('-')[1] ?? '18:00'),
-                )
-              }
-              onEndChange={(value) =>
-                update(
-                  'awake_window',
-                  joinWindow(data.awake_window.split('-')[0] ?? '09:00', value),
-                )
-              }
-              required
-              hint="跨度需在 3–12 小时之间，且不能与睡眠时段重叠。"
-              error={errors.awake_window}
-            />
-            <ChoiceControl
+            <TextControl
+              id="persona-online-policy"
               label="在线策略"
               value={data.online_policy}
-              options={ONLINE_OPTIONS}
               onChange={(value) => update('online_policy', value)}
-              required
+              max={200}
+              error={errors.online_policy}
+              placeholder="醒着就回，忙时先简短应一声，闲下来再补上。"
+              hint="一句话描述 TA 的在线状态如何判断。"
+            />
+            <TextControl
+              id="persona-location"
+              label="当前位置"
+              value={data.location}
+              onChange={(value) => update('location', value)}
+              max={40}
+              error={errors.location}
+              placeholder="旧书店二楼靠窗的位置"
+              hint="此刻所在地点，会影响场景描写与打扰时的反应。"
             />
             <LevelControl
               label="睡眠深度"
@@ -1140,16 +1122,15 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
               options={LEVEL_OPTIONS.sleepDepth}
               onChange={(value) => update('sleep_depth', value)}
               required
-              hint="决定 TA 在睡眠时段被消息吵醒的概率与反应。"
+              hint="决定 TA 被消息吵醒的概率与反应。"
             />
           </div>
         );
-      }
 
-      case 22:
-      case 23:
-      case 24:
-      case 25: {
+      case 19:
+      case 20:
+      case 21:
+      case 22: {
         const sliders = SLIDER_GROUPS[stepId] ?? [];
 
         return (
@@ -1164,7 +1145,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                 onChange={(value) => update(slider.key, value)}
               />
             ))}
-            {stepId === 25 && (
+            {stepId === 22 && (
               <LevelControl
                 label="经验等级"
                 value={experienceIndex}
@@ -1452,7 +1433,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                           className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
                         >
                           <SlidersHorizontal className="size-4 text-brass-300 transition group-hover:rotate-6" />
-                          进阶档案 · 20 项
+                          进阶档案 · 15 项
                         </button>
                       )}
                       {!editing && (
@@ -1746,7 +1727,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <span className="font-mono text-[0.55rem] uppercase tracking-[0.2em] text-brass-400/75">
-                          Advanced Dossier · 20 Fields
+                          Advanced Dossier · 15 Fields
                         </span>
                         <h2
                           id="persona-wizard-title"
@@ -1755,7 +1736,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                           进阶档案
                         </h2>
                         <p className="mt-1 text-[0.72rem] leading-5 text-mist-500">
-                          不进入 25 步主流程的行为级设置，按需展开；未改动项保持推荐默认。
+                          不进入 {TOTAL_STEPS} 步主流程的行为级设置，按需展开；未改动项保持推荐默认。
                         </p>
                       </div>
                       <button
@@ -1774,16 +1755,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                     className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-7"
                   >
                     <div className="mx-auto w-full max-w-3xl">
-                      <PersonaAdvancedPanel
-                        value={data.advanced}
-                        onChange={updateAdvanced}
-                        onJumpToStep={(target) => {
-                          setDirection(target >= step ? 1 : -1);
-                          setStep(target);
-                          setView('step');
-                          setErrors({});
-                        }}
-                      />
+                      <PersonaAdvancedPanel value={data.advanced} onChange={updateAdvanced} />
                     </div>
                   </div>
 
@@ -1805,7 +1777,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                         className="h-9 shrink-0 px-3 text-[0.72rem]"
                       >
                         <ArrowLeft className="size-3.5" />
-                        返回 25 步
+                        返回 {TOTAL_STEPS} 步
                       </GhostButton>
                       <span className="ml-1 hidden min-w-0 items-center gap-1.5 truncate font-mono text-[0.54rem] uppercase tracking-[0.1em] text-mist-600 md:flex">
                         <span className="size-1.5 shrink-0 rounded-full bg-jade-400" />
@@ -1886,7 +1858,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                     <p className="mt-6 font-mono text-[0.56rem] uppercase tracking-[0.28em] text-brass-400/70">
                       {editing
                         ? `${result?.serial ?? persona?.serial ?? ''} · v${result?.currentVersion ?? persona?.currentVersion ?? 1}`
-                        : '25 / 25 · All Filed'}
+                        : `${TOTAL_STEPS} / ${TOTAL_STEPS} · All Filed`}
                     </p>
                     <h2
                       id="persona-wizard-title"

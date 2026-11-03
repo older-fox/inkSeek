@@ -103,11 +103,13 @@ export class PersonasService {
       data,
       input.profile?.experienceLevel,
       input.profile?.gender,
+      input.profile?.quote,
     );
     const changedFields = [
       ...draftFieldKeys(data),
       ...(input.profile ? ['profile.experienceLevel'] : []),
       ...(input.profile?.gender ? ['profile.gender'] : []),
+      ...(input.profile?.quote ? ['profile.quote'] : []),
     ];
 
     const row = await this.prisma.$transaction(async (tx) => {
@@ -150,6 +152,7 @@ export class PersonasService {
     const changedFields = diffFields(previous, data);
     const experienceLevel = input.profile?.experienceLevel;
     const gender = input.profile?.gender;
+    const quote = input.profile?.quote?.trim();
     const currentProfile = readProfile(existing.profile);
     const profileChanges: Partial<PersonaProfile> = {};
 
@@ -162,6 +165,18 @@ export class PersonasService {
     if (gender && gender !== currentProfile.gender) {
       profileChanges.gender = gender;
       changedFields.push('profile.gender');
+    }
+
+    if (quote !== undefined && quote !== currentProfile.quote) {
+      profileChanges.quote = quote;
+      changedFields.push('profile.quote');
+    }
+
+    const languageStyle = derivedLanguageStyle(data);
+
+    if (languageStyle !== currentProfile.languageStyle) {
+      profileChanges.languageStyle = languageStyle;
+      changedFields.push('profile.languageStyle');
     }
 
     const nextProfile =
@@ -204,10 +219,11 @@ function createProfile(
   data: PersonaDraft,
   experienceLevel: PersonaExperienceLevel = 'Ⅰ',
   gender: PersonaGender = '未设定',
+  quote = '',
 ): PersonaProfile {
   return {
     gender,
-    quote: '',
+    quote: quote.trim(),
     keywords: [],
     accent: 'brass',
     experienceLevel,

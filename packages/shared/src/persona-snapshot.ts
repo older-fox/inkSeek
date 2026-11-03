@@ -86,18 +86,14 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
   put('emoji_level', data.emoji_level);
   put('typing_level', data.typing_level);
   put('time_zone', data.time_zone);
-  put('sleep_window', data.sleep_window);
-  put('awake_window', data.awake_window);
   put('online_policy', data.online_policy);
   put('sleep_depth', data.sleep_depth);
-  put('language_style', profile.languageStyle || derivedLanguageStyle(data));
-  put('address_style', profile.addressStyle);
+  put('location', data.location);
+  put('language_style', data.language_style || profile.languageStyle || derivedLanguageStyle(data));
   put('anchor_quote', profile.quote);
 
   const advanced = data.advanced;
 
-  put('social_circle', advanced.social_circle);
-  put('skills', advanced.skills);
   put('address_for_stranger', advanced.address_for_stranger);
   put('address_for_close', advanced.address_for_close);
   put('forbidden_addresses', advanced.forbidden_addresses);
@@ -108,9 +104,6 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
   put('in_character_never', advanced.in_character_never);
   put('in_character_recovery', advanced.in_character_recovery);
   put('in_character_allowed_meta', advanced.in_character_allowed_meta);
-  put('work_window', advanced.work_window);
-  put('do_not_disturb', advanced.do_not_disturb);
-  put('proactive_triggers', advanced.proactive_triggers);
   put('sensitivity_map', advanced.sensitivity_map);
   put('touch_preference', advanced.touch_preference);
   put('explicit_level_char', advanced.explicit_level_char);
@@ -169,11 +162,14 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
 }
 
 export function derivedLanguageStyle(data: PersonaDraft): string {
-  const habits = [data.sentence_length, `${data.punctuation}标点`, data.humor_style];
+  const style = data.language_style.trim();
 
-  if (data.particles.some((item) => item.trim())) {
-    habits.push('带语气词');
+  if (style) {
+    return style;
   }
 
-  return habits.join(' · ');
+  return [data.sentence_length, data.punctuation, data.humor_style]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join('；');
 }
