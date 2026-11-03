@@ -9,13 +9,16 @@ import type {
   PipelineOutputs,
 } from './pipeline-types.js';
 
-const REFERENCE = /^\$([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/;
-const TEMPLATE = /{{\s*([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*}}/g;
+/** Segments accept any language so `$vars.白名单` style keys stay referenceable. */
+const REFERENCE = /^\$([\p{L}\p{N}\p{M}_-]+(?:\.[\p{L}\p{N}\p{M}_-]+)*)$/u;
+const TEMPLATE = /\{\{\s*([\p{L}\p{N}\p{M}_-]+(?:\.[\p{L}\p{N}\p{M}_-]+)*)\s*\}\}/gu;
 const MAX_REPLY_LENGTH = 4000;
 const MAX_REPLY_IMAGES = 4;
 const MAX_DELAY_MS = 60_000;
 const MAX_IMAGE_INDEX = 99;
 const MAX_DESCRIPTION_PROMPT = 4000;
+const MAX_CARD_TEXT = 4000;
+const MAX_WHITELIST_TEXT = 4000;
 
 function readPath(root: unknown, path: string): unknown {
   if (!path) {
@@ -262,6 +265,60 @@ function readConstantValue(config: Record<string, unknown> | undefined): string 
   }
 }
 
+type SourceListMode = 'off' | 'whitelist' | 'blacklist';
+
+function readSourceListMode(config: Record<string, unknown> | undefined): SourceListMode {
+  const value = config?.['mode'];
+  if (value === undefined) {
+    return 'off';
+  }
+  if (value !== 'off' && value !== 'whitelist' && value !== 'blacklist') {
+    throw new Error('来源过滤方式必须是 off、whitelist 或 blacklist');
+  }
+  return value;
+}
+
+type SourceWhitelistKey = 'groupWhitelist' | 'privateWhitelist';
+
+const SOURCE_WHITELIST_LABELS: Record<SourceWhitelistKey, string> = {
+  groupWhitelist: '群号名单',
+  privateWhitelist: 'QQ 号名单',
+};
+
+/** Reads the conversation source carried by a connected message object. */
+function readSourceMessage(input: unknown): {
+  conversationKind: 'PRIVATE' | 'GROUP';
+  conversationExternalId: string;
+} {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('「来源白名单」需要消息对象输入');
+  }
+  const record = input as Record<string, unknown>;
+  const kind = record['conversationKind'];
+  if (kind !== 'PRIVATE' && kind !== 'GROUP') {
+    throw new Error('「来源白名单」的输入不是消息对象：缺少会话类型');
+  }
+  const externalId = record['conversationExternalId'];
+  return {
+    conversationKind: kind,
+    conversationExternalId: typeof externalId === 'string' ? externalId.trim() : '',
+  };
+}
+
+/** One ID per entry; commas, spaces and line breaks all separate entries. */
+function readSourceWhitelist(
+  config: Record<string, unknown> | undefined,
+  key: SourceWhitelistKey,
+): string[] {
+  const raw = readOptionalString(config, key) ?? '';
+  if (raw.length > MAX_WHITELIST_TEXT) {
+    throw new Error(`${SOURCE_WHITELIST_LABELS[key]}不能超过 ${MAX_WHITELIST_TEXT} 个字符`);
+  }
+  return raw
+    .split(/[\s,，、;；]+/u)
+    .filter((entry) => entry.length > 0);
+}
+
 function readImages(value: unknown): string[] {
   const list = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
   return list.filter(
@@ -287,6 +344,7 @@ function messageValueOf(message: PipelineMessage): ChatPipelineMessageValue {
     channelId: message.channelId,
     conversationId: message.conversationId,
     conversationKind: message.conversationKind,
+    conversationExternalId: message.conversationExternalId,
     isSelf: message.isSelf,
     sender: { id: message.senderId, name: message.senderName },
     text: message.text,
@@ -306,6 +364,7 @@ function messageValueOf(message: PipelineMessage): ChatPipelineMessageValue {
       : null,
     images: message.images,
     imageCount: message.imageCount,
+    voices: message.voices,
     voiceCount: message.voiceCount,
     isForward: message.kind === 'FORWARD',
     sentAt: message.sentAt.toISOString(),
@@ -329,7 +388,7 @@ const messageInput: PipelineNodeDefinition = {
       label: '消息对象',
       kind: 'json',
       description:
-        '包含发送者、正文、引用（含引用图片）、媒体计数等全部字段；配合「对象取值」按需读取。',
+        '包含发送者、正文、引用（含引用图片）、图片、语音（含转写）、来源群号/QQ 号等全部字段；配合「消息对象取值」按需读取。',
     },
     { key: 'text', label: '消息正文', kind: 'text', description: '一根线直连消息输出即可复读。' },
     {
@@ -364,6 +423,11 @@ const MESSAGE_FIELD_OPTIONS = [
   { value: 'quote.imageCount', label: '引用图片数量' },
   { value: 'images', label: '消息图片（数组）' },
   { value: 'imageCount', label: '消息图片数量' },
+  { value: 'voices', label: '语音（数组）' },
+  { value: 'voices.0', label: '第一条语音' },
+  { value: 'voices.0.transcript', label: '语音转写' },
+  { value: 'voices.0.url', label: '语音地址' },
+  { value: 'voices.0.duration', label: '语音时长（秒）' },
   { value: 'voiceCount', label: '语音数量' },
   { value: 'sentAt', label: '发送时间' },
   { value: 'id', label: '消息 ID' },
@@ -371,6 +435,7 @@ const MESSAGE_FIELD_OPTIONS = [
   { value: 'channelId', label: '渠道 ID' },
   { value: 'conversationId', label: '会话 ID' },
   { value: 'conversationKind', label: '会话类型' },
+  { value: 'conversationExternalId', label: '来源群号/QQ 号' },
   { value: 'isSelf', label: '是否自己发送' },
   { value: '', label: '整个消息对象' },
 ];
@@ -378,7 +443,7 @@ const MESSAGE_FIELD_OPTIONS = [
 const getObjectField: PipelineNodeDefinition = {
   type: 'object.get',
   version: 2,
-  label: '对象取值',
+  label: '消息对象取值',
   category: 'data',
   description:
     '从消息对象中选取一个字段，输出 value / text / found；选「整个消息对象」可继续向下游传递。',
@@ -395,7 +460,7 @@ const getObjectField: PipelineNodeDefinition = {
   inputs: [
     {
       key: 'value',
-      label: '对象',
+      label: '消息对象',
       kind: 'json',
       description: '从消息输入的 message 端口或其它 json 输出接入。',
     },
@@ -418,52 +483,6 @@ const getObjectField: PipelineNodeDefinition = {
   run: (context) => {
     const path = (readOptionalString(context.node.config, 'path') ?? '').trim();
     const value = readPath(context.inputs['value'], path);
-    return {
-      outputs: {
-        value: value === undefined ? null : value,
-        text: stringify(value),
-        found: value !== undefined && value !== null,
-      },
-    };
-  },
-};
-
-const readMessageField: PipelineNodeDefinition = {
-  type: 'message.get',
-  version: 1,
-  label: '取消息内容',
-  category: 'data',
-  description:
-    '无需接线，直接从本条消息对象里取一个字段（发送者、正文、引用、图片等），输出 value / text / found。',
-  defaultConfig: { path: 'text' },
-  fields: [
-    {
-      key: 'path',
-      label: '取值字段',
-      kind: 'select',
-      options: MESSAGE_FIELD_OPTIONS,
-      hint: '读取的就是本条入站消息，不需要把消息对象接进来。',
-    },
-  ],
-  inputs: [],
-  outputs: [
-    { key: 'value', label: '取值结果', kind: 'any', description: '对象或数组可直接接入任意端口。' },
-    {
-      key: 'text',
-      label: '文本形式',
-      kind: 'text',
-      description: '字符串原样输出，其它值转成 JSON 文本。',
-    },
-    {
-      key: 'found',
-      label: '是否存在',
-      kind: 'boolean',
-      description: '值为 null / undefined 时为 false，可直接用于分支条件。',
-    },
-  ],
-  run: (context) => {
-    const path = (readOptionalString(context.node.config, 'path') ?? '').trim();
-    const value = readPath(messageValueOf(context.message), path);
     return {
       outputs: {
         value: value === undefined ? null : value,
@@ -669,6 +688,41 @@ const messageOutput: PipelineNodeDefinition = {
       effects: [{ type: 'reply', text, images }],
     };
   },
+};
+
+const constantText: PipelineNodeDefinition = {
+  type: 'text.constant',
+  version: 1,
+  label: '固定文本',
+  category: 'text',
+  description:
+    '无需上游激活，直接输出一段固定文本；可以用 {{vars.名称}}、{{message.text}} 等模板引用，再接进任意文本输入。',
+  defaultConfig: { text: '' },
+  fields: [
+    {
+      key: 'text',
+      label: '固定文本',
+      kind: 'text',
+      placeholder: '例如：抱歉，我现在不在，稍后回复你。',
+      hint: '没有输入端口，每次运行都会执行；模板里可以引用变量或当前消息。',
+    },
+  ],
+  inputs: [],
+  outputs: [
+    { key: 'text', label: '文本', kind: 'text', description: '按模板渲染后的固定文本。' },
+  ],
+  validateConfig: (config) => {
+    const text = config?.['text'];
+    if (text !== undefined && typeof text !== 'string') {
+      throw new Error('固定文本必须是字符串');
+    }
+    if (typeof text === 'string' && text.length > MAX_CARD_TEXT) {
+      throw new Error(`固定文本不能超过 ${MAX_CARD_TEXT} 个字符`);
+    }
+  },
+  run: (context) => ({
+    outputs: { text: context.template(readOptionalString(context.node.config, 'text') ?? '') },
+  }),
 };
 
 const templateText: PipelineNodeDefinition = {
@@ -963,6 +1017,100 @@ const compareValues: PipelineNodeDefinition = {
     }
 
     return { outputs: { matched, left, right } };
+  },
+};
+
+const sourceWhitelist: PipelineNodeDefinition = {
+  type: 'logic.whitelist',
+  version: 5,
+  label: '来源过滤',
+  category: 'logic',
+  description:
+    '按来源 ID 过滤：白名单只放行名单内的来源，黑名单只拦截名单内的来源，也可以不启用；群聊只比对群号，私聊只比对 QQ 号，两列互不相通。',
+  defaultConfig: {
+    mode: 'off',
+    groupWhitelist: '',
+    privateWhitelist: '',
+  },
+  fields: [
+    {
+      key: 'mode',
+      label: '过滤方式',
+      kind: 'select',
+      options: [
+        { value: 'off', label: '不启用' },
+        { value: 'whitelist', label: '白名单' },
+        { value: 'blacklist', label: '黑名单' },
+      ],
+      hint: '白名单：只有名单内的来源放行；黑名单：名单内的来源不放行；不启用：全部放行。',
+    },
+    {
+      key: 'groupWhitelist',
+      label: '群号名单',
+      kind: 'text',
+      width: 'half',
+      placeholder: '每行一个群号',
+      hint: '只比对群聊的群号。白名单模式下留空表示所有群聊都不放行；黑名单模式下留空表示都不拦截。',
+    },
+    {
+      key: 'privateWhitelist',
+      label: 'QQ 号名单',
+      kind: 'text',
+      width: 'half',
+      placeholder: '每行一个 QQ 号',
+      hint: '只比对私聊对方的 QQ 号。白名单模式下留空表示所有私聊都不放行；黑名单模式下留空表示都不拦截。',
+    },
+  ],
+  inputs: [
+    {
+      key: 'message',
+      label: '消息对象',
+      kind: 'json',
+      description:
+        '从「消息输入」的 message 端口接入；来源过滤读取其中的 conversationKind 与 conversationExternalId。',
+    },
+  ],
+  outputs: [
+    {
+      key: 'matched',
+      label: '是否放行',
+      kind: 'boolean',
+      description: '名单判定通过时为 true，可直接作为下游连线的条件。',
+    },
+    { key: 'value', label: '原消息对象', kind: 'any' },
+    { key: 'conversationKind', label: '来源类型', kind: 'text' },
+    { key: 'conversationExternalId', label: '来源 ID', kind: 'text' },
+  ],
+  validateConfig: (config) => {
+    readSourceListMode(config);
+    readSourceWhitelist(config, 'groupWhitelist');
+    readSourceWhitelist(config, 'privateWhitelist');
+  },
+  run: (context) => {
+    const mode = readSourceListMode(context.node.config);
+    const { conversationKind, conversationExternalId } = readSourceMessage(
+      context.inputs['message'],
+    );
+    const isGroup = conversationKind === 'GROUP';
+
+    let matched = true;
+    if (mode !== 'off') {
+      const list = readSourceWhitelist(
+        context.node.config,
+        isGroup ? 'groupWhitelist' : 'privateWhitelist',
+      );
+      const listed = list.includes(conversationExternalId);
+      matched = mode === 'whitelist' ? listed : !listed;
+    }
+
+    return {
+      outputs: {
+        matched,
+        value: context.inputs['message'],
+        conversationKind,
+        conversationExternalId,
+      },
+    };
   },
 };
 
@@ -1264,22 +1412,57 @@ const describeImage: PipelineNodeDefinition = {
   },
 };
 
+const noteText: PipelineNodeDefinition = {
+  type: 'note.text',
+  version: 1,
+  label: '文字描述',
+  category: 'note',
+  description:
+    '画布上的说明文字，用来标注分支用途或留备忘；不参与运行，也没有可连接的端口。',
+  layout: true,
+  defaultConfig: { text: '' },
+  fields: [
+    {
+      key: 'text',
+      label: '说明文字',
+      kind: 'text',
+      placeholder: '写一段注释，例如：这个分支只处理带引用的消息……',
+      hint: '只出现在画布上，不会进入消息或运行结果；双击卡片可以直接编辑。',
+    },
+  ],
+  inputs: [],
+  outputs: [],
+  validateConfig: (config) => {
+    const text = config?.['text'];
+    if (text !== undefined && typeof text !== 'string') {
+      throw new Error('说明文字必须是字符串');
+    }
+    if (typeof text === 'string' && text.length > MAX_CARD_TEXT) {
+      throw new Error(`说明文字不能超过 ${MAX_CARD_TEXT} 个字符`);
+    }
+  },
+  // Layout-only cards are filtered out by the runner; this keeps the contract total.
+  run: () => ({ outputs: {} }),
+};
+
 const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   messageInput,
   messageOutput,
   getObjectField,
-  readMessageField,
   constantValue,
   getVariable,
   setVariable,
+  constantText,
   templateText,
   transformText,
   regexText,
   joinText,
   classifyContains,
   compareValues,
+  sourceWhitelist,
   describeImage,
   delayFlow,
+  noteText,
 ];
 
 const REGISTRY = new Map(DEFINITIONS.map((definition) => [definition.type, definition]));

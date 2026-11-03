@@ -7,7 +7,7 @@ import type {
   ChatPipelineNodeType,
 } from '@inkseek/shared';
 import { canConnectPipelineKinds } from '@inkseek/shared';
-import { Maximize2, Minus, Plus } from 'lucide-react';
+import { ChevronDown, Maximize2, Minus, Plus } from 'lucide-react';
 import {
   forwardRef,
   useCallback,
@@ -25,6 +25,7 @@ import {
   edgeMidpoint,
   edgePath,
   formatConditionValue,
+  formatRuntimeDetail,
   formatRuntimePreview,
   inputPoint,
   outputPoint,
@@ -85,6 +86,23 @@ function runtimePreview(run: ChatPipelineNodeRunSummary | undefined, value: unkn
   return formatRuntimePreview(value);
 }
 
+/** The value an edge carried; the target port only mirrors it. */
+function edgeRuntimePreview(
+  sourceRun: ChatPipelineNodeRunSummary | undefined,
+  targetRun: ChatPipelineNodeRunSummary | undefined,
+  value: unknown,
+): string {
+  if (sourceRun?.status === 'SUCCEEDED') {
+    return targetRun?.status === 'SKIPPED' ? '已跳过' : formatRuntimePreview(value);
+  }
+  return runtimePreview(sourceRun, value);
+}
+
+/** Full value for the expanded pill; plain text stays readable. */
+function runtimeDetail(value: unknown): string {
+  return typeof value === 'string' ? value : formatRuntimeDetail(value);
+}
+
 interface ConnectionDraft {
   from: string;
   fromPort: string;
@@ -114,6 +132,7 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
     const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
     const viewportRef = useRef(viewport);
     const [connecting, setConnecting] = useState<ConnectionDraft | null>(null);
+    const [expandedEdge, setExpandedEdge] = useState<string | null>(null);
     const fittedRef = useRef(false);
 
     useEffect(() => {
@@ -142,7 +161,8 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
         Math.max(
           ...graph.nodes.map(
             (node) =>
-              node.position.y + cardHeight(catalogByType.get(node.type) ?? null),
+              node.position.y +
+              cardHeight(catalogByType.get(node.type) ?? null, node.config),
           ),
         ) + 72;
       const width = maxX - minX;
@@ -498,7 +518,7 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={() => onSelect({ kind: 'edge', index })}
                 className={cn(
-                  'absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border px-2 py-0.5 font-mono text-[0.48rem] transition',
+                  'pointer-events-auto absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border px-2 py-0.5 font-mono text-[0.48rem] transition',
                   selected
                     ? 'border-brass-400/50 bg-ink-950 text-brass-200'
                     : 'border-mist-100/[0.12] bg-ink-950/90 text-mist-400 hover:border-brass-400/30 hover:text-brass-200',
@@ -534,14 +554,45 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
               );
               const point = edgeCurvePoint(start, end, 0.34);
               const outputValue = recordOf(sourceRun?.output)?.[edge.fromPort];
-              const inputValue = recordOf(recordOf(targetRun?.input)?.ports)?.[edge.toPort];
+              const targetPort = definitions
+                .get(target.type)
+                ?.inputs.find((port) => port.key === edge.toPort);
+              // A multi-line input aggregates every incoming edge, so only the
+              // source output belongs on this pill.
+              const inputValue =
+                targetPort?.multiple === true
+                  ? undefined
+                  : recordOf(recordOf(targetRun?.input)?.ports)?.[edge.toPort];
+              const carried = outputValue !== undefined ? outputValue : inputValue;
+              const key = `runtime-${edge.from}-${edge.fromPort}-${edge.to}-${edge.toPort}-${index}`;
               const selected = selection?.kind === 'edge' && selection.index === index;
+              const expanded = expandedEdge === key;
+              const expandable = carried !== undefined;
+              const flowing = sourceRun?.status === 'SUCCEEDED' && targetRun?.status !== 'SKIPPED';
+
+              // Pills for adjacent output rows would cover each other; lift the
+              // upper rows clear of the lower ones so every pill stays clickable.
+              const sourceOutputs = definitions.get(source.type)?.outputs ?? [];
+              const rowOf = (portKey: string) =>
+                Math.max(
+                  0,
+                  sourceOutputs.findIndex((port) => port.key === portKey),
+                );
+              const siblingRows = [
+                ...new Set(
+                  graph.edges
+                    .filter((other) => other.from === edge.from)
+                    .map((other) => rowOf(other.fromPort)),
+                ),
+              ].sort((a, b) => a - b);
+              const lift = (siblingRows.length - 1 - siblingRows.indexOf(rowOf(edge.fromPort))) * 26;
 
               return (
                 <div
-                  key={`runtime-${edge.from}-${edge.fromPort}-${edge.to}-${edge.toPort}-${index}`}
+                  key={key}
                   className={cn(
-                    'absolute z-10 flex w-[11.5rem] cursor-pointer flex-col gap-0.5 rounded-md border px-1.5 py-1 font-mono text-[0.46rem] leading-3.5 shadow-[0_10px_28px_-14px_rgba(0,0,0,0.95)] backdrop-blur-sm transition',
+                    'pointer-events-auto absolute z-10 flex cursor-pointer flex-col gap-0.5 rounded-md border px-1.5 py-1 font-mono text-[0.46rem] leading-3.5 shadow-[0_10px_28px_-14px_rgba(0,0,0,0.95)] backdrop-blur-sm transition-[width,border-color]',
+                    expanded ? 'w-[22rem]' : 'w-[11.5rem]',
                     selected
                       ? 'border-brass-400/50 bg-ink-950/[0.97]'
                       : 'border-mist-100/[0.14] bg-ink-950/92 hover:border-brass-400/35',
@@ -549,34 +600,49 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
                   style={{
                     left: point.x,
                     top: point.y,
-                    transform: 'translate(-50%, calc(-100% - 7px))',
+                    transform: `translate(-50%, calc(-100% - 7px - ${lift}px))`,
                   }}
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => onSelect({ kind: 'edge', index })}
+                  onClick={() => {
+                    onSelect({ kind: 'edge', index });
+                    if (expandable) {
+                      setExpandedEdge((current) => (current === key ? null : key));
+                    }
+                  }}
                 >
                   <span className="flex min-w-0 items-center gap-1">
-                    <span className="size-1 shrink-0 rounded-full bg-brass-400" />
+                    <span
+                      className={cn(
+                        'size-1 shrink-0 rounded-full',
+                        flowing ? 'bg-brass-400' : 'bg-mist-600',
+                      )}
+                    />
                     <span className="shrink-0 text-brass-300/85">{edge.fromPort}</span>
-                    <span
-                      className={cn(
-                        'truncate',
-                        sourceRun?.status === 'SUCCEEDED' ? 'text-mist-100' : 'text-mist-500',
-                      )}
-                    >
-                      {runtimePreview(sourceRun, outputValue)}
-                    </span>
-                  </span>
-                  <span className="flex min-w-0 items-center gap-1">
-                    <span className="size-1 shrink-0 rounded-full bg-jade-400" />
+                    <span className="shrink-0 text-mist-600">→</span>
                     <span className="shrink-0 text-jade-300/85">{edge.toPort}</span>
-                    <span
-                      className={cn(
-                        'truncate',
-                        targetRun?.status === 'SUCCEEDED' ? 'text-mist-100' : 'text-mist-500',
-                      )}
-                    >
-                      {runtimePreview(targetRun, inputValue)}
-                    </span>
+                    {expandable && (
+                      <ChevronDown
+                        className={cn(
+                          'ml-auto size-2 shrink-0 text-mist-600 transition-transform',
+                          expanded && 'rotate-180',
+                        )}
+                        strokeWidth={2}
+                      />
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      'min-w-0',
+                      flowing ? 'text-mist-100' : 'text-mist-500',
+                      expanded
+                        ? 'max-h-[30vh] overflow-auto whitespace-pre-wrap break-all pr-1'
+                        : 'truncate',
+                    )}
+                    onWheelCapture={expanded ? (event) => event.stopPropagation() : undefined}
+                  >
+                    {expanded && expandable
+                      ? runtimeDetail(carried)
+                      : edgeRuntimePreview(sourceRun, targetRun, carried)}
                   </span>
                 </div>
               );

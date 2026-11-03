@@ -158,6 +158,12 @@ export const debugChatPipelineRunSchema = z
     scopeId: pipelineScopeIdSchema,
     text: z.string().trim().min(1, '请输入一条模拟消息').max(4000, '模拟消息最多 4000 个字符'),
     senderName: z.string().trim().max(80).optional(),
+    conversationKind: z.enum(['PRIVATE', 'GROUP']).default('PRIVATE'),
+    conversationExternalId: z
+      .string()
+      .trim()
+      .max(32, '来源 ID 最多 32 个字符')
+      .default(''),
   })
   .superRefine(requireScopedId);
 
@@ -191,7 +197,10 @@ const pipelineVariableKeySchema = z
   .trim()
   .min(1, '变量名不能为空')
   .max(32, '变量名最多 32 个字符')
-  .regex(/^[A-Za-z0-9_-]+$/, '变量名仅支持字母、数字、下划线和连字符');
+  .regex(
+    /^[\p{L}\p{N}\p{M}_-]+$/u,
+    '变量名支持任意语言的字母、数字、下划线和连字符',
+  );
 
 const pipelineVariableValueSchema = z.union([
   z.string().max(4000, '变量文本过长'),

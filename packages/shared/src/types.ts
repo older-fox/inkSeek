@@ -345,7 +345,8 @@ export type ChatPipelineNodeCategory =
   | 'data'
   | 'media'
   | 'flow'
-  | 'variable';
+  | 'variable'
+  | 'note';
 export type ChatPipelineJoin = 'all' | 'any';
 
 /**
@@ -369,6 +370,8 @@ export interface ChatPipelineMessageValue {
   channelId: string;
   conversationId: string;
   conversationKind: ChatConversationKind;
+  /** Group number for groups, peer QQ for private chats; '' when unknown. */
+  conversationExternalId: string;
   isSelf: boolean;
   sender: { id: string; name: string };
   text: string;
@@ -378,9 +381,22 @@ export interface ChatPipelineMessageValue {
   quote: ChatPipelineQuoteValue | null;
   images: string[];
   imageCount: number;
+  /** Stored voice segments in message order, with the NapCat transcript when ready. */
+  voices: ChatPipelineVoiceValue[];
   voiceCount: number;
   isForward: boolean;
   sentAt: string;
+}
+
+export interface ChatPipelineVoiceValue {
+  url: string;
+  position: number;
+  /** Duration in seconds when the connector provides it. */
+  duration: number | null;
+  /** Speech-to-text text; null for silence or when transcription did not finish. */
+  transcript: string | null;
+  mimeType: string | null;
+  byteSize: number | null;
 }
 
 export interface ChatPipelineQuoteValue {
@@ -467,6 +483,8 @@ export interface ChatPipelineConfigField {
   kind: ChatPipelineConfigFieldKind;
   placeholder?: string;
   hint?: string;
+  /** Pair short fields side by side in the inspector instead of one per row. */
+  width?: 'half';
   options?: Array<{ value: string; label: string }>;
   /** Runtime option origin; takes precedence over `options`. */
   optionsSource?: ChatPipelineConfigOptionsSource;
@@ -501,6 +519,11 @@ export interface ChatPipelineNodeType {
   version: number;
   /** Locked system cards: always present, never deletable or addable. */
   system?: boolean;
+  /**
+   * Layout-only card: an annotation with no ports. It is never planned into a
+   * run, so it has no status and produces no node row.
+   */
+  layout?: boolean;
   /** Join mode a freshly added node starts with. */
   defaultJoin?: ChatPipelineJoin;
   defaultConfig: Record<string, unknown>;
@@ -557,6 +580,10 @@ export interface SaveChatPipelineGraphInput extends PipelineScopeRef {
 export interface DebugChatPipelineRunInput extends PipelineScopeRef {
   text: string;
   senderName?: string;
+  /** Synthetic conversation kind; defaults to PRIVATE. */
+  conversationKind?: ChatConversationKind;
+  /** Synthetic group number / peer QQ used by source filters; '' when unknown. */
+  conversationExternalId?: string;
 }
 
 export interface ChatPersonaHistoryEntry {

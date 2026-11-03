@@ -78,7 +78,8 @@ export const DEFAULT_PIPELINE_GRAPH: PipelineGraph = {
   variables: [],
 };
 
-const VARIABLE_KEY = /^[A-Za-z0-9_-]+$/;
+/** Variable keys may use any language; the key itself is the runtime id. */
+const VARIABLE_KEY = /^[\p{L}\p{N}\p{M}_-]+$/u;
 const MAX_VARIABLES = 32;
 const MAX_VARIABLE_KEY_LENGTH = 32;
 const MAX_VARIABLE_TEXT = 4000;

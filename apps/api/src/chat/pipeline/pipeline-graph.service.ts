@@ -28,7 +28,14 @@ import {
   type PipelineGraph,
   type PipelineNode,
 } from './pipeline-graph.js';
-import { migrateLegacyMessagePorts } from './pipeline-migrate.js';
+import {
+  migrateLegacyMessagePorts,
+  migrateRemovedMessageFieldNodes,
+  migrateSourceWhitelistColumns,
+  migrateSourceWhitelistInput,
+  migrateSourceWhitelistMode,
+  migrateSourceWhitelistScope,
+} from './pipeline-migrate.js';
 import { getPipelineNode, listPipelineNodes } from './pipeline-nodes.js';
 
 type PrismaScope = 'GLOBAL' | 'CHANNEL' | 'PERSONA';
@@ -287,9 +294,20 @@ export class PipelineGraphService implements OnModuleInit {
       try {
         const graph = graphFromRecord(record);
         const storedVersions = new Map(graph.nodes.map((node) => [node.id, node.nodeVersion]));
-        const migrated = migrateLegacyMessagePorts(graph, (message) =>
-          this.logger.warn(message),
-        );
+        const warn = (message: string) => this.logger.warn(message);
+        const portsMigrated = migrateLegacyMessagePorts(graph, warn);
+        const cardsMigrated = migrateRemovedMessageFieldNodes(graph, warn);
+        const whitelistMigrated = migrateSourceWhitelistColumns(graph, warn);
+        const whitelistModeMigrated = migrateSourceWhitelistMode(graph, warn);
+        const whitelistScopeMigrated = migrateSourceWhitelistScope(graph, warn);
+        const whitelistWired = migrateSourceWhitelistInput(graph, warn);
+        const migrated =
+          portsMigrated ||
+          cardsMigrated ||
+          whitelistMigrated ||
+          whitelistModeMigrated ||
+          whitelistScopeMigrated ||
+          whitelistWired;
         stampNodeVersions(graph);
         this.assertValid(graph);
 
@@ -507,6 +525,7 @@ export function pipelineCatalog(): ChatPipelineNodeType[] {
     description: definition.description,
     version: definition.version,
     system: definition.system ?? false,
+    layout: definition.layout ?? false,
     defaultJoin: definition.defaultJoin ?? 'all',
     defaultConfig: JSON.parse(JSON.stringify(definition.defaultConfig)) as Record<string, unknown>,
     fields: definition.fields.map((field) => ({ ...field })),

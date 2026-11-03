@@ -1,4 +1,5 @@
 import type {
+  ChatConversationKind,
   ChatPipelineRunDetail,
   ChatPipelineRunStatus,
   ChatPipelineScope,
@@ -62,6 +63,8 @@ export function PipelineDebugPanel({
 }: PipelineDebugPanelProps) {
   const [text, setText] = useState('');
   const [senderName, setSenderName] = useState('');
+  const [conversationKind, setConversationKind] = useState<ChatConversationKind>('PRIVATE');
+  const [conversationExternalId, setConversationExternalId] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ChatPipelineRunDetail | null>(null);
@@ -89,6 +92,8 @@ export function PipelineDebugPanel({
         scopeId,
         text: trimmed,
         senderName: senderName.trim() || undefined,
+        conversationKind,
+        conversationExternalId: conversationExternalId.trim() || undefined,
       });
       setResult(run);
       onCompleted(run);
@@ -144,6 +149,45 @@ export function PipelineDebugPanel({
               placeholder="调试消息"
               className="mt-1.5 h-9 w-full rounded-lg border border-mist-100/[0.1] bg-ink-900/60 px-3 text-[0.7rem] text-mist-100 outline-none transition placeholder:text-mist-600 focus:border-brass-400/40"
             />
+          </label>
+
+          <div>
+            <span className="font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
+              来源类型
+            </span>
+            <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-lg border border-mist-100/[0.1] bg-ink-950/40 p-1">
+              {(['PRIVATE', 'GROUP'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setConversationKind(kind)}
+                  className={cn(
+                    'rounded-md px-2 py-1.5 text-[0.66rem] transition',
+                    conversationKind === kind
+                      ? 'bg-brass-400/[0.12] text-brass-200'
+                      : 'text-mist-500 hover:bg-mist-100/[0.04] hover:text-mist-300',
+                  )}
+                >
+                  {kind === 'PRIVATE' ? '私聊' : '群聊'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
+              {conversationKind === 'GROUP' ? '群号' : '对方 QQ 号'}
+            </span>
+            <input
+              value={conversationExternalId}
+              onChange={(event) => setConversationExternalId(event.target.value)}
+              maxLength={32}
+              placeholder="例如 123456789"
+              className="mt-1.5 h-9 w-full rounded-lg border border-mist-100/[0.1] bg-ink-900/60 px-3 text-[0.7rem] text-mist-100 outline-none transition placeholder:text-mist-600 focus:border-brass-400/40"
+            />
+            <span className="mt-1 block text-[0.5rem] leading-4 text-mist-600">
+              来源过滤按这里判定；留空表示没有来源账号，白名单不会命中，黑名单不会拦截。
+            </span>
           </label>
 
           <label className="block">

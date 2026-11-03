@@ -319,8 +319,11 @@ export class ChatMessagesService {
         conversationId: conversation.id,
       });
 
+      // The pipeline's message object carries voice transcripts, so a voice
+      // message waits for NapCat before running. Text/image messages do not.
+      let voices = message.voices;
       if (voiceAssets.length > 0) {
-        void this.transcription
+        const transcript = await this.transcription
           .transcribe(client, {
             id: message.id,
             externalId: message.externalId,
@@ -331,7 +334,15 @@ export class ChatMessagesService {
             this.logger.warn(
               `语音转写失败：${error instanceof Error ? error.message : String(error)}`,
             );
+            return null;
           });
+        if (transcript) {
+          voices = voices.map((voice) =>
+            voice.id === transcript.voiceId
+              ? { ...voice, description: transcript.transcript }
+              : voice,
+          );
+        }
       }
 
       await this.triggerProcessing(
@@ -340,7 +351,7 @@ export class ChatMessagesService {
         parsed,
         message,
         imageAssets.length,
-        voiceAssets.length,
+        voices,
       );
     } catch (error) {
       this.logger.error(
@@ -511,7 +522,7 @@ export class ChatMessagesService {
       },
       message,
       imageAssets.length,
-      0,
+      message.voices,
     );
 
     return toMessageSummary(message);
@@ -1020,14 +1031,17 @@ export class ChatMessagesService {
     parsed: ParsedMessageEvent,
     message: MessageView,
     imageCount: number,
-    voiceCount: number,
+    voices: ChatVoiceAsset[],
   ): Promise<void> {
+    const orderedVoices = [...voices].sort((left, right) => left.position - right.position);
+
     try {
       await this.processor.process({
         messageId: message.id,
         channelId: channel.id,
         conversationId: conversation.id,
         conversationKind: conversation.kind,
+        conversationExternalId: conversation.externalId,
         externalId: parsed.externalId,
         isSelf: parsed.isSelf,
         senderId: parsed.senderId,
@@ -1039,7 +1053,15 @@ export class ChatMessagesService {
           .sort((left, right) => left.position - right.position)
           .map((image) => image.url),
         imageCount,
-        voiceCount,
+        voices: orderedVoices.map((voice) => ({
+          url: voice.url,
+          position: voice.position,
+          duration: voice.duration,
+          transcript: voice.description,
+          mimeType: voice.mimeType,
+          byteSize: voice.byteSize,
+        })),
+        voiceCount: orderedVoices.length,
         sentAt: parsed.sentAt,
       });
     } catch (error) {

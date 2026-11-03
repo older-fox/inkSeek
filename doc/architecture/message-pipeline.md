@@ -50,6 +50,7 @@
 
 - 拓扑排序（Kahn）后严格逐节点执行；带环的图无法保存，也无法运行。等待类卡片会让同一次运行中排在它后面的分支一起推迟。
 - 零输入节点（仅系统消息输入）无条件执行；其余节点必须有激活入边，否则记为 `SKIPPED`，其出边不会激活下游。
+- 注释卡片（`note.text`）只属于画布：运行器在拓扑序里直接跳过，不写节点轨迹、不参与整体状态；它也没有端口，无法连线。
 - 节点开始时先写一行 `RUNNING` 轨迹，结束时原地更新为最终状态，因此等待中的节点也能在运行记录里看到。
 - 节点抛错只标记该节点 `FAILED`，不中断整张图：依赖它的下游因入边未激活而 `SKIPPED`，其他分支继续执行；运行整体记为 `FAILED` 并汇总各节点错误。
 - 进程重启会中断正在运行的图：遗留的 `RUNNING` 运行在启动时改标 `INTERRUPTED`，其 `RUNNING` 节点改标 `CANCELLED`。运行被取消时，未执行到的节点同样写 `CANCELLED` 轨迹。
@@ -75,7 +76,7 @@
 
 | 输出 | 类型 | 含义 |
 | --- | --- | --- |
-| `message` | json | 完整消息对象（见下表），配合「对象取值」读取任意字段 |
+| `message` | json | 完整消息对象（见下表），配合「消息对象取值」读取任意字段 |
 | `text` | text | 消息正文 |
 | `images` | image | 按消息顺序排列的图片引用，可直接接入消息输出 |
 
@@ -86,6 +87,7 @@
 | `id` / `externalId` | string / string \| null | 本地消息 id / 渠道消息 id |
 | `channelId` / `conversationId` | string | 渠道与会话 id |
 | `conversationKind` | `GROUP` \| `PRIVATE` | 会话类型 |
+| `conversationExternalId` | string | 来源群号（群聊）或对方 QQ 号（私聊）；没有可用来源时为空串 |
 | `isSelf` | boolean | 是否自己发出（自己发出的消息不会触发管线） |
 | `sender` | `{ id, name }` | 发送者 ID 与昵称 |
 | `text` | string | 消息正文 |
@@ -93,11 +95,15 @@
 | `hasQuote` | boolean | 是否带引用 |
 | `quote` | 对象 \| null | 引用快照：`messageId`、`externalId`、`author`（`{ id, name }`）、`text`、`kind`、`sentAt`、`images`（引用图片引用）、`imageCount` |
 | `images` | string[] | 消息图片引用 |
-| `imageCount` / `voiceCount` | number | 图片、语音数量 |
+| `imageCount` | number | 图片数量 |
+| `voices` | 对象[] | 语音段，按消息顺序：`url`、`position`、`duration`（秒，可为 null）、`transcript`（NapCat 转写，可为 null）、`mimeType`、`byteSize` |
+| `voiceCount` | number | 语音数量 |
 | `isForward` | boolean | 是否合并转发 |
 | `sentAt` | string（ISO） | 发送时间 |
 
-### `object.get` 对象取值
+含语音的消息会先等待转写完成再运行管线，因此 `voices[].transcript` 在运行期间通常已有值；静音、过短或转写失败时仍为 null。纯文本与图片消息不受影响，不产生额外等待。
+
+### `object.get` 消息对象取值
 
 `category = data`。输入 `value`（json），配置 `path` 为点号路径：
 
@@ -107,7 +113,7 @@
 | `text` | text | 字符串原样输出，其它值转成 JSON 文本 |
 | `found` | boolean | 值存在且不为 null，可直接用作连线条件 |
 
-配置字段 `path` 在卡片和检查器里都是下拉菜单，选项覆盖：`sender.name`、`sender.id`、`kind`、`isForward`、`imageCount`、`voiceCount`；引用相关：`quote`（配合 `found` 判断有无引用）、`quote.author.name`、`quote.author.id`、`quote.text`、`quote.images`、`quote.images.0`、`quote.imageCount`；以及整个消息对象（空路径）。历史图里的自定义路径会以「自定义」选项保留。
+配置字段 `path` 在卡片和检查器里都是下拉菜单，选项覆盖：`sender.name`、`sender.id`、`kind`、`isForward`、`imageCount`、`voices`、`voices.0.transcript`、`voices.0.url`、`voices.0.duration`、`voiceCount`；引用相关：`quote`（配合 `found` 判断有无引用）、`quote.author.name`、`quote.author.id`、`quote.text`、`quote.images`、`quote.images.0`、`quote.imageCount`；以及整个消息对象（空路径）。历史图里的自定义路径会以「自定义」选项保留。
 
 ### `message.output` 消息输出
 
@@ -134,8 +140,11 @@
 | `{{节点.字段}}` | 在模板字符串中插值为文本，例如 `{{input.object.sender.name}} 说：{{input.text}}` |
 | `input.*` | 读取当前节点已接线的输入端口；`multiple` 端口是数组。模板文本的 `object` 输入可用 `{{input.object.sender.name}}` 直接取消息对象字段 |
 | `message.*` | 直接读取原始消息快照，字段同 `message.input` 的 `PipelineMessage` |
+| `$vars.名称` / `{{vars.名称}}` | 读取管线变量的当前值；变量名支持任意语言的字母、数字、下划线和连字符 |
 
-`message` 暴露的字段：`messageId`、`channelId`、`conversationId`、`conversationKind`、`externalId`、`isSelf`、`senderId`、`senderName`、`text`、`kind`、`quote`（`{ authorName, text, images } | null`）、`imageCount`、`voiceCount`、`sentAt`。
+管线变量在画布右侧声明，名称本身就是后端使用的 id，可以随意使用中文等任意语言，不需要额外的英文标识。
+
+`message` 暴露的字段：`messageId`、`channelId`、`conversationId`、`conversationKind`、`conversationExternalId`（群号或对方 QQ 号）、`externalId`、`isSelf`、`senderId`、`senderName`、`text`、`kind`、`quote`（`{ authorName, text, images } | null`）、`images`、`imageCount`、`voices`（`{ url, position, duration, transcript, mimeType, byteSize }[]`）、`voiceCount`、`sentAt`。
 
 ## 节点目录
 
@@ -145,12 +154,13 @@
 
 | 类型 | 输入 | 输出 | 配置 |
 | --- | --- | --- | --- |
-| `object.get` 对象取值 | `value`（json） | `value`（any）、`text`（text）、`found`（boolean） | `path` 下拉选择（发送者昵称/ID、正文、类型、引用作者/正文/图片、计数、时间、整个对象等），默认 `sender.name`；卡片与检查器都可直接切换 |
+| `object.get` 消息对象取值 | `value`（json） | `value`（any）、`text`（text）、`found`（boolean） | `path` 下拉选择（发送者昵称/ID、正文、类型、来源群号/QQ 号、引用作者/正文/图片、计数、时间、整个对象等），默认 `sender.name`；卡片与检查器都可直接切换 |
 
 ### 文本（text）
 
 | 类型 | 输入 | 输出 | 配置 |
 | --- | --- | --- | --- |
+| `text.constant` 固定文本 | 无 | `text` 固定文本（text） | `text`，支持 `{{vars.名称}}`、`{{message.text}}` 等模板引用；没有输入端口，无需上游激活，每次运行都会执行 |
 | `text.template` 模板文本 | `text`（text，可选）、`object`（json，可选） | `text` 拼出的文本（text） | `template`，默认 `收到：{{input.text}}`；接入 `object` 后可用 `{{input.object.sender.name}}` |
 | `text.transform` 文本整形 | `text`（text） | `text` 处理后的文本（text） | `mode`（trim/collapse/upper/lower/prefix/suffix）、`argument` |
 | `text.regex` 正则提取 | `text`（text） | `matched`（boolean）、`match`（text）、`groups`（json）、`text` 原文本（text） | `pattern`、`flags`（仅 `imsu`） |
@@ -162,6 +172,13 @@
 | --- | --- | --- | --- |
 | `logic.contains` 包含判断 | `text`（text） | `matched`（boolean）、`text` 原文本（text） | `value`、`caseSensitive` |
 | `logic.compare` 值比较 | `left`（any）、`right`（any，可选） | `matched`（boolean）、`left` / `right` 实际值（any） | `operator`（eq/neq/gt/gte/lt/lte/contains/notContains）、`left` / `right` 未连线时的引用 |
+| `logic.whitelist` 来源过滤 | `message`（json） | `matched`（boolean）、`value` 原消息对象（any）、`conversationKind`（text）、`conversationExternalId`（text） | `mode`（off/whitelist/blacklist）、`groupWhitelist` 群号名单、`privateWhitelist` QQ 号名单（各自换行、逗号或空格分隔） |
+
+「来源过滤」只接受消息对象输入：把「消息输入」的 `message` 端口接到它的 `message` 输入，卡片从这里读取 `conversationKind` 与 `conversationExternalId`，不再另读运行时的会话记录。群号和 QQ 号分两列：群聊只比对 `groupWhitelist`，私聊只比对 `privateWhitelist`（即 `conversationExternalId`，和聊天列表里看到的号码一致，不是数据库内部会话 ID），所以即使某个群号恰好和某个 QQ 号相同，也不会把另一类来源误放行。
+
+`mode` 是三态开关：`off` 全部放行；`whitelist` 只放行名单内的来源，名单为空时该类来源全部不放行；`blacklist` 拦截名单内的来源，名单为空时不拦截任何来源。卡片不再有独立的来源类型过滤，只按名单判定。把出线的条件设为 `matched = true`，下游就只会在放行的会话上执行。试跑面板可以指定来源类型（私聊 / 群聊）和来源群号 / QQ 号，用来验证名单是否命中；留空表示没有来源账号，白名单不会命中，黑名单不会拦截。
+
+旧版单一 `whitelist` 会在启动迁移时按原 `source` 拆进对应列（`any` 写入两列）并记录警告；旧配置没有 `mode` 时，两列都为空迁移为 `off`，否则迁移为 `whitelist`（非空旧图的空列会提示该类来源不再放行）；旧的 `source` 配置会被删除；旧的 `value` 输入端连线也会自动改接到 `message`。
 
 ### 流程（flow）
 
@@ -170,6 +187,14 @@
 | `flow.delay` 延时等待 | `value`（any） | `value` 原样透传（any）、`delayedAt` 完成时间（text）、`waitedMs` 实际等待毫秒（number） | `delayMs`，范围 0–60000，默认 3000；保存时校验 |
 
 延时卡片由运行器提供 `wait(ms)`：等待计入该节点与整次运行的耗时，进程重启或运行取消时等待会立即中止并记为 `CANCELLED`。因为运行是逐节点串行的，延时也会推迟同一次运行中排在它后面的所有分支。
+
+### 注释（note）
+
+| 类型 | 输入 | 输出 | 配置 |
+| --- | --- | --- | --- |
+| `note.text` 文字描述 | 无 | 无 | `text`：多行说明文字（≤ 4000 字符）；双击卡片直接编辑，或选中后在检查器修改 |
+
+注释卡片是纯布局卡片：`layout: true`，运行器跳过且不写轨迹，保存校验不要求系统卡片外的最小连线；因为没有端口，任何指向它的连线都会在保存时被拒绝。它最适合标注分支用途、临时备忘或记录调参结论。
 
 ## 默认图
 
@@ -231,6 +256,6 @@ input.text ──► contains ──(matched = true)──► template ──┐
 
 ## 新增节点
 
-1. 在 `pipeline-nodes.ts` 定义 `type`、`label`、`category`、`description`、`defaultConfig`、`fields`、`inputs`、`outputs`、`run`；需要锁定卡片时加 `system: true`。
+1. 在 `pipeline-nodes.ts` 定义 `type`、`label`、`category`、`description`、`defaultConfig`、`fields`、`inputs`、`outputs`、`run`；需要锁定卡片时加 `system: true`，只做画布注释时加 `layout: true`（运行器会跳过）。
 2. 输入端口声明 `kind`，按需加 `optional` / `multiple`；输出键需与 `run` 返回对象的键一致。
 3. 注册后目录接口自动带出新节点，画布「添加节点」、检查器与节点文档抽屉无需改动；保存时自动参与类型校验。

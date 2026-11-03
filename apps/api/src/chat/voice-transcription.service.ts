@@ -30,9 +30,9 @@ export class VoiceTranscriptionService {
       channelId: string;
       conversationId: string;
     },
-  ): Promise<void> {
+  ): Promise<{ voiceId: string; transcript: string } | null> {
     if (!message.externalId) {
-      return;
+      return null;
     }
 
     const voice = await this.prisma.chatVoiceAsset.findFirst({
@@ -42,7 +42,7 @@ export class VoiceTranscriptionService {
     });
 
     if (!voice) {
-      return;
+      return null;
     }
 
     for (const delay of RETRY_DELAYS_MS) {
@@ -65,10 +65,11 @@ export class VoiceTranscriptionService {
         conversationId: message.conversationId,
         messageId: message.id,
       });
-      return;
+      return { voiceId: voice.id, transcript: description };
     }
 
     this.logger.debug(`语音未获得转写文本：${message.externalId}`);
+    return null;
   }
 
   private async request(client: OneBotRequester, externalId: string): Promise<string | null> {

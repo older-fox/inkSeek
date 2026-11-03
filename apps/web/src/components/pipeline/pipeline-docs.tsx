@@ -32,6 +32,7 @@ const CATEGORY_ORDER: ChatPipelineNodeCategory[] = [
   'text',
   'logic',
   'flow',
+  'note',
 ];
 
 export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
@@ -105,11 +106,19 @@ export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
                 </dd>
               </div>
               <div>
+                <dt className="inline font-mono text-mist-200">注释卡片</dt>
+                <dd className="inline">
+                  {' '}
+                  「文字描述」只用来在画布上写说明：没有端口，不参与运行，也不会出现在运行轨迹里。
+                  双击卡片可以直接编辑，或选中后在右侧检查器修改。
+                </dd>
+              </div>
+              <div>
                 <dt className="inline font-mono text-mist-200">源卡片</dt>
                 <dd className="inline">
                   {' '}
-                  没有输入端口的卡片（取消息内容、固定内容）每次运行都直接执行，
-                  不需要上级激活，适合提供判定用的固定值或消息字段；读取变量在没有接线时也会直接执行。
+                  没有输入端口的卡片（固定内容、固定文本）每次运行都直接执行，可以当作常量来源；
+                  读取变量在没有接线时也会直接执行。
                   要让读取发生在写入之后，把「写入变量」的{' '}
                   <span className="font-mono">value</span> 接到「读取变量」的顺序端口。
                 </dd>
@@ -125,11 +134,15 @@ export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
                   <span className="font-mono">kind</span>、
                   <span className="font-mono">images</span>、
                   <span className="font-mono">imageCount</span>、
+                  <span className="font-mono">voices</span>（每条含{' '}
+                  <span className="font-mono">url</span>、
+                  <span className="font-mono">duration</span> 与转写{' '}
+                  <span className="font-mono">transcript</span>）、
                   <span className="font-mono">voiceCount</span>、
                   <span className="font-mono">isForward</span>、
                   <span className="font-mono">hasQuote</span> 与{' '}
                   <span className="font-mono">quote</span>（引用快照，含{' '}
-                  <span className="font-mono">quote.images</span>）。「对象取值」卡片提供下拉菜单，
+                  <span className="font-mono">quote.images</span>）。「消息对象取值」卡片提供下拉菜单，
                   可直接选择要取出的字段，例如发送者昵称、引用作者、引用图片；选「整个消息对象」
                   则原样输出整个对象。
                 </dd>
@@ -178,6 +191,7 @@ export function PipelineDocs({ catalog, onClose }: PipelineDocsProps) {
                   {' '}
                   读取管线变量，例如 <span className="font-mono">$vars.counter</span>，
                   模板中写作 <span className="font-mono">{'{{vars.counter}}'}</span>。
+                  变量名支持任意语言（如 <span className="font-mono">$vars.白名单</span>），
                   变量在图设置里声明，也可以直接在「读取变量 / 写入变量」的变量下拉底部新建；
                   每次跑图都从声明值开始；「写入变量」只改本次运行的值，不会改动图。
                 </dd>

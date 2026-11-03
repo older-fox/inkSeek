@@ -1217,7 +1217,7 @@ function AddNodeMenu({
   }, [open]);
 
   const categories = (
-    ['system', 'data', 'variable', 'media', 'text', 'logic', 'flow'] as const
+    ['system', 'data', 'variable', 'media', 'text', 'logic', 'flow', 'note'] as const
   ).map((category) => ({
     category,
     style: CATEGORY_STYLE[category],

@@ -356,7 +356,7 @@ function VariableRow({
       return;
     }
     if (!VARIABLE_KEY_PATTERN.test(next)) {
-      setError('仅限字母、数字、下划线或连字符，1–32 个字符');
+      setError('支持任意语言的字母、数字、下划线或连字符，1–32 个字符');
       return;
     }
     if (siblings.some((entry) => entry.key === next)) {
@@ -595,25 +595,26 @@ function NodeInspector({
         </RuntimePanel>
       )}
 
-      <div className="mt-4 space-y-3.5">
+      <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3.5">
         {(definition?.fields ?? []).length === 0 ? (
-          <p className="rounded-lg border border-dashed border-mist-100/[0.1] px-3 py-3 text-[0.62rem] text-mist-600">
+          <p className="col-span-2 rounded-lg border border-dashed border-mist-100/[0.1] px-3 py-3 text-[0.62rem] text-mist-600">
             这个节点没有可配置字段。
           </p>
         ) : (
           definition?.fields.map((field) => (
-            <FieldControl
-              key={field.key}
-              field={field}
-              value={config[field.key]}
-              options={dynamicFieldOptions(field, config, providers, variables)}
-              create={
-                field.optionsSource === 'pipeline-variables'
-                  ? variableSelectCreate(variables, onCreateVariable)
-                  : undefined
-              }
-              onChange={(value) => commitField(field, value)}
-            />
+            <div key={field.key} className={cn('min-w-0', field.width !== 'half' && 'col-span-2')}>
+              <FieldControl
+                field={field}
+                value={config[field.key]}
+                options={dynamicFieldOptions(field, config, providers, variables)}
+                create={
+                  field.optionsSource === 'pipeline-variables'
+                    ? variableSelectCreate(variables, onCreateVariable)
+                    : undefined
+                }
+                onChange={(value) => commitField(field, value)}
+              />
+            </div>
           ))
         )}
       </div>

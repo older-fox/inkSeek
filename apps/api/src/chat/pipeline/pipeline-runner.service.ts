@@ -198,7 +198,8 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       messageId: `debug-${Date.now().toString(36)}`,
       channelId: channelId ?? '',
       conversationId: '',
-      conversationKind: 'PRIVATE',
+      conversationKind: input.conversationKind ?? 'PRIVATE',
+      conversationExternalId: input.conversationExternalId ?? '',
       externalId: null,
       isSelf: false,
       senderId: 'debug',
@@ -208,6 +209,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       quote: null,
       images: [],
       imageCount: 0,
+      voices: [],
       voiceCount: 0,
       sentAt: new Date(),
     };
@@ -331,6 +333,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     try {
       for (const node of order) {
         const definition = getPipelineNode(node.type);
+        // Annotation cards exist for the canvas only: no trace row, no status.
+        if (definition.layout === true) {
+          continue;
+        }
         const nodeEdges = incoming.get(node.id) ?? [];
         const activeEdges = this.activeEdges(nodeEdges, statuses, outputs);
         const inputs = collectInputs(definition, activeEdges, outputs);

@@ -107,6 +107,200 @@ export function migrateLegacyMessagePorts(
   return changed;
 }
 
+/**
+ * `message.get` was a source card that read the inbound message without an
+ * input port, which hid where a value came from. Saved graphs keep their
+ * wiring by turning each one into an `object.get` fed from the message input,
+ * so the card disappears from the palette without changing behaviour.
+ */
+export function migrateRemovedMessageFieldNodes(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  const legacy = graph.nodes.filter((node) => node.type === 'message.get');
+  if (legacy.length === 0) {
+    return false;
+  }
+
+  const input = graph.nodes.find((node) => node.type === 'message.input');
+  if (!input) {
+    warn(`管线图迁移：图中没有消息输入，${legacy.length} 张「取消息内容」卡片已移除`);
+    const legacyIds = new Set(legacy.map((node) => node.id));
+    graph.nodes = graph.nodes.filter((node) => !legacyIds.has(node.id));
+    graph.edges = graph.edges.filter(
+      (edge) => !legacyIds.has(edge.from) && !legacyIds.has(edge.to),
+    );
+    return true;
+  }
+
+  for (const node of legacy) {
+    node.type = 'object.get';
+  }
+
+  for (const node of legacy) {
+    const wired = graph.edges.some((edge) => edge.to === node.id && edge.toPort === 'value');
+    if (!wired) {
+      graph.edges.push({ from: input.id, fromPort: 'message', to: node.id, toPort: 'value' });
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The source whitelist card used one list for both kinds, so a group number
+ * that happened to equal a QQ number could let the wrong conversation through.
+ * Split it into a group-number column and a peer-QQ column, copying legacy
+ * entries into the column(s) the old `source` allowed.
+ */
+export function migrateSourceWhitelistColumns(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  let changed = false;
+
+  for (const node of graph.nodes) {
+    if (node.type !== 'logic.whitelist' || !node.config) {
+      continue;
+    }
+
+    const config = node.config;
+    if (!Object.prototype.hasOwnProperty.call(config, 'whitelist')) {
+      continue;
+    }
+
+    const legacy = typeof config['whitelist'] === 'string' ? config['whitelist'].trim() : '';
+    delete config['whitelist'];
+
+    const targets: Array<'groupWhitelist' | 'privateWhitelist'> =
+      config['source'] === 'group'
+        ? ['groupWhitelist']
+        : config['source'] === 'private'
+          ? ['privateWhitelist']
+          : ['groupWhitelist', 'privateWhitelist'];
+
+    if (legacy.length > 0) {
+      for (const key of targets) {
+        if (config[key] === undefined) {
+          config[key] = legacy;
+        }
+      }
+      warn(
+        `管线图迁移：来源白名单已拆分为群号与 QQ 号两列，旧名单写入了` +
+          `${targets.length === 2 ? '两列' : '对应列'}，请按需删减`,
+      );
+    }
+
+    if (config['groupWhitelist'] === undefined) {
+      config['groupWhitelist'] = '';
+    }
+    if (config['privateWhitelist'] === undefined) {
+      config['privateWhitelist'] = '';
+    }
+    changed = true;
+  }
+
+  return changed;
+}
+
+/**
+ * The source card gained an explicit three-way list mode. Legacy configs
+ * filtered by the list whenever it had entries and ignored it otherwise, so an
+ * empty pair maps to `off` and anything else to `whitelist`. The old per-column
+ * "empty means allow all" no longer applies to whitelist mode, so a half-empty
+ * pair is reported.
+ */
+export function migrateSourceWhitelistMode(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  let changed = false;
+
+  for (const node of graph.nodes) {
+    if (node.type !== 'logic.whitelist' || !node.config) {
+      continue;
+    }
+
+    const config = node.config;
+    if (Object.prototype.hasOwnProperty.call(config, 'mode')) {
+      continue;
+    }
+
+    const group = typeof config['groupWhitelist'] === 'string' ? config['groupWhitelist'].trim() : '';
+    const privateList =
+      typeof config['privateWhitelist'] === 'string' ? config['privateWhitelist'].trim() : '';
+    const mode = group.length === 0 && privateList.length === 0 ? 'off' : 'whitelist';
+    config['mode'] = mode;
+    changed = true;
+
+    if (mode === 'whitelist' && (group.length === 0 || privateList.length === 0)) {
+      const empty = group.length === 0 ? '群号' : 'QQ 号';
+      warn(
+        `管线图迁移：来源过滤已设为白名单，${empty}名单为空，该类来源将不再放行；` +
+          '如需放行请改为黑名单或不启用',
+      );
+    }
+  }
+
+  return changed;
+}
+
+/**
+ * The separate source-type filter was removed: the card only decides by list
+ * membership, choosing the group or QQ column from the message itself. Drop
+ * the stale key so the saved config matches the card definition.
+ */
+export function migrateSourceWhitelistScope(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  let changed = false;
+
+  for (const node of graph.nodes) {
+    if (node.type !== 'logic.whitelist' || !node.config) {
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(node.config, 'source')) {
+      continue;
+    }
+    delete node.config['source'];
+    changed = true;
+    warn('管线图迁移：来源过滤已移除「来源类型」限制，只按名单判定');
+  }
+
+  return changed;
+}
+
+/**
+ * The source whitelist card now reads a connected message object instead of
+ * the runtime message, so legacy edges move from the old `value` port to
+ * `message`. Without the rewire the card would stay skipped.
+ */
+export function migrateSourceWhitelistInput(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  const whitelistIds = new Set(
+    graph.nodes.filter((node) => node.type === 'logic.whitelist').map((node) => node.id),
+  );
+  if (whitelistIds.size === 0) {
+    return false;
+  }
+
+  let changed = false;
+  for (const edge of graph.edges) {
+    if (whitelistIds.has(edge.to) && edge.toPort === 'value') {
+      edge.toPort = 'message';
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    warn('管线图迁移：来源白名单的输入改为消息对象，原连线已接到 message 端口');
+  }
+  return changed;
+}
+
 function freeNodeId(base: string, used: Set<string>): string {
   if (!used.has(base)) {
     return base;

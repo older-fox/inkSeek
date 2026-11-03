@@ -9,7 +9,7 @@ import type {
   ChatPipelineVariable,
 } from '@inkseek/shared';
 import type { LucideIcon } from 'lucide-react';
-import { Braces, Cpu, GitBranch, Images, Timer, Type, Variable } from 'lucide-react';
+import { Braces, Cpu, GitBranch, Images, StickyNote, Timer, Type, Variable } from 'lucide-react';
 import type { PipelineSelectCreate } from './pipeline-select';
 
 export const CARD_WIDTH = 248;
@@ -87,6 +87,14 @@ export const CATEGORY_STYLE: Record<
     background: 'bg-[#6fc0aa]/[0.08]',
     dot: 'bg-[#6fc0aa]',
   },
+  note: {
+    label: '注释',
+    icon: StickyNote,
+    text: 'text-[#d6c49a]',
+    border: 'border-[#bfa878]/30',
+    background: 'bg-[#bfa878]/[0.08]',
+    dot: 'bg-[#bfa878]',
+  },
 };
 
 export const NODE_STATUS_STYLE: Record<
@@ -159,7 +167,31 @@ export function cardRows(definition: ChatPipelineNodeType | null): number {
   return Math.max(1, definition?.inputs.length ?? 0, definition?.outputs.length ?? 0);
 }
 
-export function cardHeight(definition: ChatPipelineNodeType | null): number {
+const NOTE_LINE_HEIGHT = 20;
+const NOTE_CHARS_PER_LINE = 26;
+
+/** Text carried by a layout-only note card. */
+export function noteTextOf(config: Record<string, unknown> | null | undefined): string {
+  const text = config?.['text'];
+  return typeof text === 'string' ? text : '';
+}
+
+/** Rough wrapped line count; overestimating only adds slack to the fit view. */
+export function noteLineCount(text: string): number {
+  return text.split('\n').reduce((total, line) => {
+    return total + Math.max(1, Math.ceil([...line].length / NOTE_CHARS_PER_LINE));
+  }, 0);
+}
+
+export function cardHeight(
+  definition: ChatPipelineNodeType | null,
+  config?: Record<string, unknown> | null,
+): number {
+  if (definition?.layout) {
+    const lines = Math.max(1, noteLineCount(noteTextOf(config) || '双击编辑说明…'));
+    return CARD_HEADER_HEIGHT + 8 + lines * NOTE_LINE_HEIGHT + 12;
+  }
+
   return (
     CARD_HEADER_HEIGHT +
     PORTS_PADDING_TOP +
@@ -364,7 +396,7 @@ export function wouldCreateCycle(
   return false;
 }
 
-export const VARIABLE_KEY_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+export const VARIABLE_KEY_PATTERN = /^[\p{L}\p{N}\p{M}_-]{1,32}$/u;
 export const MAX_PIPELINE_VARIABLES = 32;
 
 /** Create-row config for dropdowns that pick a pipeline variable. */
@@ -374,11 +406,11 @@ export function variableSelectCreate(
 ): PipelineSelectCreate {
   return {
     label: '新建变量',
-    placeholder: '变量名，如 counter',
+    placeholder: '变量名，如 计数器 或 counter',
     maxLength: 32,
     validate: (value) => {
       if (!VARIABLE_KEY_PATTERN.test(value)) {
-        return '仅限字母、数字、下划线或连字符，1–32 个字符';
+        return '支持任意语言的字母、数字、下划线或连字符，1–32 个字符';
       }
       if (variables.some((variable) => variable.key === value)) {
         return '该变量已存在，直接选择即可';

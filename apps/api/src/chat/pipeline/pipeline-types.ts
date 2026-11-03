@@ -5,6 +5,7 @@ import type {
   ChatPipelineIoField,
   ChatPipelineJoin,
   ChatPipelineNodeCategory,
+  ChatPipelineVoiceValue,
 } from '@inkseek/shared';
 import type { PipelineGraph, PipelineNode } from './pipeline-graph.js';
 
@@ -13,6 +14,8 @@ export interface PipelineMessage {
   channelId: string;
   conversationId: string;
   conversationKind: ChatConversationKind;
+  /** External conversation id: group number for groups, peer QQ for private chats. */
+  conversationExternalId: string;
   externalId: string | null;
   isSelf: boolean;
   senderId: string;
@@ -33,6 +36,8 @@ export interface PipelineMessage {
   /** Stored image references (media URLs), in message order. */
   images: string[];
   imageCount: number;
+  /** Stored voice segments in message order; transcription is awaited before the run. */
+  voices: ChatPipelineVoiceValue[];
   voiceCount: number;
   sentAt: Date;
 }
@@ -115,6 +120,11 @@ export interface PipelineNodeDefinition {
   description: string;
   /** Locked card: exactly one instance must exist and it cannot be removed. */
   system?: boolean;
+  /**
+   * Annotation card: placed on the canvas only. The runner skips it entirely,
+   * so it never opens a node row and has no ports to connect.
+   */
+  layout?: boolean;
   /** Join mode used when the node is added from the palette. */
   defaultJoin?: ChatPipelineJoin;
   /** Runs even without incoming edges; for cards whose inputs only order execution. */
