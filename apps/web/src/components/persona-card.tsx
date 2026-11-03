@@ -16,6 +16,18 @@ import type { Persona, PersonaAccent, PersonaTrait } from '@/lib/personas';
 import { ExpandButton, PersonaTextDialog, useClampedOverflow } from './persona-card-text';
 
 const CARD_HEIGHT = 'h-[33rem]';
+const ADDRESS_PREVIEW_MAX = 36;
+
+function addressPreview(value: string): string {
+  if (value.length <= ADDRESS_PREVIEW_MAX) {
+    return value;
+  }
+
+  const clipped = value.slice(0, ADDRESS_PREVIEW_MAX);
+  const boundary = clipped.lastIndexOf('、');
+
+  return `${boundary > 0 ? clipped.slice(0, boundary) : clipped}…`;
+}
 
 function PersonaAvatar({ name, accent }: { name: string; accent: PersonaAccent }) {
   return (
@@ -109,6 +121,7 @@ function PersonaFront({
   const quote = useClampedOverflow<HTMLParagraphElement>(persona.quote);
   const languageStyle = useClampedOverflow<HTMLParagraphElement>(persona.languageStyle);
   const addressStyle = useClampedOverflow<HTMLParagraphElement>(persona.addressStyle);
+  const addressText = addressPreview(persona.addressStyle);
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5">
@@ -220,7 +233,7 @@ function PersonaFront({
               <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
                 称呼
               </p>
-              {addressStyle.overflow && (
+              {(addressStyle.overflow || addressText !== persona.addressStyle) && (
                 <ExpandButton
                   active={active}
                   onClick={() => onExpand(`${persona.name} · 称呼`, persona.addressStyle)}
@@ -231,7 +244,7 @@ function PersonaFront({
               ref={addressStyle.ref}
               className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400"
             >
-              {persona.addressStyle || '尚未设定'}
+              {addressText || '尚未设定'}
             </p>
           </div>
         </div>

@@ -54,7 +54,10 @@ export function personaViewOf(record: PersonaSummary): Persona {
       { label: '占有', value: data.possessiveness_base },
     ],
     languageStyle: profile.languageStyle,
-    addressStyle: profile.addressStyle,
+    addressStyle: data.advanced.allowed_addresses
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join('、'),
     story: data.backstory,
     taboos: data.taboos.filter((item) => item.trim()),
     physical: [
