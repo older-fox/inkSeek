@@ -62,7 +62,7 @@ export function MessagePipelinePage() {
               visible: { opacity: 1, y: 0 },
             }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="rounded-2xl border border-mist-100/[0.07] bg-ink-900/40 p-4 backdrop-blur-sm transition hover:border-brass-400/25 hover:bg-ink-900/60"
+            className="rounded-2xl border border-mist-100/[0.07] bg-ink-900/40 p-4 transition hover:border-brass-400/25 hover:bg-ink-900/60"
           >
             <div className="flex items-center justify-between">
               <span className="grid size-9 place-items-center rounded-xl border border-brass-400/20 bg-brass-400/[0.08] text-brass-300">
@@ -82,7 +82,7 @@ export function MessagePipelinePage() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="mt-8 rounded-2xl border border-dashed border-mist-100/[0.14] bg-ink-900/25 px-6 py-10 text-center backdrop-blur-sm"
+        className="mt-8 rounded-2xl border border-dashed border-mist-100/[0.14] bg-ink-900/30 px-6 py-10 text-center"
       >
         <span className="mx-auto grid size-11 place-items-center rounded-xl border border-mist-100/[0.08] bg-ink-950/40 text-mist-600">
           <Construction className="size-5" strokeWidth={1.5} />
