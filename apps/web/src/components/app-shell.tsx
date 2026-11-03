@@ -3,8 +3,6 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
-  Bot,
-  CalendarClock,
   ChevronRight,
   Compass,
   LoaderCircle,
@@ -39,8 +37,6 @@ const navItems: NavItem[] = [
   { label: '人格中心', icon: UsersRound, to: '/personas' },
   { label: '互联中心', icon: Waypoints, to: '/connections' },
   { label: '消息管线', icon: Workflow, to: '/pipeline' },
-  { label: '智能体', icon: Bot, soon: true },
-  { label: '定时任务', icon: CalendarClock, soon: true },
   { label: '数据洞察', icon: BarChart3, soon: true },
 ];
 

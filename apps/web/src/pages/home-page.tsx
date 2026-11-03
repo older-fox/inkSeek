@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowUpRight, BarChart3, Bot, CalendarClock, MessageSquare, Sparkles } from 'lucide-react';
+import { ArrowUpRight, BarChart3, MessageSquare, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 import { meQuery } from '@/lib/queries';
 
@@ -8,11 +8,6 @@ const modules = [
     icon: MessageSquare,
     title: '对话控制台',
     description: '流式对话、工具调用、中断与重试，一条时间线看清执行轨迹。',
-  },
-  {
-    icon: CalendarClock,
-    title: '定时任务',
-    description: 'Cron 调度、失败重试与执行历史，让智能体按时醒来。',
   },
   {
     icon: BarChart3,
@@ -52,8 +47,7 @@ export function HomePage() {
           {greeting}，{user?.displayName ?? ''}
         </h1>
         <p className="mt-4 max-w-2xl text-[0.95rem] leading-7 text-mist-500">
-          控制台已经就绪。账户与 Redis 配置均已写入数据库，接下来可以接入第一个智能体，
-          或从一条定时任务开始。
+          控制台已经就绪。账户与 Redis 配置均已写入数据库，可以从人格中心或互联中心开始配置。
         </p>
       </motion.div>
 
@@ -64,7 +58,7 @@ export function HomePage() {
           hidden: {},
           visible: { transition: { staggerChildren: 0.09, delayChildren: 0.18 } },
         }}
-        className="mt-11 grid gap-4 sm:grid-cols-3"
+        className="mt-11 grid gap-4 sm:grid-cols-2"
       >
         {modules.map(({ icon: Icon, title, description }) => (
           <motion.article
@@ -115,10 +109,6 @@ export function HomePage() {
           <p className="mt-0.5 text-[0.7rem] text-mist-600">
             后续模块将在此基础上逐步启用，无需重新初始化
           </p>
-        </div>
-        <div className="flex items-center gap-2 font-mono text-[0.6rem] uppercase tracking-[0.16em] text-jade-300">
-          <Bot className="size-3.5" />
-          Agent ready
         </div>
       </motion.div>
     </div>
