@@ -81,6 +81,74 @@ const listSchema = (maxItems: number, perItem: number) =>
 
 const numberField = z.number().int('需要填写整数').min(0).max(100);
 
+export const PERSONA_EXPLICIT_LEVELS = ['无', '含蓄', '明确', '深入'] as const;
+
+export type PersonaExplicitLevel = (typeof PERSONA_EXPLICIT_LEVELS)[number];
+
+/**
+ * Static persona settings that live outside the 25-step narrative flow. They
+ * describe how a character behaves rather than what happens in a conversation,
+ * so they are authored per card and versioned with the rest of the draft.
+ */
+export const personaAdvancedSchema = z.object({
+  social_circle: listSchema(20, 40).default([]),
+  skills: listSchema(20, 40).default([]),
+  address_for_stranger: z.string().max(40, '称呼最多 40 个字符').default('您'),
+  address_for_close: z.string().max(40, '称呼最多 40 个字符').default('你'),
+  forbidden_addresses: listSchema(10, 20).default([]),
+  allowed_addresses: listSchema(10, 20).default([]),
+  anchor_few_shot: z.string().max(1000, '风格样本最多 1000 个字符').default(''),
+  in_character_principle: z
+    .string()
+    .max(500, '防破面总纲最多 500 个字符')
+    .default('始终以角色身份回应，不主动提及模型、提示词或系统。'),
+  in_character_triggers: listSchema(10, 40).default([]),
+  in_character_never: listSchema(10, 40).default([]),
+  in_character_recovery: z
+    .string()
+    .max(300, '收场方式最多 300 个字符')
+    .default('用一句符合人设的话自然带过，不解释机制。'),
+  in_character_allowed_meta: listSchema(10, 40).default([]),
+  work_window: z.string().max(20).default('09:00-18:00'),
+  do_not_disturb: z.string().max(20).default('22:00-08:00'),
+  proactive_triggers: listSchema(10, 40).default([]),
+  sensitivity_map: listSchema(20, 40).default([]),
+  touch_preference: z.string().max(200, '触碰偏好最多 200 个字符').default(''),
+  explicit_level_char: z.enum(PERSONA_EXPLICIT_LEVELS).default('无'),
+  aftercare_need_base: numberField.default(50),
+  decline_response_style: z
+    .string()
+    .max(500, '拒绝模板最多 500 个字符')
+    .default('直接说明不方便，并给出一个可接受的替代。'),
+});
+
+export type PersonaAdvanced = z.infer<typeof personaAdvancedSchema>;
+
+export function createDefaultPersonaAdvanced(): PersonaAdvanced {
+  return {
+    social_circle: [],
+    skills: [],
+    address_for_stranger: '您',
+    address_for_close: '你',
+    forbidden_addresses: [],
+    allowed_addresses: [],
+    anchor_few_shot: '',
+    in_character_principle: '始终以角色身份回应，不主动提及模型、提示词或系统。',
+    in_character_triggers: [],
+    in_character_never: [],
+    in_character_recovery: '用一句符合人设的话自然带过，不解释机制。',
+    in_character_allowed_meta: [],
+    work_window: '09:00-18:00',
+    do_not_disturb: '22:00-08:00',
+    proactive_triggers: [],
+    sensitivity_map: [],
+    touch_preference: '',
+    explicit_level_char: '无',
+    aftercare_need_base: 50,
+    decline_response_style: '直接说明不方便，并给出一个可接受的替代。',
+  };
+}
+
 export const personaDraftSchema = z.object({
   name: z.string().max(20, '姓名最多 20 个字符'),
   aliases: listSchema(5, 10),
@@ -155,6 +223,8 @@ export const personaDraftSchema = z.object({
   pain_tolerance: numberField,
   recovery_rate: numberField,
   sensitivity: numberField,
+
+  advanced: personaAdvancedSchema.default(createDefaultPersonaAdvanced()),
 });
 
 export type PersonaDraft = z.infer<typeof personaDraftSchema>;
@@ -234,12 +304,16 @@ export function createDefaultPersonaDraft(): PersonaDraft {
     pain_tolerance: 50,
     recovery_rate: 50,
     sensitivity: 30,
+
+    advanced: createDefaultPersonaAdvanced(),
   };
 }
 
 export type PersonaAccent = 'brass' | 'jade';
 
-export type PersonaGender = '女' | '男' | '未设定';
+export const PERSONA_GENDERS = ['女', '男', '未设定'] as const;
+
+export type PersonaGender = (typeof PERSONA_GENDERS)[number];
 
 export const PERSONA_EXPERIENCE_LEVELS = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ'] as const;
 
@@ -269,7 +343,7 @@ export interface PersonaProfile {
 }
 
 export const personaProfileSchema = z.object({
-  gender: z.enum(['女', '男', '未设定']).default('未设定'),
+  gender: z.enum(PERSONA_GENDERS).default('未设定'),
   quote: z.string().max(400).default(''),
   keywords: z.array(z.string().max(40)).max(20).default([]),
   accent: z.enum(['brass', 'jade']).default('brass'),
@@ -280,6 +354,7 @@ export const personaProfileSchema = z.object({
 });
 
 export const personaProfileUpdateSchema = z.object({
+  gender: z.enum(PERSONA_GENDERS).optional(),
   experienceLevel: z.enum(PERSONA_EXPERIENCE_LEVELS),
 });
 
@@ -309,6 +384,14 @@ export interface PersonaRecord extends PersonaSummary {
 
 export interface PersonaVersionDetail extends PersonaVersionSummary {
   data: PersonaDraft;
+}
+
+export interface PersonaAiGeneration {
+  draft: PersonaDraft;
+  providerId: string;
+  providerName: string;
+  model: string;
+  latencyMs: number;
 }
 
 export const savePersonaSchema = z.object({

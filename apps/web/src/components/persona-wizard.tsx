@@ -5,6 +5,7 @@ import {
   History,
   LoaderCircle,
   Save,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   TriangleAlert,
@@ -17,11 +18,14 @@ import { createPortal } from 'react-dom';
 import {
   experienceLabelOf,
   PERSONA_EXPERIENCE_LEVELS,
+  type PersonaAdvanced,
   type PersonaExperienceLevel,
+  type PersonaGender,
   type PersonaRecord,
   type PersonaSummary,
 } from '@inkseek/shared';
 import { GhostButton, PrimaryButton } from '@/components/button';
+import { PersonaAdvancedPanel } from '@/components/persona-advanced-panel';
 import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
   ChoiceControl,
@@ -60,6 +64,7 @@ import {
   STEPS,
   TOTAL_STEPS,
   validateStep,
+  type ChoiceOption,
   type PersonaDraft,
   type StepErrors,
 } from '@/lib/persona-draft';
@@ -70,7 +75,7 @@ interface PersonaWizardProps {
   persona?: PersonaSummary | null;
 }
 
-type View = 'intro' | 'step' | 'milestone' | 'ai' | 'success';
+type View = 'intro' | 'step' | 'milestone' | 'advanced' | 'ai' | 'success';
 
 interface ResumeState {
   step: number;
@@ -83,6 +88,12 @@ const VIEW_TRANSITION = { duration: 0.24, ease: EASE };
 const EXPERIENCE_OPTIONS = PERSONA_EXPERIENCE_LEVELS.map(
   (level) => `${level} · ${experienceLabelOf(level)}`,
 );
+
+const GENDER_OPTIONS: readonly ChoiceOption<PersonaGender>[] = [
+  { value: '女', label: '女性', hint: '称呼与卡面按女性展示' },
+  { value: '男', label: '男性', hint: '称呼与卡面按男性展示' },
+  { value: '未设定', label: '未设定', hint: '保持中性，不标注性别' },
+];
 
 function splitWindow(value: string, fallbackStart: string, fallbackEnd: string): [string, string] {
   const parsed = parseWindow(value);
@@ -233,6 +244,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   });
   const [data, setData] = useState<PersonaDraft>(createDefaultDraft);
   const [experienceLevel, setExperienceLevel] = useState<PersonaExperienceLevel>('Ⅰ');
+  const [gender, setGender] = useState<PersonaGender>('未设定');
   const [view, setView] = useState<View>('intro');
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -247,10 +259,14 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const saveMutation = useMutation({
-    mutationFn: (input: { draft: PersonaDraft; experienceLevel: PersonaExperienceLevel }) => {
+    mutationFn: (input: {
+      draft: PersonaDraft;
+      experienceLevel: PersonaExperienceLevel;
+      gender: PersonaGender;
+    }) => {
       const payload = {
         data: input.draft,
-        profile: { experienceLevel: input.experienceLevel },
+        profile: { experienceLevel: input.experienceLevel, gender: input.gender },
       };
 
       return persona ? api.updatePersona(persona.id, payload) : api.createPersona(payload);
@@ -288,6 +304,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
     if (persona) {
       setData(persona.data);
       setExperienceLevel(persona.profile.experienceLevel);
+      setGender(persona.profile.gender);
       setStep(1);
       setSavedAt(null);
       setResume(null);
@@ -296,6 +313,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       const draft = loadDraft();
       setData(draft?.data ?? createDefaultDraft());
       setExperienceLevel('Ⅰ');
+      setGender('未设定');
       setStep(draft?.step ?? 1);
       setSavedAt(draft?.updatedAt ?? null);
       setResume(draft ? { step: draft.step, updatedAt: draft.updatedAt } : null);
@@ -341,6 +359,27 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       delete next[key as string];
       return next;
     });
+  };
+
+  const updateAdvanced = (
+    key: keyof PersonaAdvanced,
+    value: PersonaAdvanced[keyof PersonaAdvanced],
+  ) => {
+    const nextValue = Array.isArray(value)
+      ? value.map((item) => item.trim()).filter(Boolean)
+      : value;
+
+    setData((previous) => ({
+      ...previous,
+      advanced: { ...previous.advanced, [key]: nextValue } as PersonaAdvanced,
+    }));
+  };
+
+  const openAdvanced = () => {
+    setDirection(1);
+    setConfirmDiscard(false);
+    setSaveError(null);
+    setView('advanced');
   };
 
   const focusFirstError = () => {
@@ -407,7 +446,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       setErrors({});
     }
 
-    saveMutation.mutate({ draft: data, experienceLevel });
+    saveMutation.mutate({ draft: data, experienceLevel, gender });
   };
 
   const handleNext = () => {
@@ -637,6 +676,15 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                 placeholder="52"
               />
             </div>
+
+            <ChoiceControl
+              label="性别"
+              value={gender}
+              options={GENDER_OPTIONS}
+              onChange={setGender}
+              columns={3}
+              hint="用于称呼与卡面展示，不改变互动规则。"
+            />
 
             <SwitchControl
               label="时间感知"
@@ -1397,6 +1445,16 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                         {editing ? '继续编辑' : resume ? '继续填写' : '开始填写'}
                         <ArrowRight className="size-4" />
                       </PrimaryButton>
+                      {editing && (
+                        <button
+                          type="button"
+                          onClick={openAdvanced}
+                          className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
+                        >
+                          <SlidersHorizontal className="size-4 text-brass-300 transition group-hover:rotate-6" />
+                          进阶档案 · 20 项
+                        </button>
+                      )}
                       {!editing && (
                         <button
                           type="button"
@@ -1672,6 +1730,103 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                       </footer>
                     )}
                   </div>
+                </motion.div>
+              )}
+
+              {view === 'advanced' && (
+                <motion.div
+                  key="advanced"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={VIEW_TRANSITION}
+                  className="relative flex min-h-0 flex-1 flex-col"
+                >
+                  <header className="border-b border-mist-100/[0.07] px-5 pb-4 pt-5 sm:px-8">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <span className="font-mono text-[0.55rem] uppercase tracking-[0.2em] text-brass-400/75">
+                          Advanced Dossier · 20 Fields
+                        </span>
+                        <h2
+                          id="persona-wizard-title"
+                          className="mt-2 font-display text-[1.35rem] font-semibold tracking-tight text-mist-100"
+                        >
+                          进阶档案
+                        </h2>
+                        <p className="mt-1 text-[0.72rem] leading-5 text-mist-500">
+                          不进入 25 步主流程的行为级设置，按需展开；未改动项保持推荐默认。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onClose}
+                        aria-label="取消编辑"
+                        className="shrink-0 rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  </header>
+
+                  <div
+                    ref={scrollRef}
+                    className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-7"
+                  >
+                    <div className="mx-auto w-full max-w-3xl">
+                      <PersonaAdvancedPanel
+                        value={data.advanced}
+                        onChange={updateAdvanced}
+                        onJumpToStep={(target) => {
+                          setDirection(target >= step ? 1 : -1);
+                          setStep(target);
+                          setView('step');
+                          setErrors({});
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {saveError && (
+                    <p className="flex items-start gap-2 border-t border-signal-400/20 bg-signal-400/[0.06] px-5 py-2.5 text-[0.68rem] leading-5 text-signal-400 sm:px-8">
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.8} />
+                      <span className="min-w-0 break-words">{saveError}</span>
+                    </p>
+                  )}
+
+                  <footer className="flex items-center justify-between gap-3 border-t border-mist-100/[0.07] px-5 py-4 sm:px-8">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <GhostButton
+                        type="button"
+                        onClick={() => {
+                          setDirection(-1);
+                          setView('step');
+                        }}
+                        className="h-9 shrink-0 px-3 text-[0.72rem]"
+                      >
+                        <ArrowLeft className="size-3.5" />
+                        返回 25 步
+                      </GhostButton>
+                      <span className="ml-1 hidden min-w-0 items-center gap-1.5 truncate font-mono text-[0.54rem] uppercase tracking-[0.1em] text-mist-600 md:flex">
+                        <span className="size-1.5 shrink-0 rounded-full bg-jade-400" />
+                        {`${persona?.serial ?? ''} · v${persona?.currentVersion ?? 1} · 保存后生成新版本`}
+                      </span>
+                    </div>
+
+                    <PrimaryButton
+                      type="button"
+                      onClick={handleSave}
+                      disabled={saveMutation.isPending}
+                      className="h-10 w-auto shrink-0 px-5 text-[0.76rem]"
+                    >
+                      {saveMutation.isPending ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                      保存修改
+                    </PrimaryButton>
+                  </footer>
                 </motion.div>
               )}
 

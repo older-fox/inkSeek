@@ -1,5 +1,6 @@
 import {
   createDefaultPersonaDraft,
+  personaAdvancedSchema,
   type ConflictStyle,
   type HumorStyle,
   type MemoryBias,
@@ -981,7 +982,10 @@ function hydrateDraft(raw: unknown): PersonaDraft {
   for (const [key, fallback] of Object.entries(defaults)) {
     const value = source[key];
 
-    if (Array.isArray(fallback)) {
+    if (key === 'advanced') {
+      const parsed = personaAdvancedSchema.safeParse(value);
+      merged.advanced = parsed.success ? parsed.data : fallback;
+    } else if (Array.isArray(fallback)) {
       merged[key] = Array.isArray(value)
         ? value.filter((item): item is string => typeof item === 'string')
         : fallback;

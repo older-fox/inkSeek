@@ -94,6 +94,29 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
   put('address_style', profile.addressStyle);
   put('anchor_quote', profile.quote);
 
+  const advanced = data.advanced;
+
+  put('social_circle', advanced.social_circle);
+  put('skills', advanced.skills);
+  put('address_for_stranger', advanced.address_for_stranger);
+  put('address_for_close', advanced.address_for_close);
+  put('forbidden_addresses', advanced.forbidden_addresses);
+  put('allowed_addresses', advanced.allowed_addresses);
+  put('anchor_few_shot', advanced.anchor_few_shot);
+  put('in_character_principle', advanced.in_character_principle);
+  put('in_character_triggers', advanced.in_character_triggers);
+  put('in_character_never', advanced.in_character_never);
+  put('in_character_recovery', advanced.in_character_recovery);
+  put('in_character_allowed_meta', advanced.in_character_allowed_meta);
+  put('work_window', advanced.work_window);
+  put('do_not_disturb', advanced.do_not_disturb);
+  put('proactive_triggers', advanced.proactive_triggers);
+  put('sensitivity_map', advanced.sensitivity_map);
+  put('touch_preference', advanced.touch_preference);
+  put('explicit_level_char', advanced.explicit_level_char);
+  put('aftercare_need_base', advanced.aftercare_need_base);
+  put('decline_response_style', advanced.decline_response_style);
+
   put('confidence', data.confidence);
   put('self_control', data.self_control);
   put('shame', data.shame);

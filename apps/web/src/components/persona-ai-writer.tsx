@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Cpu,
   LoaderCircle,
   Sparkles,
   TriangleAlert,
@@ -9,14 +10,15 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PersonaAiGeneration, PersonaAiProviderOption } from '@inkseek/shared';
 import { GhostButton, PrimaryButton } from '@/components/button';
+import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
   AI_GENERATION_STAGES,
   AI_PROMPT_EXAMPLE,
   AI_PROMPT_MAX,
   describeGeneratedDraft,
-  generatePersonaFromPrompt,
 } from '@/lib/persona-ai';
 import { charCount, clampChars, type PersonaDraft } from '@/lib/persona-draft';
 
@@ -30,6 +32,7 @@ interface PersonaAiWriterProps {
 }
 
 type AiStage = 'idle' | 'writing' | 'ready';
+type ProviderState = 'loading' | 'ready' | 'error';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -43,12 +46,28 @@ export function PersonaAiWriter({
 }: PersonaAiWriterProps) {
   const [stage, setStage] = useState<AiStage>('idle');
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<PersonaDraft | null>(null);
+  const [generation, setGeneration] = useState<PersonaAiGeneration | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [providers, setProviders] = useState<PersonaAiProviderOption[]>([]);
+  const [providerState, setProviderState] = useState<ProviderState>('loading');
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [providerId, setProviderId] = useState('');
+  const [model, setModel] = useState('');
   const timers = useRef<number[]>([]);
+  const requestId = useRef(0);
   const count = charCount(prompt);
   const writing = stage === 'writing';
-  const sections = useMemo(() => (result ? describeGeneratedDraft(result) : []), [result]);
+  const sections = useMemo(
+    () => (generation ? describeGeneratedDraft(generation.draft) : []),
+    [generation],
+  );
+
+  const runnableProviders = useMemo(
+    () => providers.filter((provider) => provider.models.length > 0),
+    [providers],
+  );
+  const selectedProvider = runnableProviders.find((provider) => provider.id === providerId);
+  const canGenerate = providerState === 'ready' && Boolean(selectedProvider) && model.length > 0;
 
   const stopTimers = () => {
     timers.current.forEach((timer) => window.clearTimeout(timer));
@@ -56,21 +75,74 @@ export function PersonaAiWriter({
   };
 
   useEffect(() => {
+    timers.current.forEach((timer) => window.clearTimeout(timer));
+    timers.current = [];
+    requestId.current += 1;
+
     return () => {
       timers.current.forEach((timer) => window.clearTimeout(timer));
       timers.current = [];
+      requestId.current += 1;
     };
   }, []);
 
-  const handleGenerate = () => {
+  useEffect(() => {
+    let active = true;
+
+    api
+      .personaAiProviders()
+      .then((list) => {
+        if (!active) {
+          return;
+        }
+
+        setProviders(list);
+        setProviderState('ready');
+
+        const first = list.find((provider) => provider.models.length > 0);
+
+        if (first) {
+          setProviderId(first.id);
+          setModel(first.models[0] ?? '');
+        }
+      })
+      .catch((cause) => {
+        if (!active) {
+          return;
+        }
+
+        setProviderState('error');
+        setProviderError(
+          cause instanceof ApiError ? cause.message : '无法读取模型提供商，请稍后重试',
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleProviderChange = (nextId: string) => {
+    const next = runnableProviders.find((provider) => provider.id === nextId);
+    setProviderId(nextId);
+    setModel(next?.models[0] ?? '');
+    setError(null);
+  };
+
+  const handleGenerate = async () => {
     if (charCount(prompt.trim()) < 20) {
       setError('请至少写下 20 个字，让 AI 知道 TA 大致是谁。');
       return;
     }
 
+    if (!canGenerate) {
+      setError('还没有可用的模型提供商，请先到设置中添加并测试连接。');
+      return;
+    }
+
     stopTimers();
     setError(null);
-    setResult(null);
+    setGeneration(null);
     setStage('writing');
     setProgress(0);
 
@@ -78,15 +150,41 @@ export function PersonaAiWriter({
 
     AI_GENERATION_STAGES.forEach((item, index) => {
       elapsed += item.delay;
+
+      if (index === AI_GENERATION_STAGES.length - 1) {
+        return;
+      }
+
       timers.current.push(window.setTimeout(() => setProgress(index + 1), elapsed));
     });
 
-    timers.current.push(
-      window.setTimeout(() => {
-        setResult(generatePersonaFromPrompt(prompt));
-        setStage('ready');
-      }, elapsed + 320),
-    );
+    const currentRequest = ++requestId.current;
+
+    try {
+      const result = await api.generatePersonaDraft({
+        prompt: prompt.trim(),
+        providerId,
+        model,
+      });
+
+      if (requestId.current !== currentRequest) {
+        return;
+      }
+
+      stopTimers();
+      setGeneration(result);
+      setProgress(AI_GENERATION_STAGES.length);
+      setStage('ready');
+    } catch (cause) {
+      if (requestId.current !== currentRequest) {
+        return;
+      }
+
+      stopTimers();
+      setStage('idle');
+      setProgress(0);
+      setError(cause instanceof ApiError ? cause.message : '生成失败，请检查网络后重试');
+    }
   };
 
   const handlePromptChange = (value: string) => {
@@ -99,7 +197,7 @@ export function PersonaAiWriter({
 
     if (stage === 'ready') {
       setStage('idle');
-      setResult(null);
+      setGeneration(null);
     }
   };
 
@@ -111,12 +209,19 @@ export function PersonaAiWriter({
     onPromptChange(AI_PROMPT_EXAMPLE);
     setError(null);
     setStage('idle');
-    setResult(null);
+    setGeneration(null);
   };
 
   const handleBack = () => {
     stopTimers();
+    requestId.current += 1;
     onBack();
+  };
+
+  const handleCancel = () => {
+    stopTimers();
+    requestId.current += 1;
+    onCancel();
   };
 
   return (
@@ -136,7 +241,7 @@ export function PersonaAiWriter({
           </span>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={handleCancel}
             aria-label="取消并保存草稿"
             className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
           >
@@ -162,8 +267,8 @@ export function PersonaAiWriter({
                 写一段角色描述，AI 会整理成 25 步档案，再逐项修改。
               </p>
             </div>
-            <span className="ml-auto rounded-full border border-mist-100/10 bg-ink-950/30 px-2.5 py-1 font-mono text-[0.52rem] uppercase tracking-[0.14em] text-mist-600">
-              界面演示
+            <span className="ml-auto rounded-full border border-jade-400/25 bg-jade-400/[0.08] px-2.5 py-1 font-mono text-[0.52rem] uppercase tracking-[0.14em] text-jade-300">
+              模型生成
             </span>
           </div>
 
@@ -232,11 +337,77 @@ export function PersonaAiWriter({
             ))}
           </div>
 
+          <div className="mt-5 rounded-xl border border-mist-100/[0.07] bg-ink-950/25 p-3.5">
+            <div className="flex items-center gap-1.5 text-[0.62rem] font-medium tracking-[0.04em] text-mist-400">
+              <Cpu className="size-3.5 text-brass-300/80" />
+              模型来源
+            </div>
+            <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-[0.58rem] uppercase tracking-[0.12em] text-mist-600">
+                  提供商
+                </span>
+                <select
+                  value={providerId}
+                  onChange={(event) => handleProviderChange(event.target.value)}
+                  disabled={writing || providerState !== 'ready' || runnableProviders.length === 0}
+                  className="h-9 w-full rounded-lg border border-mist-100/10 bg-ink-950/50 px-2.5 text-[0.7rem] text-mist-200 outline-none transition focus:border-brass-400/40 disabled:opacity-60"
+                >
+                  {providerState === 'loading' && <option value="">读取中…</option>}
+                  {providerState !== 'loading' && runnableProviders.length === 0 && (
+                    <option value="">暂无可用提供商</option>
+                  )}
+                  {runnableProviders.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.name} · {provider.protocol}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-[0.58rem] uppercase tracking-[0.12em] text-mist-600">
+                  模型
+                </span>
+                <select
+                  value={model}
+                  onChange={(event) => {
+                    setModel(event.target.value);
+                    setError(null);
+                  }}
+                  disabled={writing || !selectedProvider}
+                  className="h-9 w-full rounded-lg border border-mist-100/10 bg-ink-950/50 px-2.5 text-[0.7rem] text-mist-200 outline-none transition focus:border-brass-400/40 disabled:opacity-60"
+                >
+                  {!selectedProvider && <option value="">暂无可用模型</option>}
+                  {selectedProvider?.models.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {providerState === 'error' ? (
+              <p className="mt-2.5 flex items-start gap-1.5 text-[0.62rem] leading-5 text-signal-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                {providerError ?? '无法读取模型提供商'}
+              </p>
+            ) : providerState === 'ready' && runnableProviders.length === 0 ? (
+              <p className="mt-2.5 flex items-start gap-1.5 text-[0.62rem] leading-5 text-signal-400/90">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                {providers.length === 0
+                  ? '还没有可用的模型提供商。请先到「设置 · 模型提供商」添加并测试连接，再回来生成。'
+                  : '已添加的提供商尚未检测出可用模型，请到设置中重新检测。'}
+              </p>
+            ) : null}
+          </div>
+
           <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:items-center">
             <PrimaryButton
               type="button"
               onClick={handleGenerate}
               loading={writing}
+              disabled={!canGenerate}
               className="h-11 w-full px-6 text-[0.78rem] sm:w-auto"
             >
               {stage === 'ready' ? '重新生成' : '生成属性'}
@@ -263,7 +434,7 @@ export function PersonaAiWriter({
                 <div className="mt-5 rounded-xl border border-brass-400/20 bg-brass-400/[0.05] p-4">
                   <div className="flex items-center gap-2 text-[0.72rem] text-brass-200">
                     <LoaderCircle className="size-4 animate-spin" />
-                    AI 正在整理属性，请稍候…
+                    AI 正在整理属性，请稍候… 大模型通常需要 20–60 秒。
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     {AI_GENERATION_STAGES.map((item, index) => {
@@ -309,7 +480,7 @@ export function PersonaAiWriter({
           </AnimatePresence>
 
           <AnimatePresence initial={false}>
-            {stage === 'ready' && result && (
+            {stage === 'ready' && generation && (
               <motion.div
                 key="ai-result"
                 initial={{ opacity: 0, y: 14 }}
@@ -323,16 +494,20 @@ export function PersonaAiWriter({
                       Generated Draft
                     </p>
                     <h3 className="mt-1.5 font-display text-[1.05rem] font-semibold tracking-tight text-mist-100">
-                      已生成「{result.name}」的档案草稿
+                      已生成「{generation.draft.name}」的档案草稿
                     </h3>
+                    <p className="mt-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-mist-600">
+                      {generation.providerName} · {generation.model} ·{' '}
+                      {(generation.latencyMs / 1000).toFixed(1)}s
+                    </p>
                   </div>
-                  <span className="rounded-full border border-brass-400/25 bg-brass-400/10 px-2.5 py-1 text-[0.6rem] text-brass-300">
-                    演示数据
+                  <span className="rounded-full border border-jade-400/25 bg-jade-400/[0.08] px-2.5 py-1 text-[0.6rem] text-jade-300">
+                    可带入
                   </span>
                 </div>
 
                 <p className="mt-2 text-[0.64rem] leading-5 text-mist-600">
-                  当前为界面演示：结构化属性来自示例模板，世界观与背景故事取自你的提示词。接入模型后，所有字段都将依据提示词生成。
+                  模型已根据提示词生成 25 步档案、性格参数与 20 项进阶字段。带入后仍可逐项修改。
                 </p>
 
                 <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
@@ -370,7 +545,7 @@ export function PersonaAiWriter({
                 <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
                   <PrimaryButton
                     type="button"
-                    onClick={() => onApply(result)}
+                    onClick={() => onApply(generation.draft)}
                     className="h-11 w-full px-6 text-[0.78rem] sm:w-auto"
                   >
                     带入表单并继续

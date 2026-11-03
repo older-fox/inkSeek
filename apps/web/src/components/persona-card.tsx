@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/cn';
 import { formatPersonaTimestamp } from '@/lib/persona-metadata';
 import type { Persona, PersonaAccent, PersonaTrait } from '@/lib/personas';
+import { ExpandButton, PersonaTextDialog, useClampedOverflow } from './persona-card-text';
 
 const CARD_HEIGHT = 'h-[33rem]';
 
@@ -97,11 +98,17 @@ function PersonaFront({
   persona,
   active,
   onEdit,
+  onExpand,
 }: {
   persona: Persona;
   active: boolean;
   onEdit?: () => void;
+  onExpand: (title: string, text: string) => void;
 }) {
+  const quote = useClampedOverflow<HTMLParagraphElement>(persona.quote);
+  const languageStyle = useClampedOverflow<HTMLParagraphElement>(persona.languageStyle);
+  const addressStyle = useClampedOverflow<HTMLParagraphElement>(persona.addressStyle);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5">
       <div
@@ -133,9 +140,20 @@ function PersonaFront({
         </div>
       </div>
 
-      <div className="mt-4 border-l-2 border-brass-400/40 pl-3">
+      <div className="relative mt-4 border-l-2 border-brass-400/40 pl-3">
+        {quote.overflow && (
+          <span className="absolute -top-4 right-0">
+            <ExpandButton
+              active={active}
+              onClick={() => onExpand(`${persona.name} · 台词锚点`, persona.quote)}
+            />
+          </span>
+        )}
         {persona.quote ? (
-          <p className="line-clamp-2 font-display text-[0.92rem] leading-6 text-mist-200">
+          <p
+            ref={quote.ref}
+            className="line-clamp-2 font-display text-[0.92rem] leading-6 text-mist-200"
+          >
             「{persona.quote}」
           </p>
         ) : (
@@ -174,22 +192,44 @@ function PersonaFront({
             className="mt-0.5 size-3.5 shrink-0 text-brass-400/75"
             strokeWidth={1.7}
           />
-          <div className="min-w-0">
-            <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
-              语言风格
-            </p>
-            <p className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
+                语言风格
+              </p>
+              {languageStyle.overflow && (
+                <ExpandButton
+                  active={active}
+                  onClick={() => onExpand(`${persona.name} · 语言风格`, persona.languageStyle)}
+                />
+              )}
+            </div>
+            <p
+              ref={languageStyle.ref}
+              className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400"
+            >
               {persona.languageStyle || '尚未设定'}
             </p>
           </div>
         </div>
         <div className="flex gap-2.5">
           <AtSign className="mt-0.5 size-3.5 shrink-0 text-jade-400/75" strokeWidth={1.7} />
-          <div className="min-w-0">
-            <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
-              称呼
-            </p>
-            <p className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-mono text-[0.54rem] uppercase tracking-[0.18em] text-mist-600">
+                称呼
+              </p>
+              {addressStyle.overflow && (
+                <ExpandButton
+                  active={active}
+                  onClick={() => onExpand(`${persona.name} · 称呼`, persona.addressStyle)}
+                />
+              )}
+            </div>
+            <p
+              ref={addressStyle.ref}
+              className="mt-0.5 line-clamp-2 text-[0.68rem] leading-5 text-mist-400"
+            >
               {persona.addressStyle || '尚未设定'}
             </p>
           </div>
@@ -210,11 +250,15 @@ function PersonaBack({
   persona,
   active,
   onEdit,
+  onExpand,
 }: {
   persona: Persona;
   active: boolean;
   onEdit?: () => void;
+  onExpand: (title: string, text: string) => void;
 }) {
+  const story = useClampedOverflow<HTMLParagraphElement>(persona.story);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[1.5rem] p-5">
       <div className="absolute inset-x-5 top-0 h-px hairline" />
@@ -240,10 +284,21 @@ function PersonaBack({
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.07] bg-ink-950/30 p-3">
-        <span className="grid size-3.5 place-items-center">
-          <Quote className="size-3.5 text-brass-400/70" strokeWidth={1.7} />
-        </span>
-        <p className="mt-1.5 text-[0.76rem] leading-6 text-mist-300">
+        <div className="flex items-center justify-between gap-2">
+          <span className="grid size-3.5 place-items-center">
+            <Quote className="size-3.5 text-brass-400/70" strokeWidth={1.7} />
+          </span>
+          {story.overflow && (
+            <ExpandButton
+              active={active}
+              onClick={() => onExpand(`${persona.name} · 背景故事`, persona.story)}
+            />
+          )}
+        </div>
+        <p
+          ref={story.ref}
+          className="mt-1.5 line-clamp-4 text-[0.76rem] leading-6 text-mist-300"
+        >
           {persona.story || '尚未补全背景故事。'}
         </p>
       </div>
@@ -311,47 +366,67 @@ function PersonaBack({
 
 export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: () => void }) {
   const [flipped, setFlipped] = useState(false);
+  const [expanded, setExpanded] = useState<{ title: string; text: string } | null>(null);
+  const handleExpand = (title: string, text: string) => setExpanded({ title, text });
 
   return (
-    <div
-      className={cn(
-        'group relative',
-        CARD_HEIGHT,
-        'transition-transform duration-300 hover:-translate-y-1',
-      )}
-    >
-      <button
-        type="button"
-        aria-pressed={flipped}
-        aria-label={
-          flipped
-            ? `${persona.name} 的人格档案，当前为背面，点击返回正面`
-            : `${persona.name} 的人格档案，点击查看背面`
-        }
-        onClick={() => setFlipped((value) => !value)}
-        className="absolute inset-0 z-0 cursor-pointer rounded-[1.5rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
-      />
-      <div className="pointer-events-none absolute inset-0 z-10 [perspective:1600px]">
-        <div className="relative h-full w-full [transform-style:preserve-3d]">
-          <motion.div
-            initial={false}
-            animate={{ rotateY: flipped ? 180 : 0 }}
-            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
-          >
-            <PersonaFront persona={persona} active={!flipped} onEdit={onEdit} />
-          </motion.div>
-          <motion.div
-            initial={false}
-            animate={{ rotateY: flipped ? 0 : -180 }}
-            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
-          >
-            <PersonaBack persona={persona} active={flipped} onEdit={onEdit} />
-          </motion.div>
+    <>
+      <div
+        className={cn(
+          'group relative',
+          CARD_HEIGHT,
+          'transition-transform duration-300 hover:-translate-y-1',
+        )}
+      >
+        <button
+          type="button"
+          aria-pressed={flipped}
+          aria-label={
+            flipped
+              ? `${persona.name} 的人格档案，当前为背面，点击返回正面`
+              : `${persona.name} 的人格档案，点击查看背面`
+          }
+          onClick={() => setFlipped((value) => !value)}
+          className="absolute inset-0 z-0 cursor-pointer rounded-[1.5rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+        />
+        <div className="pointer-events-none absolute inset-0 z-10 [perspective:1600px]">
+          <div className="relative h-full w-full [transform-style:preserve-3d]">
+            <motion.div
+              initial={false}
+              animate={{ rotateY: flipped ? 180 : 0 }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+              className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+            >
+              <PersonaFront
+                persona={persona}
+                active={!flipped}
+                onEdit={onEdit}
+                onExpand={handleExpand}
+              />
+            </motion.div>
+            <motion.div
+              initial={false}
+              animate={{ rotateY: flipped ? 0 : -180 }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+              className="glass-panel absolute inset-0 overflow-hidden rounded-[1.5rem] backdrop-blur-none [backface-visibility:hidden]"
+            >
+              <PersonaBack
+                persona={persona}
+                active={flipped}
+                onEdit={onEdit}
+                onExpand={handleExpand}
+              />
+            </motion.div>
+          </div>
         </div>
       </div>
-    </div>
+      <PersonaTextDialog
+        open={expanded !== null}
+        title={expanded?.title ?? ''}
+        text={expanded?.text ?? ''}
+        onClose={() => setExpanded(null)}
+      />
+    </>
   );
 }
 

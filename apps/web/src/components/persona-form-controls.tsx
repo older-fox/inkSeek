@@ -272,7 +272,7 @@ interface ChoiceControlProps<T extends string> {
   required?: boolean;
   hint?: string;
   error?: string;
-  columns?: 1 | 2;
+  columns?: 1 | 2 | 3;
 }
 
 export function ChoiceControl<T extends string>({
@@ -290,7 +290,11 @@ export function ChoiceControl<T extends string>({
       <div
         role="group"
         aria-label={label}
-        className={cn('grid gap-2', columns === 2 && 'sm:grid-cols-2')}
+        className={cn(
+          'grid gap-2',
+          columns === 2 && 'sm:grid-cols-2',
+          columns === 3 && 'sm:grid-cols-3',
+        )}
       >
         {options.map((option) => {
           const selected = option.value === value;

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { resolve } from 'node:path';
+import { AiModule } from './ai/ai.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BootstrapModule } from './bootstrap/bootstrap.module.js';
 import { ChatModule } from './chat/chat.module.js';
@@ -19,6 +20,7 @@ import { SettingsModule } from './settings/settings.module.js';
     DatabaseModule,
     SystemConfigModule,
     AuthModule,
+    AiModule,
     BootstrapModule,
     ChatModule,
     PersonasModule,

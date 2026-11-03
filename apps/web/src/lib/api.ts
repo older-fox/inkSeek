@@ -14,6 +14,9 @@ import type {
   LoginInput,
   ModelProviderInput,
   ModelProviderSaveResult,
+  PersonaAiGenerateInput,
+  PersonaAiGeneration,
+  PersonaAiProviderOption,
   PersonaRecord,
   PersonaSummary,
   PersonaVersionDetail,
@@ -131,6 +134,12 @@ export const api = {
   updatePersona: (id: string, input: SavePersonaInput) =>
     request<PersonaRecord>(`/personas/${encodeURIComponent(id)}`, {
       method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  personaAiProviders: () => request<PersonaAiProviderOption[]>('/ai/persona-providers'),
+  generatePersonaDraft: (input: PersonaAiGenerateInput) =>
+    request<PersonaAiGeneration>('/ai/persona-draft', {
+      method: 'POST',
       body: JSON.stringify(input),
     }),
   chatConversations: (kind: ChatConversationKind) =>

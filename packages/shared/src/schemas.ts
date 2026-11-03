@@ -133,6 +133,19 @@ export const saveConversationPersonaSchema = z.object({
   history: z.array(chatPersonaHistoryEntrySchema).max(200, '人格历史最多保留 200 条').default([]),
 });
 
+export const personaAiGenerateSchema = z.object({
+  prompt: z.string().trim().min(20, '请至少写下 20 个字').max(10000, '提示词最多 10000 个字符'),
+  providerId: z.string().trim().min(1).max(64).optional(),
+  model: z.string().trim().min(1).max(160).optional(),
+});
+
+export interface PersonaAiProviderOption {
+  id: string;
+  name: string;
+  protocol: ModelProviderProtocol;
+  models: string[];
+}
+
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
@@ -143,3 +156,4 @@ export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
 export type SaveConversationPersonaInput = z.infer<typeof saveConversationPersonaSchema>;
+export type PersonaAiGenerateInput = z.infer<typeof personaAiGenerateSchema>;

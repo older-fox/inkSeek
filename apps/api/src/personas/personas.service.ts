@@ -5,8 +5,10 @@ import {
   experienceLabelOf,
   personaDraftSchema,
   personaProfileSchema,
+  type PersonaAdvanced,
   type PersonaDraft,
   type PersonaExperienceLevel,
+  type PersonaGender,
   type PersonaProfile,
   type PersonaRecord,
   type PersonaSummary,
@@ -97,10 +99,15 @@ export class PersonasService {
       });
     }
 
-    const profile = createProfile(data, input.profile?.experienceLevel);
+    const profile = createProfile(
+      data,
+      input.profile?.experienceLevel,
+      input.profile?.gender,
+    );
     const changedFields = [
-      ...Object.keys(data),
+      ...draftFieldKeys(data),
       ...(input.profile ? ['profile.experienceLevel'] : []),
+      ...(input.profile?.gender ? ['profile.gender'] : []),
     ];
 
     const row = await this.prisma.$transaction(async (tx) => {
@@ -142,17 +149,25 @@ export class PersonasService {
     const data = input.data;
     const changedFields = diffFields(previous, data);
     const experienceLevel = input.profile?.experienceLevel;
+    const gender = input.profile?.gender;
     const currentProfile = readProfile(existing.profile);
-    let nextProfile: PersonaProfile | null = null;
+    const profileChanges: Partial<PersonaProfile> = {};
 
     if (experienceLevel && experienceLevel !== currentProfile.experienceLevel) {
-      nextProfile = {
-        ...currentProfile,
-        experienceLevel,
-        experienceLabel: experienceLabelOf(experienceLevel),
-      };
+      profileChanges.experienceLevel = experienceLevel;
+      profileChanges.experienceLabel = experienceLabelOf(experienceLevel);
       changedFields.push('profile.experienceLevel');
     }
+
+    if (gender && gender !== currentProfile.gender) {
+      profileChanges.gender = gender;
+      changedFields.push('profile.gender');
+    }
+
+    const nextProfile =
+      Object.keys(profileChanges).length > 0
+        ? { ...currentProfile, ...profileChanges }
+        : null;
 
     const version = existing.currentVersion + 1;
 
@@ -188,9 +203,10 @@ export class PersonasService {
 function createProfile(
   data: PersonaDraft,
   experienceLevel: PersonaExperienceLevel = 'Ⅰ',
+  gender: PersonaGender = '未设定',
 ): PersonaProfile {
   return {
-    gender: '未设定',
+    gender,
     quote: '',
     keywords: [],
     accent: 'brass',
@@ -244,9 +260,19 @@ function readDraft(value: Prisma.JsonValue): PersonaDraft {
     return parsed.data;
   }
 
+  const defaults = createDefaultPersonaDraft();
+  const source =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const advanced =
+    source.advanced && typeof source.advanced === 'object' && !Array.isArray(source.advanced)
+      ? (source.advanced as Record<string, unknown>)
+      : {};
   const fallback = {
-    ...createDefaultPersonaDraft(),
-    ...(value && typeof value === 'object' && !Array.isArray(value) ? value : {}),
+    ...defaults,
+    ...source,
+    advanced: { ...defaults.advanced, ...advanced },
   };
   const merged = personaDraftSchema.safeParse(fallback);
 
@@ -257,10 +283,29 @@ function readStringArray(value: Prisma.JsonValue): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function diffFields(previous: PersonaDraft, next: PersonaDraft): string[] {
-  return (Object.keys(next) as (keyof PersonaDraft)[]).filter(
-    (key) => JSON.stringify(previous[key]) !== JSON.stringify(next[key]),
+function draftFieldKeys(data: PersonaDraft): string[] {
+  return (Object.keys(data) as (keyof PersonaDraft)[]).flatMap((key) =>
+    key === 'advanced'
+      ? (Object.keys(data.advanced) as (keyof PersonaAdvanced)[]).map(
+          (field) => `advanced.${field}`,
+        )
+      : [key],
   );
+}
+
+function diffFields(previous: PersonaDraft, next: PersonaDraft): string[] {
+  return (Object.keys(next) as (keyof PersonaDraft)[]).flatMap((key) => {
+    if (key === 'advanced') {
+      return (Object.keys(next.advanced) as (keyof PersonaAdvanced)[])
+        .filter(
+          (field) =>
+            JSON.stringify(previous.advanced[field]) !== JSON.stringify(next.advanced[field]),
+        )
+        .map((field) => `advanced.${field}`);
+    }
+
+    return JSON.stringify(previous[key]) === JSON.stringify(next[key]) ? [] : [key];
+  });
 }
 
 function parseAge(value: string): number | null {
