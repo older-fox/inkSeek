@@ -14,3 +14,21 @@
 - 关联位置：
   - 入库与分段：`apps/api/src/chat/chat-messages.service.ts`（`extractContent` / `buildParts`）
   - 上下文组装：`apps/api/src/chat/chat-message-processor.service.ts`
+
+## 消息管线对前端与日志系统不透明
+
+- 现状：一条消息经过 接收 → 归一 → 裁决 → 生成 → 投递 时，各阶段只存在于进程内的调用栈里。
+  前端拿不到任何阶段信息，`/pipeline` 页面只能做静态占位；日志里也没有统一的运行标识，
+  排查「这条消息为什么没回 / 为什么回错」只能靠散落的普通日志拼接。
+- 目标：每个阶段结束时落一行不可变事件（按 runId 归组），前端和日志共享同一份运行标识与阶段数据。
+- 要求：
+  1. 新增只追加的管线事件表（阶段、状态 RUNNING/SUCCEEDED/SKIPPED/FAILED、摘要、结构化详情、
+     模型与 token 用量、耗时、错误码、起止时间），以 runId 串起一条消息的完整轨迹。
+  2. 裁决为 SKIPPED 时明确记录原因，后续阶段不再写行；失败阶段写入错误码与错误信息，且不影响已写事件。
+  3. API 暴露只读运行列表与单条轨迹；前端把占位页换成按阶段展开的时间线，能直接看出在哪一步停下。
+  4. 日志系统在每个阶段输出同一条 runId 的结构化日志，级别与事件状态对应，便于与数据库轨迹互查。
+  5. 事件写入不能反向影响消息处理主链路：写事件失败只记日志，不抛出、不阻断投递。
+- 关联位置：
+  - 消息处理：`apps/api/src/chat/chat-message-processor.service.ts`
+  - 入库：`apps/api/src/chat/chat-messages.service.ts`
+  - 占位页面：`apps/web/src/pages/message-pipeline-page.tsx`
