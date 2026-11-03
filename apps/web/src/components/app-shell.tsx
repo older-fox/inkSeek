@@ -219,7 +219,7 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
           </div>
         </header>
 
-        <main ref={mainRef} className="relative min-h-0 flex-1 overflow-y-auto">
+        <main ref={mainRef} className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 ink-grid opacity-25" />
             <div

@@ -2,9 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import {
   createDefaultPersonaDraft,
   derivedLanguageStyle,
+  experienceLabelOf,
   personaDraftSchema,
   personaProfileSchema,
   type PersonaDraft,
+  type PersonaExperienceLevel,
   type PersonaProfile,
   type PersonaRecord,
   type PersonaSummary,
@@ -95,8 +97,11 @@ export class PersonasService {
       });
     }
 
-    const profile = createProfile(data);
-    const changedFields = Object.keys(data);
+    const profile = createProfile(data, input.profile?.experienceLevel);
+    const changedFields = [
+      ...Object.keys(data),
+      ...(input.profile ? ['profile.experienceLevel'] : []),
+    ];
 
     const row = await this.prisma.$transaction(async (tx) => {
       const serial = await nextSerial(tx);
@@ -136,6 +141,19 @@ export class PersonasService {
     const previous = readDraft(existing.data);
     const data = input.data;
     const changedFields = diffFields(previous, data);
+    const experienceLevel = input.profile?.experienceLevel;
+    const currentProfile = readProfile(existing.profile);
+    let nextProfile: PersonaProfile | null = null;
+
+    if (experienceLevel && experienceLevel !== currentProfile.experienceLevel) {
+      nextProfile = {
+        ...currentProfile,
+        experienceLevel,
+        experienceLabel: experienceLabelOf(experienceLevel),
+      };
+      changedFields.push('profile.experienceLevel');
+    }
+
     const version = existing.currentVersion + 1;
 
     const row = await this.prisma.$transaction(async (tx) => {
@@ -145,6 +163,9 @@ export class PersonasService {
           name: data.name.trim() || existing.name,
           occupation: data.occupation.trim(),
           age: parseAge(data.age) ?? existing.age,
+          ...(nextProfile
+            ? { profile: nextProfile as unknown as Prisma.InputJsonValue }
+            : {}),
           data: data as unknown as Prisma.InputJsonValue,
           currentVersion: version,
           versions: {
@@ -164,14 +185,17 @@ export class PersonasService {
   }
 }
 
-function createProfile(data: PersonaDraft): PersonaProfile {
+function createProfile(
+  data: PersonaDraft,
+  experienceLevel: PersonaExperienceLevel = 'Ⅰ',
+): PersonaProfile {
   return {
     gender: '未设定',
     quote: '',
     keywords: [],
     accent: 'brass',
-    experienceLevel: 'Ⅰ',
-    experienceLabel: '初识',
+    experienceLevel,
+    experienceLabel: experienceLabelOf(experienceLevel),
     languageStyle: derivedLanguageStyle(data),
     addressStyle: '',
   };

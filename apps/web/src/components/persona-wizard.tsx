@@ -14,7 +14,13 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { PersonaRecord, PersonaSummary } from '@inkseek/shared';
+import {
+  experienceLabelOf,
+  PERSONA_EXPERIENCE_LEVELS,
+  type PersonaExperienceLevel,
+  type PersonaRecord,
+  type PersonaSummary,
+} from '@inkseek/shared';
 import { GhostButton, PrimaryButton } from '@/components/button';
 import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
@@ -74,6 +80,9 @@ interface ResumeState {
 const EASE = [0.22, 1, 0.36, 1] as const;
 const STEP_TRANSITION = { duration: 0.26, ease: EASE };
 const VIEW_TRANSITION = { duration: 0.24, ease: EASE };
+const EXPERIENCE_OPTIONS = PERSONA_EXPERIENCE_LEVELS.map(
+  (level) => `${level} · ${experienceLabelOf(level)}`,
+);
 
 function splitWindow(value: string, fallbackStart: string, fallbackEnd: string): [string, string] {
   const parsed = parseWindow(value);
@@ -223,6 +232,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
     staleTime: 10_000,
   });
   const [data, setData] = useState<PersonaDraft>(createDefaultDraft);
+  const [experienceLevel, setExperienceLevel] = useState<PersonaExperienceLevel>('Ⅰ');
   const [view, setView] = useState<View>('intro');
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -237,8 +247,14 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const saveMutation = useMutation({
-    mutationFn: (draft: PersonaDraft) =>
-      persona ? api.updatePersona(persona.id, { data: draft }) : api.createPersona({ data: draft }),
+    mutationFn: (input: { draft: PersonaDraft; experienceLevel: PersonaExperienceLevel }) => {
+      const payload = {
+        data: input.draft,
+        profile: { experienceLevel: input.experienceLevel },
+      };
+
+      return persona ? api.updatePersona(persona.id, payload) : api.createPersona(payload);
+    },
     onSuccess: (record) => {
       setResult(record);
       setSaveError(null);
@@ -271,6 +287,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
 
     if (persona) {
       setData(persona.data);
+      setExperienceLevel(persona.profile.experienceLevel);
       setStep(1);
       setSavedAt(null);
       setResume(null);
@@ -278,6 +295,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
     } else {
       const draft = loadDraft();
       setData(draft?.data ?? createDefaultDraft());
+      setExperienceLevel('Ⅰ');
       setStep(draft?.step ?? 1);
       setSavedAt(draft?.updatedAt ?? null);
       setResume(draft ? { step: draft.step, updatedAt: draft.updatedAt } : null);
@@ -310,6 +328,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   const phase = PHASES[current.phase] ?? PHASES[0]!;
   const savedLabel = formatClock(savedAt);
   const resumePhase = resume ? PHASES[(STEPS[resume.step - 1] ?? STEPS[0]!).phase] : null;
+  const experienceIndex = Math.max(0, PERSONA_EXPERIENCE_LEVELS.indexOf(experienceLevel));
 
   const update = <K extends keyof PersonaDraft>(key: K, value: PersonaDraft[K]) => {
     setData((previous) => ({ ...previous, [key]: value }));
@@ -388,7 +407,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
       setErrors({});
     }
 
-    saveMutation.mutate(data);
+    saveMutation.mutate({ draft: data, experienceLevel });
   };
 
   const handleNext = () => {
@@ -1087,9 +1106,6 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
 
         return (
           <div className="space-y-8">
-            <p className="rounded-xl border border-mist-100/[0.07] bg-ink-950/25 px-4 py-3 text-[0.68rem] leading-5 text-mist-500">
-              滑条可自由调整 0–100，不再受单项范围限制。未调整时使用推荐值。
-            </p>
             {sliders.map((slider) => (
               <SliderControl
                 key={slider.key}
@@ -1100,6 +1116,17 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                 onChange={(value) => update(slider.key, value)}
               />
             ))}
+            {stepId === 25 && (
+              <LevelControl
+                label="经验等级"
+                value={experienceIndex}
+                options={EXPERIENCE_OPTIONS}
+                onChange={(index) =>
+                  setExperienceLevel(PERSONA_EXPERIENCE_LEVELS[index] ?? 'Ⅰ')
+                }
+                hint="相关互动的经验程度，仅作档案标记，不改变同意规则。"
+              />
+            )}
           </div>
         );
       }
@@ -1480,7 +1507,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
 
                     <div
                       ref={scrollRef}
-                      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-7"
+                      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-7"
                     >
                       <div className="mx-auto w-full max-w-3xl">
                         <AnimatePresence mode="wait" initial={false}>

@@ -241,12 +241,28 @@ export type PersonaAccent = 'brass' | 'jade';
 
 export type PersonaGender = '女' | '男' | '未设定';
 
+export const PERSONA_EXPERIENCE_LEVELS = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ'] as const;
+
+export type PersonaExperienceLevel = (typeof PERSONA_EXPERIENCE_LEVELS)[number];
+
+export const PERSONA_EXPERIENCE_LABELS: Record<PersonaExperienceLevel, string> = {
+  'Ⅰ': '初识',
+  'Ⅱ': '浅尝',
+  'Ⅲ': '熟稔',
+  'Ⅳ': '资深',
+  'Ⅴ': '深谙',
+};
+
+export function experienceLabelOf(level: PersonaExperienceLevel): string {
+  return PERSONA_EXPERIENCE_LABELS[level];
+}
+
 export interface PersonaProfile {
   gender: PersonaGender;
   quote: string;
   keywords: string[];
   accent: PersonaAccent;
-  experienceLevel: string;
+  experienceLevel: PersonaExperienceLevel;
   experienceLabel: string;
   languageStyle: string;
   addressStyle: string;
@@ -257,10 +273,14 @@ export const personaProfileSchema = z.object({
   quote: z.string().max(400).default(''),
   keywords: z.array(z.string().max(40)).max(20).default([]),
   accent: z.enum(['brass', 'jade']).default('brass'),
-  experienceLevel: z.enum(['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ']).default('Ⅰ'),
-  experienceLabel: z.string().max(20).default('初识'),
+  experienceLevel: z.enum(PERSONA_EXPERIENCE_LEVELS).default('Ⅰ'),
+  experienceLabel: z.string().max(20).default(PERSONA_EXPERIENCE_LABELS['Ⅰ']),
   languageStyle: z.string().max(2000).default(''),
   addressStyle: z.string().max(2000).default(''),
+});
+
+export const personaProfileUpdateSchema = z.object({
+  experienceLevel: z.enum(PERSONA_EXPERIENCE_LEVELS),
 });
 
 export interface PersonaVersionSummary {
@@ -293,6 +313,7 @@ export interface PersonaVersionDetail extends PersonaVersionSummary {
 
 export const savePersonaSchema = z.object({
   data: personaDraftSchema,
+  profile: personaProfileUpdateSchema.optional(),
 });
 
 export type SavePersonaInput = z.infer<typeof savePersonaSchema>;
