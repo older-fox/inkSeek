@@ -282,7 +282,7 @@ export const chatPersonaHistoryEntrySchema = z.object({
   reason: z.string().trim().min(1).max(80),
 });
 
-export const saveConversationPersonaSchema = z.object({
+export const saveChannelPersonaSchema = z.object({
   values: z.record(z.string().min(1).max(80), chatPersonaValueSchema),
   history: z.array(chatPersonaHistoryEntrySchema).max(200, '人格历史最多保留 200 条').default([]),
 });
@@ -309,5 +309,5 @@ export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
-export type SaveConversationPersonaInput = z.infer<typeof saveConversationPersonaSchema>;
+export type SaveChannelPersonaInput = z.infer<typeof saveChannelPersonaSchema>;
 export type PersonaAiGenerateInput = z.infer<typeof personaAiGenerateSchema>;

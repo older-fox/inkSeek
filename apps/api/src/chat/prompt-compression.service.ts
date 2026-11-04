@@ -56,6 +56,7 @@ export class PromptCompressionService {
       model,
       temperature: COMPRESSION_TEMPERATURE,
       maxTokens: COMPRESSION_MAX_TOKENS,
+      source: 'pipeline.ai.compress',
     });
     const text = completion.text.trim();
     if (text.length === 0) {

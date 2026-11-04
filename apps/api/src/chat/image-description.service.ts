@@ -12,6 +12,8 @@ const MAX_PROMPT_LENGTH = 4_000;
 const MAX_DESCRIPTION_LENGTH = 2_000;
 const DESCRIPTION_TEMPERATURE = 0.3;
 const DESCRIPTION_MAX_TOKENS = 800;
+const SCENE_DESCRIPTION_PROMPT =
+  '请用简洁的中文描述这张图片：先说明主体与场景，再补充关键细节（人物、动作、文字、表情、风格）；如果是表情包，说明它传达的情绪或含义。不要编造图片中没有的内容，控制在 120 字以内。';
 
 /**
  * Vision descriptions are keyed by the image hash, so the same bytes are
@@ -25,7 +27,9 @@ export class ImageDescriptionService {
     private readonly llm: LlmService,
   ) {}
 
-  async describe(input: PipelineImageDescriptionInput): Promise<PipelineImageDescriptionResult> {
+  async describe(
+    input: PipelineImageDescriptionInput & { source?: string },
+  ): Promise<PipelineImageDescriptionResult> {
     const prompt = input.prompt.trim();
     if (prompt.length === 0) {
       throw new BadGatewayException('图片描述提示词为空');
@@ -42,7 +46,7 @@ export class ImageDescriptionService {
       select: { id: true, description: true },
     });
 
-    if (!input.force && existing?.description) {
+    if (!input.force && existing?.description?.trim()) {
       return {
         sha256,
         mediaId: existing.id,
@@ -66,6 +70,7 @@ export class ImageDescriptionService {
       model: emptyToNull(input.model),
       temperature: DESCRIPTION_TEMPERATURE,
       maxTokens: DESCRIPTION_MAX_TOKENS,
+      source: input.source?.trim() || 'chat.image-description',
     });
     const description = truncate(completion.text.trim(), MAX_DESCRIPTION_LENGTH);
     if (description.length === 0) {
@@ -73,6 +78,37 @@ export class ImageDescriptionService {
     }
 
     return { sha256, mediaId, description, cached: false };
+  }
+
+  /**
+   * Describes an image for the persona mind and persists the result so later
+   * turns and pipeline runs reuse the same hash cache. The mind bypasses the
+   * pipeline in LIVE/APPROVAL mode, so it cannot rely on a media.describe node.
+   */
+  async describeForScene(
+    reference: string,
+    prompt?: string,
+  ): Promise<{
+    mediaId: string | null;
+    description: string;
+    cached: boolean;
+  }> {
+    const result = await this.describe({
+      reference,
+      prompt: prompt?.trim() || SCENE_DESCRIPTION_PROMPT,
+      source: 'mind.image-description',
+    });
+    if (!result.cached && result.mediaId) {
+      await this.prisma.chatMediaObject.updateMany({
+        where: { id: result.mediaId },
+        data: { description: result.description },
+      });
+    }
+    return {
+      mediaId: result.mediaId,
+      description: result.description,
+      cached: result.cached,
+    };
   }
 }
 

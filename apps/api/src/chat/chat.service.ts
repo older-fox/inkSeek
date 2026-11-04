@@ -16,14 +16,17 @@ import type {
   ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
+  ChatPersonaHistoryEntry,
   ChatPersonaValue,
   ChatSendMessageInput,
+  SaveChannelPersonaInput,
 } from '@inkseek/shared';
 import { buildChannelPersonaSnapshot } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   ChatChannel,
   ChatChannelPersona,
+  PersonaState,
   Prisma,
 } from '../generated/prisma/client.js';
 import { PersonasService } from '../personas/personas.service.js';
@@ -59,7 +62,7 @@ export class ChatService {
   async listChannels(): Promise<ChatChannelSummary[]> {
     const [records, conversationCounts, messageCounts] = await Promise.all([
       this.prisma.chatChannel.findMany({
-        include: { persona: true },
+        include: { persona: { include: { state: true } } },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.chatConversation.groupBy({
@@ -192,7 +195,10 @@ export class ChatService {
   }
 
   async deleteChannel(id: string): Promise<void> {
-    const existing = await this.prisma.chatChannel.findUnique({ where: { id }, select: { id: true } });
+    const existing = await this.prisma.chatChannel.findUnique({
+      where: { id },
+      select: { id: true },
+    });
 
     if (!existing) {
       throw new NotFoundException({
@@ -216,6 +222,41 @@ export class ChatService {
     }
 
     this.logger.log(`已移除渠道 ${id} 及其命名空间数据`);
+  }
+
+  /**
+   * Channel persona is the single owner of the persona's own attributes. The
+   * scene editors only project into it; nothing is stored per conversation.
+   */
+  async updatePersonaValues(
+    channelId: string,
+    input: SaveChannelPersonaInput,
+  ): Promise<ChatChannelSummary> {
+    const existing = await this.prisma.chatChannelPersona.findUnique({ where: { channelId } });
+    if (!existing) {
+      throw new NotFoundException({
+        code: 'PERSONA_NOT_FOUND',
+        message: '这个渠道还没有绑定人格',
+      });
+    }
+    const values = sanitizePersonaValues(input.values);
+    const history = input.history.slice(0, 200) as unknown as Prisma.InputJsonValue;
+    const name = readPersonaText(values['name']) || existing.name;
+    const identity = readPersonaText(values['identity']) || existing.identity;
+    const quote =
+      readPersonaText(values['anchor_quote']) || readPersonaText(values['quote']) || existing.quote;
+    await this.prisma.chatChannelPersona.update({
+      where: { channelId },
+      data: {
+        values: values as Prisma.InputJsonValue,
+        history,
+        name,
+        identity,
+        quote,
+      },
+    });
+    this.events.emit({ type: 'channel.updated', channelId });
+    return this.getChannelSummary(channelId);
   }
 
   async listConversations(kind: ChatConversationKind): Promise<ChatConversationSummary[]> {
@@ -431,7 +472,7 @@ export class ChatService {
   private async getChannelSummary(id: string): Promise<ChatChannelSummary> {
     const record = await this.prisma.chatChannel.findUnique({
       where: { id },
-      include: { persona: true },
+      include: { persona: { include: { state: true } } },
     });
 
     if (!record) {
@@ -455,7 +496,9 @@ export class ChatService {
   }
 }
 
-type ChannelWithPersona = ChatChannel & { persona?: ChatChannelPersona | null };
+type ChannelWithPersona = ChatChannel & {
+  persona?: (ChatChannelPersona & { state?: PersonaState | null }) | null;
+};
 
 function toChannelSummary(record: ChannelWithPersona, stats: ChatChannelStats): ChatChannelSummary {
   return {
@@ -476,8 +519,11 @@ function toChannelSummary(record: ChannelWithPersona, stats: ChatChannelStats): 
   };
 }
 
-function toPersonaSnapshot(record: ChatChannelPersona): ChatChannelPersonaSnapshot {
+function toPersonaSnapshot(
+  record: ChatChannelPersona & { state?: PersonaState | null },
+): ChatChannelPersonaSnapshot {
   return {
+    id: record.id,
     cardId: record.cardId,
     cardSerial: record.cardSerial,
     name: record.name,
@@ -485,7 +531,74 @@ function toPersonaSnapshot(record: ChatChannelPersona): ChatChannelPersonaSnapsh
     quote: record.quote,
     accent: record.accent === 'jade' ? 'jade' : 'brass',
     values: (record.values ?? {}) as Record<string, ChatPersonaValue>,
+    meta: {
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+      history: readPersonaHistory(record.history),
+    },
+    state: record.state
+      ? {
+          moodValence: record.state.moodValence,
+          moodArousal: record.state.moodArousal,
+          moodDominance: record.state.moodDominance,
+          energy: record.state.energy,
+          health: record.state.health,
+          stress: record.state.stress,
+          socialBattery: record.state.socialBattery,
+          attention: record.state.attention,
+          currentActivity: record.state.currentActivity,
+          location: record.state.location,
+          sleepDebt: record.state.sleepDebt,
+          grooming: record.state.grooming,
+          nextWakeAt: record.state.nextWakeAt?.toISOString() ?? null,
+          updatedAt: record.state.updatedAt.toISOString(),
+        }
+      : null,
   };
+}
+
+function sanitizePersonaValues(
+  values: Record<string, ChatPersonaValue>,
+): Record<string, ChatPersonaValue> {
+  const result: Record<string, ChatPersonaValue> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = value;
+      continue;
+    }
+    if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function readPersonaText(value: ChatPersonaValue | undefined): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readPersonaHistory(value: Prisma.JsonValue | null): ChatPersonaHistoryEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const entries: ChatPersonaHistoryEntry[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record['id'] === 'string' &&
+      typeof record['time'] === 'string' &&
+      typeof record['field'] === 'string' &&
+      typeof record['from'] === 'string' &&
+      typeof record['to'] === 'string' &&
+      typeof record['reason'] === 'string'
+    ) {
+      entries.push(record as unknown as ChatPersonaHistoryEntry);
+    }
+  }
+  return entries;
 }
 
 function maskAccessToken(token: string): string | null {

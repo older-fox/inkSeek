@@ -1,5 +1,5 @@
 import type { PersonaDraft, PersonaSummary } from './persona.js';
-import type { ChatChannelPersonaSnapshot, ChatPersonaValue } from './types.js';
+import type { ChatChannelPersonaDraft, ChatPersonaValue } from './types.js';
 
 const EXPERIENCE_LEVELS: Record<string, number> = {
   'Ⅰ': 1,
@@ -19,7 +19,7 @@ type SnapshotSource = Pick<
  * shared so the server can snapshot at connect time and the contract stays the
  * same everywhere.
  */
-export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPersonaSnapshot {
+export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPersonaDraft {
   const { data, profile } = card;
   const values: Record<string, ChatPersonaValue> = {};
   const put = (key: string, value: ChatPersonaValue | undefined) => {

@@ -422,6 +422,60 @@
     padding-right: 2.5rem;
   }
 
+  .mind-select {
+    width: 100%;
+    height: 2.65rem;
+    cursor: pointer;
+    appearance: none;
+    border-radius: 0.8rem;
+    border: 1px solid var(--field-border);
+    background-color: var(--field-bg);
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--color-mist-500) 50%),
+      linear-gradient(135deg, var(--color-mist-500) 50%, transparent 50%);
+    background-position:
+      calc(100% - 1.15rem) calc(50% + 1px),
+      calc(100% - 0.82rem) calc(50% + 1px);
+    background-size:
+      0.34rem 0.34rem,
+      0.34rem 0.34rem;
+    background-repeat: no-repeat;
+    padding: 0 2.3rem 0 0.9rem;
+    color: var(--color-mist-100);
+    font-size: 0.86rem;
+    line-height: 1.25;
+    outline: none;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .mind-select:hover {
+    border-color: color-mix(in srgb, var(--color-mist-500) 34%, transparent);
+    background-color: var(--field-bg-focus);
+  }
+
+  .mind-select:focus {
+    border-color: var(--field-focus-border);
+    background-color: var(--field-bg-focus);
+    box-shadow: 0 0 0 4px var(--field-focus-shadow);
+  }
+
+  .mind-select option {
+    background: var(--color-ink-900);
+    color: var(--color-mist-100);
+  }
+
+  .mind-select-compact {
+    height: 2.15rem;
+    font-size: 0.78rem;
+    padding: 0 2rem 0 0.75rem;
+    background-position:
+      calc(100% - 1rem) calc(50% + 1px),
+      calc(100% - 0.68rem) calc(50% + 1px);
+  }
+
   .wizard-select option {
     background: var(--color-ink-900);
     color: var(--color-mist-100);
@@ -439,13 +493,19 @@
   .wizard-range::-webkit-slider-runnable-track {
     height: 0.35rem;
     border-radius: 999px;
-    background: var(--range-track);
+    background: var(
+      --range-track,
+      color-mix(in srgb, var(--color-mist-500) 24%, transparent)
+    );
   }
 
   .wizard-range::-moz-range-track {
     height: 0.35rem;
     border-radius: 999px;
-    background: var(--range-track);
+    background: var(
+      --range-track,
+      color-mix(in srgb, var(--color-mist-500) 24%, transparent)
+    );
   }
 
   .wizard-range::-moz-range-progress {
@@ -503,6 +563,100 @@
     box-shadow:
       0 0 0 4px var(--field-focus-shadow),
       0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Mind sliders: the native track needs an explicit filled segment because
+     mind rows do not use the wizard's --range-track gradient. */
+  .mind-range {
+    --range-track: color-mix(in srgb, var(--color-mist-500) 24%, transparent);
+    display: block;
+    width: 100%;
+    height: 1.2rem;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .mind-range::-webkit-slider-runnable-track {
+    height: 0.42rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--range-track) 0%,
+      var(--range-track) var(--range-low, 50%),
+      var(--color-brass-300) var(--range-low, 50%),
+      var(--color-brass-300) var(--range-high, 50%),
+      var(--range-track) var(--range-high, 50%),
+      var(--range-track) 100%
+    );
+  }
+
+  .mind-range::-moz-range-track {
+    height: 0.42rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--range-track) 0%,
+      var(--range-track) var(--range-low, 50%),
+      var(--color-brass-300) var(--range-low, 50%),
+      var(--color-brass-300) var(--range-high, 50%),
+      var(--range-track) var(--range-high, 50%),
+      var(--range-track) 100%
+    );
+  }
+
+  .mind-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    margin-top: calc((0.42rem - 1rem) / 2);
+    border-radius: 999px;
+    border: 2px solid var(--color-ink-950);
+    background: var(--color-brass-200);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  }
+
+  .mind-range::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    border: 2px solid var(--color-ink-950);
+    background: var(--color-brass-200);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  }
+
+  .mind-range:hover::-webkit-slider-thumb,
+  .mind-range:focus-visible::-webkit-slider-thumb {
+    background: var(--color-brass-300);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--color-brass-400) 22%, transparent),
+      0 1px 6px rgba(0, 0, 0, 0.45);
+  }
+
+  .mind-range:hover::-moz-range-thumb,
+  .mind-range:focus-visible::-moz-range-thumb {
+    background: var(--color-brass-300);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--color-brass-400) 22%, transparent),
+      0 1px 6px rgba(0, 0, 0, 0.45);
+  }
+
+  .mind-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-brass-300) 28%, transparent) transparent;
+  }
+
+  .mind-scroll::-webkit-scrollbar {
+    width: 0.35rem;
+  }
+
+  .mind-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-brass-300) 24%, transparent);
   }
 
   .ink-grid {

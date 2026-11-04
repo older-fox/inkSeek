@@ -1,0 +1,99 @@
+import { Injectable, Logger } from '@nestjs/common';
+import type { PipelineMessage } from './pipeline/pipeline-types.js';
+
+/** Hard ceiling so a person who keeps typing without pause still gets a reply. */
+const MAX_BURST_MS = 12_000;
+
+type BurstRunner = (messages: PipelineMessage[], quietSeconds: number) => Promise<void>;
+
+interface BurstState {
+  messages: PipelineMessage[];
+  firstAt: number;
+  timer: NodeJS.Timeout;
+  quietSeconds: number;
+  runner: BurstRunner;
+}
+
+/**
+ * Private chats only: wait for a short quiet gap and answer the whole burst
+ * once. This is not the group reply-avoid window; nothing is suppressed.
+ * Runs are serialized per conversation so two flushes cannot overlap.
+ */
+@Injectable()
+export class PrivateBurstService {
+  private readonly logger = new Logger(PrivateBurstService.name);
+  private readonly bursts = new Map<string, BurstState>();
+  private readonly queues = new Map<string, Promise<void>>();
+
+  schedule(message: PipelineMessage, quietSeconds: number, runner: BurstRunner): void {
+    const quietMs = Math.max(0, Math.round(quietSeconds * 1000));
+    if (quietMs === 0) {
+      void this.enqueue(message.conversationId, () => this.runBurst([message], 0, runner));
+      return;
+    }
+    const key = message.conversationId;
+    const now = Date.now();
+    const existing = this.bursts.get(key);
+
+    if (existing) {
+      existing.messages.push(message);
+      existing.quietSeconds = quietSeconds;
+      existing.runner = runner;
+      clearTimeout(existing.timer);
+      existing.timer = setTimeout(
+        () => void this.flush(key),
+        burstDelay(existing.firstAt, now, quietMs),
+      );
+      return;
+    }
+
+    const state: BurstState = {
+      messages: [message],
+      firstAt: now,
+      quietSeconds,
+      runner,
+      timer: setTimeout(() => void this.flush(key), quietMs),
+    };
+    this.bursts.set(key, state);
+  }
+
+  private async flush(key: string): Promise<void> {
+    const state = this.bursts.get(key);
+    if (!state) {
+      return;
+    }
+    this.bursts.delete(key);
+    await this.enqueue(key, () => this.runBurst(state.messages, state.quietSeconds, state.runner));
+  }
+
+  private async runBurst(
+    messages: PipelineMessage[],
+    quietSeconds: number,
+    runner: BurstRunner,
+  ): Promise<void> {
+    try {
+      await runner(messages, quietSeconds);
+    } catch (error) {
+      this.logger.warn(
+        `私聊连发合并失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private enqueue(key: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.queues.get(key) ?? Promise.resolve();
+    const next = previous.then(task).catch(() => undefined);
+    this.queues.set(key, next);
+    void next.finally(() => {
+      if (this.queues.get(key) === next) {
+        this.queues.delete(key);
+      }
+    });
+    return next;
+  }
+}
+
+function burstDelay(firstAt: number, now: number, quietMs: number): number {
+  const remaining = MAX_BURST_MS - (now - firstAt);
+  return Math.max(0, Math.min(quietMs, remaining));
+}

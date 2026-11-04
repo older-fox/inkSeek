@@ -14,6 +14,7 @@ import type {
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
+import { LlmPromptLogService } from './llm-prompt-log.service.js';
 import { extractJsonObject, normalizePersonaDraft } from './persona-ai.normalize.js';
 import { buildPersonaAiMessages } from './persona-ai.prompt.js';
 
@@ -32,7 +33,10 @@ interface ResolvedProvider {
 
 @Injectable()
 export class AiService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly promptLogs: LlmPromptLogService,
+  ) {}
 
   async listProviders(): Promise<PersonaAiProviderOption[]> {
     const records = await this.prisma.modelProvider.findMany({
@@ -51,8 +55,44 @@ export class AiService {
     const provider = await this.resolveProvider(input.providerId);
     const model = this.resolveModel(provider, input.model);
     const startedAt = performance.now();
-    const content = await this.requestCompletion(provider, model, input.prompt);
+    const messages = buildPersonaAiMessages(input.prompt);
+    let content: string;
+
+    try {
+      content = await this.requestCompletion(provider, model, input.prompt);
+    } catch (error) {
+      await this.promptLogs.record({
+        source: 'persona.ai',
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        system: messages.system,
+        prompt: messages.user,
+        response: '',
+        imageCount: 0,
+        promptTokens: null,
+        completionTokens: null,
+        latencyMs: Math.round(performance.now() - startedAt),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
     const latencyMs = Math.round(performance.now() - startedAt);
+    await this.promptLogs.record({
+      source: 'persona.ai',
+      providerId: provider.id,
+      providerName: provider.name,
+      model,
+      system: messages.system,
+      prompt: messages.user,
+      response: content,
+      imageCount: 0,
+      promptTokens: null,
+      completionTokens: null,
+      latencyMs,
+      error: null,
+    });
 
     let draft: PersonaDraft;
 

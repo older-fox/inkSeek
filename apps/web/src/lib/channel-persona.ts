@@ -1,3 +1,4 @@
+import type { ChatChannelPersonaStateSnapshot, PersonaStateUpdateInput } from '@inkseek/shared';
 import type { Channel, ChannelAccent } from '@/lib/connections';
 import { LEVEL_OPTIONS } from '@/lib/persona-draft';
 
@@ -25,6 +26,8 @@ export interface PersonaField {
   wide?: boolean;
   suffix?: string;
   levels?: readonly string[];
+  /** Live PersonaState projections (or derived values) cannot be written to the card. */
+  readonly?: boolean;
 }
 
 export interface PersonaSection {
@@ -47,6 +50,113 @@ export interface ChannelPersona {
   quote: string;
   accent: ChannelAccent;
   values: Record<string, PersonaValue>;
+}
+
+type StateSnapshot = ChatChannelPersonaStateSnapshot;
+
+interface StateFieldBinding {
+  read: (state: StateSnapshot) => PersonaValue;
+  input?: (value: PersonaValue) => PersonaStateUpdateInput;
+}
+
+const numericValue = (value: PersonaValue): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+/**
+ * PersonaState is the only live state row. Keys below are projected into the
+ * card editor for display and edits are routed back to PersonaState instead of
+ * writing a second copy into ChatChannelPersona.values.
+ */
+const STATE_FIELD_BINDINGS: Record<string, StateFieldBinding> = {
+  doing_now: {
+    read: (state) => state.currentActivity,
+    input: (value) => ({ currentActivity: String(value).slice(0, 200) }),
+  },
+  mood_tags: { read: (state) => stateMoodLabel(state) },
+  mood_valence: {
+    read: (state) => state.moodValence,
+    input: (value) => ({ moodValence: numericValue(value) }),
+  },
+  mood_arousal: {
+    read: (state) => state.moodArousal,
+    input: (value) => ({ moodArousal: numericValue(value) }),
+  },
+  mood_dominance: {
+    read: (state) => state.moodDominance,
+    input: (value) => ({ moodDominance: numericValue(value) }),
+  },
+  energy: {
+    read: (state) => state.energy,
+    input: (value) => ({ energy: numericValue(value) }),
+  },
+  health: {
+    read: (state) => state.health,
+    input: (value) => ({ health: numericValue(value) }),
+  },
+  stress: {
+    read: (state) => state.stress,
+    input: (value) => ({ stress: numericValue(value) }),
+  },
+  social_battery: {
+    read: (state) => state.socialBattery,
+    input: (value) => ({ socialBattery: numericValue(value) }),
+  },
+  attention: {
+    read: (state) => state.attention,
+    input: (value) => ({ attention: numericValue(value) }),
+  },
+  sleep_debt: {
+    read: (state) => state.sleepDebt,
+    input: (value) => ({ sleepDebt: numericValue(value) }),
+  },
+  grooming: {
+    read: (state) => state.grooming,
+    input: (value) => ({ grooming: numericValue(value) }),
+  },
+  location: {
+    read: (state) => state.location,
+    input: (value) => ({ location: String(value).slice(0, 100) }),
+  },
+};
+
+export function isStateField(key: string): boolean {
+  return key in STATE_FIELD_BINDINGS;
+}
+
+export function stateFieldInput(key: string, value: PersonaValue): PersonaStateUpdateInput | null {
+  return STATE_FIELD_BINDINGS[key]?.input?.(value) ?? null;
+}
+
+export function mergeStateValues(
+  values: Record<string, PersonaValue>,
+  state: StateSnapshot | null,
+): Record<string, PersonaValue> {
+  if (!state) {
+    return values;
+  }
+  const merged = { ...values };
+  for (const [key, binding] of Object.entries(STATE_FIELD_BINDINGS)) {
+    merged[key] = binding.read(state);
+  }
+  return merged;
+}
+
+export function stateMoodLabel(state: Pick<StateSnapshot, 'moodValence' | 'moodArousal'>): string {
+  const base =
+    state.moodValence > 30
+      ? '愉快'
+      : state.moodValence > 10
+        ? '轻松'
+        : state.moodValence < -30
+          ? '低落'
+          : state.moodValence < -10
+            ? '烦闷'
+            : '平静';
+  if (state.moodArousal > 70) return `亢奋·${base}`;
+  if (state.moodArousal < 30) return `倦怠·${base}`;
+  return base;
 }
 
 const EMPTY_SECTION = '';
@@ -246,7 +356,7 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'doing_now',
             label: '正在做的事',
-            hint: '决定被打扰时是短回还是多话',
+            hint: '实时状态：读取 PersonaState，编辑会直接更新正在做的事',
             kind: 'paragraph',
             wide: true,
           },
@@ -491,7 +601,7 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
           {
             key: 'location',
             label: '当前位置',
-            hint: '此刻所在地点',
+            hint: '实时状态：读取 PersonaState，编辑会直接更新当前位置',
             kind: 'text',
           },
         ],
@@ -610,24 +720,67 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
       },
       {
         id: 'baselines-state',
-        title: '当前状态',
+        title: '当前状态 · 实时',
         fields: [
           {
             key: 'mood_tags',
-            label: '当前情绪标签',
-            hint: '此刻的情绪状态，不无理由跳变',
-            kind: 'tags',
+            label: '当前情绪',
+            hint: '由情绪好坏与唤醒实时推导，只读',
+            kind: 'text',
+            readonly: true,
           },
           {
-            key: 'mood_intensity',
-            label: '情绪强度',
-            hint: '情绪标签的强度，决定语气幅度',
+            key: 'mood_valence',
+            label: '情绪好坏',
+            hint: '范围为 -100 到 100，实时同步 PersonaState',
+            kind: 'number',
+          },
+          {
+            key: 'mood_arousal',
+            label: '情绪唤醒',
+            hint: '0 到 100，越高越亢奋',
+            kind: 'score',
+          },
+          {
+            key: 'mood_dominance',
+            label: '掌控感',
+            hint: '范围为 -100 到 100，实时同步 PersonaState',
+            kind: 'number',
+          },
+          {
+            key: 'energy',
+            label: '精力',
+            hint: '0 到 100，直接更新 PersonaState',
+            kind: 'score',
+          },
+          {
+            key: 'health',
+            label: '健康度',
+            hint: '0 到 100，睡眠不足或被强行叫醒会下降',
             kind: 'score',
           },
           {
             key: 'stress',
             label: '压力',
-            hint: '心理压力，有恢复途径',
+            hint: '0 到 100，有恢复途径',
+            kind: 'score',
+          },
+          {
+            key: 'social_battery',
+            label: '社交电量',
+            hint: '0 到 100，耗尽后回复变短',
+            kind: 'score',
+          },
+          {
+            key: 'attention',
+            label: '注意力',
+            hint: '0 到 100，当前对话的关注度',
+            kind: 'score',
+          },
+          {
+            key: 'sleep_debt',
+            label: '睡眠债',
+            hint: '0 到 100，越高越困',
             kind: 'score',
           },
           {
@@ -640,12 +793,6 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
             key: 'grooming',
             label: '整洁程度',
             hint: '对仪容与环境整洁的当前状态',
-            kind: 'score',
-          },
-          {
-            key: 'social_battery',
-            label: '社交电量',
-            hint: '社交耐力余量，耗尽后回复变短',
             kind: 'score',
           },
         ],
@@ -894,31 +1041,6 @@ export function clearChannelPersonaOverrides(channelId: string): void {
     }
 
     delete store[channelId];
-    window.localStorage.setItem(PERSONA_OVERRIDE_STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    return;
-  }
-}
-
-export function writeChannelPersonaOverride(
-  channelId: string,
-  key: string,
-  value: PersonaValue,
-): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(PERSONA_OVERRIDE_STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
-    const store = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-    const current =
-      store[channelId] && typeof store[channelId] === 'object'
-        ? (store[channelId] as Record<string, unknown>)
-        : {};
-
-    store[channelId] = { ...current, [key]: value };
     window.localStorage.setItem(PERSONA_OVERRIDE_STORAGE_KEY, JSON.stringify(store));
   } catch {
     return;

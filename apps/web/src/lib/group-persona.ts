@@ -1,9 +1,4 @@
 import type { PersonaValue } from '@/lib/channel-persona';
-import {
-  readPersonaMetadata,
-  writePersonaMetadata,
-  type PersonaMetadata,
-} from '@/lib/persona-metadata';
 
 export type GroupFieldKind = 'text' | 'paragraph' | 'tags' | 'score' | 'ratio' | 'boolean';
 
@@ -152,106 +147,18 @@ const GROUP_FALLBACK: Record<string, PersonaValue> = {
   scene_type: '陌生人局',
   narrative: '彼此还不熟，先端着，别抢话，也别急着走。',
   group_persona: '边缘人',
-  comfort: 40,
+  comfort: 0,
   boundary_here: ['不聊私事', '不接玩笑式暧昧'],
   topic: '还没有明确的话题',
   focus: '旁观',
   phase: '普通',
   explicit_cap: 'none',
-  formality: 0.6,
+  formality: 0,
   scene_rules: ['禁政治'],
   mention_only: false,
-  speak_rate_target: 0.08,
+  speak_rate_target: 0,
 };
 
 export function groupPersonaDefaults(): Record<string, PersonaValue> {
   return { ...GROUP_FALLBACK };
-}
-
-const GROUP_OVERRIDE_STORAGE_KEY = 'inkseek-group-persona-values';
-
-function isPersonaValue(value: unknown): value is PersonaValue {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return true;
-  }
-
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-export function readGroupPersonaOverrides(conversationId: string): Record<string, PersonaValue> {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const raw = window.localStorage.getItem(GROUP_OVERRIDE_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return {};
-    }
-
-    const stored = (parsed as Record<string, unknown>)[conversationId];
-    if (!stored || typeof stored !== 'object') {
-      return {};
-    }
-
-    const result: Record<string, PersonaValue> = {};
-    Object.entries(stored as Record<string, unknown>).forEach(([key, value]) => {
-      if (isPersonaValue(value)) {
-        result[key] = value;
-      }
-    });
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-const GROUP_META_STORAGE_KEY = 'inkseek-group-persona-meta';
-
-const GROUP_META_FALLBACK: PersonaMetadata = {
-  createdAt: '2026-09-05T10:20:00+08:00',
-  updatedAt: '2026-11-02T19:30:00+08:00',
-  history: [],
-};
-
-export function groupPersonaMetadata(): PersonaMetadata {
-  return GROUP_META_FALLBACK;
-}
-
-export function readGroupPersonaMeta(conversationId: string): PersonaMetadata | null {
-  return readPersonaMetadata(GROUP_META_STORAGE_KEY, conversationId);
-}
-
-export function writeGroupPersonaMeta(conversationId: string, meta: PersonaMetadata): void {
-  writePersonaMetadata(GROUP_META_STORAGE_KEY, conversationId, meta);
-}
-
-export function writeGroupPersonaOverride(
-  conversationId: string,
-  key: string,
-  value: PersonaValue,
-): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(GROUP_OVERRIDE_STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
-    const store = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-    const current =
-      store[conversationId] && typeof store[conversationId] === 'object'
-        ? (store[conversationId] as Record<string, unknown>)
-        : {};
-
-    store[conversationId] = { ...current, [key]: value };
-    window.localStorage.setItem(GROUP_OVERRIDE_STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    return;
-  }
 }

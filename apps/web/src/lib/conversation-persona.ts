@@ -1,36 +1,28 @@
-import type {
-  ChatConversationKind,
-  ChatConversationPersonaRecord,
-  ChatPersonaValue,
-  SaveConversationPersonaInput,
+import {
+  relationshipPatchFromValues,
+  relationshipToPersonaValues,
+  stancePatchFromValues,
+  stanceToPersonaValues,
+  type ChatConversationKind,
+  type PersonaGroupStanceRecord,
+  type PersonaRelationshipRecord,
 } from '@inkseek/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { ApiError, api } from '@/lib/api';
 import type { PersonaValue } from '@/lib/channel-persona';
 import type { SourcedConversation } from '@/lib/connections';
+import { groupPersonaDefaults } from '@/lib/group-persona';
+import { appendPersonaHistory, formatPersonaValue, type PersonaMetadata } from '@/lib/persona-metadata';
+import { privatePersonaDefaults } from '@/lib/private-persona';
 import {
-  groupPersonaDefaults,
-  groupPersonaMetadata,
-  readGroupPersonaMeta,
-  readGroupPersonaOverrides,
-} from '@/lib/group-persona';
-import { ApiError, api } from '@/lib/api';
-import {
-  appendPersonaHistory,
-  formatPersonaValue,
-  type PersonaMetadata,
-} from '@/lib/persona-metadata';
-import {
-  privatePersonaDefaults,
-  privatePersonaMetadata,
-  readPrivatePersonaMeta,
-  readPrivatePersonaOverrides,
-} from '@/lib/private-persona';
-import { chatConversationPersonaQuery } from '@/lib/queries';
+  chatChannelsQuery,
+  mindGroupStancesQuery,
+  mindRelationshipsQuery,
+} from '@/lib/queries';
 
 const SAVE_DELAY_MS = 500;
-const HISTORY_LIMIT = 200;
 
 export type PersonaSyncState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -52,59 +44,86 @@ interface Draft {
 
 interface PendingSave {
   conversationId: string;
+  personaId: string;
+  kind: ChatConversationKind;
+  contactId: string;
   values: Record<string, PersonaValue>;
-  history: PersonaMetadata['history'];
 }
 
-const LEGACY_READERS = {
-  GROUP: {
-    defaults: groupPersonaDefaults,
-    defaultMeta: groupPersonaMetadata,
-    readValues: readGroupPersonaOverrides,
-    readMeta: readGroupPersonaMeta,
-  },
-  PRIVATE: {
-    defaults: privatePersonaDefaults,
-    defaultMeta: privatePersonaMetadata,
-    readValues: readPrivatePersonaOverrides,
-    readMeta: readPrivatePersonaMeta,
-  },
-} as const;
-
 /**
- * Loads and persists the persona attached to a conversation. Group rows are
- * keyed by the conversation; private rows are keyed by channel + contact, so
- * every private scene with the same person shares one profile.
+ * Reads and writes the single PersonaRelationship / PersonaGroupStance row.
+ * The conversation panels are projections of those rows; no per-conversation
+ * copy of the persona's attributes exists anymore.
  */
 export function useConversationPersona(
   conversation: SourcedConversation | null,
   kind: ChatConversationKind,
 ): ConversationPersonaEditor {
   const conversationId = conversation?.id ?? null;
-  const legacyScope =
-    conversation !== null ? `${conversation.source.id}:${conversation.externalId}` : null;
-  const reader = LEGACY_READERS[kind];
+  const channelId = conversation?.source.id ?? null;
   const queryClient = useQueryClient();
-  const query = useQuery({
-    ...chatConversationPersonaQuery(conversationId ?? ''),
-    enabled: conversationId !== null,
+  const channelsQuery = useQuery(chatChannelsQuery);
+  const personaId =
+    channelsQuery.data?.find((channel) => channel.id === channelId)?.persona?.id ?? '';
+
+  const relationshipsQuery = useQuery({
+    ...mindRelationshipsQuery(personaId),
+    enabled: Boolean(personaId) && kind === 'PRIVATE' && Boolean(conversationId),
   });
-  const record = query.data ?? null;
+  const stancesQuery = useQuery({
+    ...mindGroupStancesQuery(personaId),
+    enabled: Boolean(personaId) && kind === 'GROUP' && Boolean(conversationId),
+  });
+
+  const relationship =
+    kind === 'PRIVATE' && conversation
+      ? (relationshipsQuery.data?.find((item) => item.externalId === conversation.externalId) ??
+        null)
+      : null;
+  const stance =
+    kind === 'GROUP' && conversationId
+      ? (stancesQuery.data?.find((item) => item.conversationId === conversationId) ?? null)
+      : null;
+
+  const serverValues = useMemo(
+    () =>
+      kind === 'PRIVATE'
+        ? relationship
+          ? relationshipToPersonaValues(relationship)
+          : null
+        : stance
+          ? stanceToPersonaValues(stance)
+          : null,
+    [kind, relationship, stance],
+  );
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [syncState, setSyncState] = useState<PersonaSyncState>('idle');
   const activeDraft = draft && draft.conversationId === conversationId ? draft : null;
-
   const pendingRef = useRef<PendingSave | null>(null);
   const timerRef = useRef<number | null>(null);
   const savingRef = useRef(false);
-  const migratedRef = useRef<string | null>(null);
 
-  const applyRecord = useCallback(
-    (next: ChatConversationPersonaRecord) => {
-      queryClient.setQueryData(chatConversationPersonaQuery(next.conversationId).queryKey, next);
-    },
-    [queryClient],
+  const entityQuery = kind === 'PRIVATE' ? relationshipsQuery : stancesQuery;
+  const entity = kind === 'PRIVATE' ? relationship : stance;
+  const defaults = kind === 'PRIVATE' ? privatePersonaDefaults() : groupPersonaDefaults();
+  const overrides = activeDraft?.values ?? serverValues;
+  const values = useMemo(
+    () => (conversation ? { ...defaults, ...(overrides ?? {}) } : null),
+    [conversation, defaults, overrides],
+  );
+  const updatedAt =
+    (entity as PersonaRelationshipRecord | PersonaGroupStanceRecord | null)?.updatedAt ?? null;
+  const meta = useMemo<PersonaMetadata | null>(
+    () =>
+      conversation
+        ? {
+            createdAt: updatedAt ?? new Date(0).toISOString(),
+            updatedAt: updatedAt ?? new Date(0).toISOString(),
+            history: [],
+          }
+        : null,
+    [conversation, updatedAt],
   );
 
   const runSave = useCallback(async () => {
@@ -112,40 +131,45 @@ export function useConversationPersona(
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-
     if (savingRef.current) {
       return;
     }
-
     const pending = pendingRef.current;
-
     if (!pending) {
       return;
     }
-
     pendingRef.current = null;
     savingRef.current = true;
     setSyncState('saving');
 
     try {
-      const payload: SaveConversationPersonaInput = {
-        values: toChatValues(pending.values),
-        history: pending.history.slice(0, HISTORY_LIMIT).map((entry) => ({ ...entry })),
-      };
-      const saved = await api.saveChatConversationPersona(pending.conversationId, payload);
-      applyRecord(saved);
+      if (pending.kind === 'PRIVATE') {
+        const patch = relationshipPatchFromValues(pending.values);
+        patch.extras = { ...asRecord(relationship?.extras), ...asRecord(patch.extras) };
+        await api.updateMindRelationship(pending.personaId, {
+          ...patch,
+          contactId: pending.contactId,
+        });
+      } else {
+        const patch = stancePatchFromValues(pending.values);
+        patch.extras = { ...asRecord(stance?.extras), ...asRecord(patch.extras) };
+        await api.updateMindGroupStance(pending.personaId, {
+          ...patch,
+          conversationId: pending.conversationId,
+        });
+      }
       setSyncState('saved');
+      void queryClient.invalidateQueries({ queryKey: ['mind'] });
     } catch (error) {
       setSyncState('error');
       toast.error(error instanceof ApiError ? error.message : '人格属性保存失败，请稍后重试');
     } finally {
       savingRef.current = false;
-
       if (pendingRef.current) {
         void runSave();
       }
     }
-  }, [applyRecord]);
+  }, [queryClient, relationship, stance]);
 
   const flush = useCallback(() => {
     void runSave();
@@ -158,99 +182,60 @@ export function useConversationPersona(
   }, [conversationId, runSave]);
 
   useEffect(() => {
-    if (!record || record.persisted || !conversationId || !legacyScope) {
-      return;
-    }
-
-    if (migratedRef.current === legacyScope) {
-      return;
-    }
-
-    const legacyValues = reader.readValues(legacyScope);
-    const legacyMeta = reader.readMeta(legacyScope);
-    const hasLegacyValues = Object.keys(legacyValues).length > 0;
-
-    if (!hasLegacyValues && !legacyMeta) {
-      return;
-    }
-
-    migratedRef.current = legacyScope;
-    const values = { ...reader.defaults(), ...legacyValues };
-    const meta = legacyMeta ?? record.meta;
-
-    setDraft({ conversationId, values, meta });
-    pendingRef.current = { conversationId, values, history: meta.history };
-    void runSave();
-  }, [record, conversationId, legacyScope, reader, runSave]);
-
-  useEffect(() => {
     return () => {
       void runSave();
     };
   }, [runSave]);
 
-  const storedValues = record?.values ?? null;
-  const storedMeta = record?.meta ?? null;
-  const overrides = activeDraft?.values ?? storedValues;
-  const meta = activeDraft?.meta ?? storedMeta;
-  const fallbackValues = reader.defaults();
-  const values = overrides === null ? fallbackValues : { ...fallbackValues, ...overrides };
-  const ready = record !== null;
-
   const update = useCallback(
     (key: string, label: string, value: PersonaValue) => {
-      if (!conversationId || !ready) {
+      if (!conversationId || !personaId || !values || !entity) {
         return;
       }
-
-      const previous = values[key];
+      const contactId = kind === 'PRIVATE' ? (relationship?.contactId ?? '') : '';
+      if (kind === 'PRIVATE' && !contactId) {
+        toast.error('还没有这个联系人的关系记录');
+        return;
+      }
       const nextValues = { ...values, [key]: value };
-      const nextMeta = appendPersonaHistory(meta ?? reader.defaultMeta(), {
+      const nextMeta = appendPersonaHistory(meta ?? { createdAt: '', updatedAt: '', history: [] }, {
         field: label,
-        from: formatPersonaValue(previous),
+        from: formatPersonaValue(values[key]),
         to: formatPersonaValue(value),
       });
-
       setDraft({ conversationId, values: nextValues, meta: nextMeta });
       pendingRef.current = {
         conversationId,
+        personaId,
+        kind,
+        contactId,
         values: nextValues,
-        history: nextMeta.history,
       };
       setSyncState('saving');
-
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
       }
-
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
         void runSave();
       }, SAVE_DELAY_MS);
     },
-    [conversationId, ready, values, meta, reader, runSave],
+    [conversationId, personaId, values, entity, kind, relationship, meta, runSave],
   );
 
   return {
-    values: conversation ? values : null,
+    values,
     meta: conversation ? meta : null,
-    ready,
-    error: query.isError,
+    ready: Boolean(personaId) && entityQuery.isSuccess && Boolean(entity),
+    error: entityQuery.isError || Boolean(personaId && entityQuery.isSuccess && !entity),
     syncState,
     update,
     flush,
   };
 }
 
-function toChatValues(values: Record<string, PersonaValue>): Record<string, ChatPersonaValue> {
-  const result: Record<string, ChatPersonaValue> = {};
-
-  Object.entries(values).forEach(([key, value]) => {
-    result[key] =
-      typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-        ? value
-        : [...value];
-  });
-
-  return result;
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }

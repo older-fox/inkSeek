@@ -22,8 +22,9 @@ import type {
 import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { LlmService } from '../../ai/llm.service.js';
+import { MindRuntimeService } from '../../mind/mind-runtime.service.js';
+import { MindService } from '../../mind/mind.service.js';
 import { PersonasService } from '../../personas/personas.service.js';
-import { ChatPersonaService } from '../chat-persona.service.js';
 import { ImageDescriptionService } from '../image-description.service.js';
 import { PromptCompressionService } from '../prompt-compression.service.js';
 import { PipelineEffectsService } from './pipeline-effects.service.js';
@@ -98,9 +99,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     private readonly imageDescriptions: ImageDescriptionService,
     private readonly events: PipelineEventsService,
     private readonly personas: PersonasService,
-    private readonly conversationPersonas: ChatPersonaService,
     private readonly llm: LlmService,
     private readonly promptCompression: PromptCompressionService,
+    private readonly mind: MindRuntimeService,
+    private readonly mindData: MindService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -423,7 +425,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           readHistory: (input) => this.loadHistory(input),
           readConversationPersona: (kind, externalId) =>
             plan.channelId
-              ? this.conversationPersonas.valuesByExternalId(
+              ? this.mindData.conversationPersonaValues(
                   kind === 'group' ? 'GROUP' : 'PRIVATE',
                   plan.channelId,
                   externalId,
@@ -439,8 +441,15 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
               model: input.model ?? null,
               temperature: input.temperature,
               maxTokens: input.maxTokens,
+              source: 'pipeline.ai.chat',
             }),
           compressPrompt: (input) => this.promptCompression.compress(input),
+          runMind: (input) =>
+            this.mind.turn({
+              message: input.message ?? message,
+              mode: input.mode ?? (plan.mode === 'debug' ? 'SHADOW' : undefined),
+              trigger: input.trigger ?? 'MANUAL',
+            }),
         });
         const output = sanitizeRecord(result.outputs);
         if (result.effects && result.effects.length > 0) {
@@ -810,20 +819,20 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
    * keys the channel snapshot exposes.
    */
   private async loadPersonaValues(plan: RunPlan): Promise<Record<string, ChatPersonaValue> | null> {
-    let cardId = plan.personaCardId;
-
     try {
-      if (!cardId && plan.channelId) {
+      if (plan.channelId) {
         const binding = await this.prisma.chatChannelPersona.findUnique({
           where: { channelId: plan.channelId },
-          select: { cardId: true },
+          select: { values: true },
         });
-        cardId = binding?.cardId ?? null;
+        return binding
+          ? (binding.values as Record<string, ChatPersonaValue>)
+          : null;
       }
-      if (!cardId) {
+      if (!plan.personaCardId) {
         return null;
       }
-      const card = await this.personas.latestForSnapshot(cardId);
+      const card = await this.personas.latestForSnapshot(plan.personaCardId);
       return buildChannelPersonaSnapshot(card).values;
     } catch (error) {
       this.logger.warn(

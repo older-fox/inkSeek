@@ -55,6 +55,31 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * SET NX + EX. Returns null when Redis is unavailable so callers can fall
+   * back to an in-process lock instead of treating the outage as "acquired".
+   */
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean | null> {
+    const client = await this.clientFor();
+    if (!client) {
+      return null;
+    }
+
+    try {
+      const ttl = Math.max(1, Math.round(ttlSeconds));
+      const result = await withTimeout(
+        client.set(key, value, 'EX', ttl, 'NX'),
+        COMMAND_TIMEOUT_MS,
+      );
+      this.warned = false;
+      return result === 'OK';
+    } catch (error) {
+      this.resetClient(client);
+      this.warnOnce(error);
+      return null;
+    }
+  }
+
   onModuleDestroy(): void {
     this.client?.disconnect();
     this.client = null;

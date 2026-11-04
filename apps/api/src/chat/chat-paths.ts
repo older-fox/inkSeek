@@ -10,3 +10,7 @@ export const CHAT_VOICE_ROOT = fileURLToPath(
   new URL('../../../../data/chat/voices/', import.meta.url),
 );
 export const CHAT_VOICE_URL_PREFIX = '/api/v1/media/voices';
+export const CHAT_STICKER_ROOT = fileURLToPath(
+  new URL('../../../../data/chat/stickers/', import.meta.url),
+);
+export const CHAT_STICKER_URL_PREFIX = '/api/v1/media/stickers';

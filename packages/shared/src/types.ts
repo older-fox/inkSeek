@@ -77,14 +77,7 @@ export interface HealthStatus {
 
 export type ChatChannelStatus = 'CONNECTING' | 'ONLINE' | 'OFFLINE' | 'ERROR';
 export type ChatConversationKind = 'PRIVATE' | 'GROUP';
-export type ChatMessageKind =
-  | 'TEXT'
-  | 'IMAGE'
-  | 'VOICE'
-  | 'FACE'
-  | 'MIXED'
-  | 'SYSTEM'
-  | 'FORWARD';
+export type ChatMessageKind = 'TEXT' | 'IMAGE' | 'VOICE' | 'FACE' | 'MIXED' | 'SYSTEM' | 'FORWARD';
 
 export interface ChatChannelStats {
   private: number;
@@ -98,7 +91,30 @@ export type ChatPersonaValue = string | number | boolean | string[];
  * A deep copy of a Persona Center card, frozen at import time and stored under
  * the channel namespace. Editing the source card never mutates this snapshot.
  */
+/**
+ * Read-time projection of the single PersonaState row. Never stored on the
+ * channel persona; this only lets channel-level UI show the live values.
+ */
+export interface ChatChannelPersonaStateSnapshot {
+  moodValence: number;
+  moodArousal: number;
+  moodDominance: number;
+  energy: number;
+  health: number;
+  stress: number;
+  socialBattery: number;
+  attention: number;
+  currentActivity: string;
+  location: string;
+  sleepDebt: number;
+  grooming: number;
+  nextWakeAt: string | null;
+  updatedAt: string;
+}
+
 export interface ChatChannelPersonaSnapshot {
+  /** Persona instance id; the single identity used by mind/relationship APIs. */
+  id: string;
   cardId: string;
   cardSerial: string;
   name: string;
@@ -106,7 +122,12 @@ export interface ChatChannelPersonaSnapshot {
   quote: string;
   accent: 'brass' | 'jade';
   values: Record<string, ChatPersonaValue>;
+  meta: ChatPersonaMetadata;
+  state?: ChatChannelPersonaStateSnapshot | null;
 }
+
+/** Snapshot built from a card before it is attached to a channel. */
+export type ChatChannelPersonaDraft = Omit<ChatChannelPersonaSnapshot, 'id' | 'meta' | 'state'>;
 
 /**
  * A message channel is the namespace root: every conversation, contact,
@@ -265,12 +286,7 @@ export interface ChatMessagePage {
 }
 
 export type ChatPipelineRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED';
-export type ChatPipelineNodeStatus =
-  | 'RUNNING'
-  | 'SUCCEEDED'
-  | 'SKIPPED'
-  | 'FAILED'
-  | 'CANCELLED';
+export type ChatPipelineNodeStatus = 'RUNNING' | 'SUCCEEDED' | 'SKIPPED' | 'FAILED' | 'CANCELLED';
 
 /**
  * A pipeline graph belongs to exactly one namespace. `global` is the editable
@@ -339,15 +355,7 @@ export interface ChatPipelineRunEvent {
 }
 
 export type ChatPipelineNodeCategory =
-  | 'system'
-  | 'ai'
-  | 'text'
-  | 'logic'
-  | 'data'
-  | 'media'
-  | 'flow'
-  | 'variable'
-  | 'note';
+  'system' | 'ai' | 'text' | 'logic' | 'data' | 'media' | 'flow' | 'variable' | 'note';
 export type ChatPipelineJoin = 'all' | 'any';
 
 /**
@@ -468,12 +476,7 @@ export interface ChatPipelineGraph {
 }
 
 export type ChatPipelineConfigFieldKind =
-  | 'text'
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'select'
-  | 'json';
+  'text' | 'string' | 'number' | 'boolean' | 'select' | 'json';
 
 /**
  * Select fields can resolve their options at runtime instead of listing them in
@@ -482,9 +485,7 @@ export type ChatPipelineConfigFieldKind =
  * `pipeline-variables` lists the variables declared on the current graph.
  */
 export type ChatPipelineConfigOptionsSource =
-  | 'model-providers'
-  | 'provider-models'
-  | 'pipeline-variables';
+  'model-providers' | 'provider-models' | 'pipeline-variables';
 
 export interface ChatPipelineConfigField {
   key: string;
@@ -574,10 +575,7 @@ export interface ChatPipelineNodeType {
  * otherwise the kinds must be identical, so a boolean output can never feed a
  * text-only port.
  */
-export function canConnectPipelineKinds(
-  from: ChatPipelineIoKind,
-  to: ChatPipelineIoKind,
-): boolean {
+export function canConnectPipelineKinds(from: ChatPipelineIoKind, to: ChatPipelineIoKind): boolean {
   return from === 'any' || to === 'any' || from === to;
 }
 
@@ -607,9 +605,7 @@ export function resolvePipelineNodeInputs(
   }
   const raw = config?.['inputs'];
   const keys = Array.isArray(raw)
-    ? raw.filter(
-        (key): key is string => typeof key === 'string' && PIPELINE_INPUT_KEY.test(key),
-      )
+    ? raw.filter((key): key is string => typeof key === 'string' && PIPELINE_INPUT_KEY.test(key))
     : [];
   const resolved = keys.length > 0 ? keys : definition.inputs.map((port) => port.key);
 
@@ -688,23 +684,6 @@ export interface ChatPersonaMetadata {
   createdAt: string;
   updatedAt: string;
   history: ChatPersonaHistoryEntry[];
-}
-
-/**
- * Persona state attached to one conversation. GROUP rows are keyed by the
- * conversation; PRIVATE rows are keyed by (channelId, contactId), so the same
- * person shares one profile across every private scene in that channel.
- */
-export interface ChatConversationPersonaRecord {
-  kind: ChatConversationKind;
-  conversationId: string;
-  channelId: string;
-  /** Present for PRIVATE conversations; null for GROUP. */
-  contactId: string | null;
-  values: Record<string, ChatPersonaValue>;
-  meta: ChatPersonaMetadata;
-  /** False when the record is still synthesized from defaults and not yet stored. */
-  persisted: boolean;
 }
 
 export interface ChatGroupMemberSummary {

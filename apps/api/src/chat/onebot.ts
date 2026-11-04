@@ -30,6 +30,22 @@ export interface OneBotMessageEvent extends OneBotEvent {
   sender?: OneBotSender;
 }
 
+/**
+ * NapCat sends pokes as `notice/notify` with `sub_type: "poke"`; some builds
+ * use `notice_type: "poke"` directly. Neither shape carries a message_id.
+ */
+export interface OneBotPokeEvent extends OneBotEvent {
+  post_type: 'notice';
+  notice_type?: string;
+  sub_type?: string;
+  user_id: number | string;
+  target_id?: number | string;
+  group_id?: number | string;
+  sender?: OneBotSender;
+  nickname?: string;
+  card?: string;
+}
+
 export interface OneBotGroupInfo {
   group_id?: number | string;
   group_name?: string;
@@ -94,6 +110,14 @@ export function isOneBotMessageEvent(event: OneBotEvent): event is OneBotMessage
     (event.post_type === 'message' || event.post_type === 'message_sent') &&
     (event['message_type'] === 'private' || event['message_type'] === 'group') &&
     (event['message_id'] !== undefined || event['message'] !== undefined)
+  );
+}
+
+export function isOneBotPokeEvent(event: OneBotEvent): event is OneBotPokeEvent {
+  return (
+    event.post_type === 'notice' &&
+    event['user_id'] !== undefined &&
+    (event['sub_type'] === 'poke' || event['notice_type'] === 'poke')
   );
 }
 

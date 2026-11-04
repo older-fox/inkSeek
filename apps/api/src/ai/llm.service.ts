@@ -8,6 +8,7 @@ import {
 import type { ModelProviderProtocol } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
+import { LlmPromptLogService } from './llm-prompt-log.service.js';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -27,6 +28,10 @@ export interface LlmCompletionInput {
   model?: string | null;
   temperature?: number;
   maxTokens?: number;
+  /** Per-call timeout; defaults to the shared request timeout. */
+  timeoutMs?: number;
+  /** Caller label shown in the prompt log, e.g. `mind.planner`. */
+  source?: string;
 }
 
 export interface LlmCompletion {
@@ -35,6 +40,14 @@ export interface LlmCompletion {
   providerName: string;
   model: string;
   latencyMs: number;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+interface LlmUsage {
+  text: string;
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 interface ResolvedProvider {
@@ -52,25 +65,66 @@ interface ResolvedProvider {
  */
 @Injectable()
 export class LlmService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly promptLogs: LlmPromptLogService,
+  ) {}
 
   async complete(input: LlmCompletionInput): Promise<LlmCompletion> {
     if (input.prompt.trim().length === 0) {
       throw new BadRequestException({ code: 'AI_PROMPT_EMPTY', message: '提示词不能为空' });
     }
 
-    const provider = await this.resolveProvider(input.providerId);
-    const model = this.resolveModel(provider, input.model);
     const startedAt = performance.now();
-    const text = await this.requestCompletion(provider, model, input);
+    let provider: ResolvedProvider | null = null;
+    let model: string | null = null;
 
-    return {
-      text,
-      providerId: provider.id,
-      providerName: provider.name,
-      model,
-      latencyMs: Math.round(performance.now() - startedAt),
-    };
+    try {
+      provider = await this.resolveProvider(input.providerId);
+      model = this.resolveModel(provider, input.model);
+      const result = await this.requestCompletion(provider, model, input);
+      const latencyMs = Math.round(performance.now() - startedAt);
+      const completion: LlmCompletion = {
+        text: result.text,
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        latencyMs,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+      };
+      await this.promptLogs.record({
+        source: input.source?.trim() || 'llm',
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        system: input.system ?? '',
+        prompt: input.prompt,
+        response: result.text,
+        imageCount: input.images?.length ?? 0,
+        promptTokens: result.promptTokens ?? null,
+        completionTokens: result.completionTokens ?? null,
+        latencyMs,
+        error: null,
+      });
+      return completion;
+    } catch (error) {
+      await this.promptLogs.record({
+        source: input.source?.trim() || 'llm',
+        providerId: provider?.id ?? null,
+        providerName: provider?.name ?? null,
+        model,
+        system: input.system ?? '',
+        prompt: input.prompt,
+        response: '',
+        imageCount: input.images?.length ?? 0,
+        promptTokens: null,
+        completionTokens: null,
+        latencyMs: Math.round(performance.now() - startedAt),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async resolveProvider(providerId?: string | null): Promise<ResolvedProvider> {
@@ -126,10 +180,11 @@ export class LlmService {
     provider: ResolvedProvider,
     model: string,
     input: LlmCompletionInput,
-  ): Promise<string> {
+  ): Promise<LlmUsage> {
     const images = input.images ?? [];
     const temperature = input.temperature ?? 0.3;
     const maxTokens = input.maxTokens ?? 1024;
+    const timeoutMs = input.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
     if (provider.protocol === 'anthropic') {
       const content = [
@@ -158,9 +213,15 @@ export class LlmService {
           ...(input.system ? { system: input.system } : {}),
           messages: [{ role: 'user', content }],
         },
+        timeoutMs,
       );
 
-      return joinTextBlocks(asRecord(payload).content);
+      const usage = asRecord(asRecord(payload).usage);
+      return {
+        text: joinTextBlocks(asRecord(payload).content),
+        promptTokens: readUsageNumber(usage['input_tokens']),
+        completionTokens: readUsageNumber(usage['output_tokens']),
+      };
     }
 
     if (provider.protocol === 'gemini') {
@@ -174,9 +235,7 @@ export class LlmService {
         url.toString(),
         { 'content-type': 'application/json' },
         {
-          ...(input.system
-            ? { systemInstruction: { parts: [{ text: input.system }] } }
-            : {}),
+          ...(input.system ? { systemInstruction: { parts: [{ text: input.system }] } } : {}),
           contents: [
             {
               role: 'user',
@@ -190,12 +249,16 @@ export class LlmService {
           ],
           generationConfig: { temperature, maxOutputTokens: maxTokens },
         },
+        timeoutMs,
       );
 
-      const candidate = asRecord(
-        (asRecord(payload).candidates as unknown[] | undefined)?.[0],
-      );
-      return joinTextBlocks(asRecord(candidate.content).parts);
+      const candidate = asRecord((asRecord(payload).candidates as unknown[] | undefined)?.[0]);
+      const usage = asRecord(asRecord(payload).usageMetadata);
+      return {
+        text: joinTextBlocks(asRecord(candidate.content).parts),
+        promptTokens: readUsageNumber(usage['promptTokenCount']),
+        completionTokens: readUsageNumber(usage['candidatesTokenCount']),
+      };
     }
 
     const content =
@@ -227,10 +290,16 @@ export class LlmService {
           { role: 'user', content },
         ],
       },
+      timeoutMs,
     );
 
     const choice = asRecord((asRecord(payload).choices as unknown[] | undefined)?.[0]);
-    return joinTextBlocks(asRecord(choice.message).content);
+    const usage = asRecord(asRecord(payload).usage);
+    return {
+      text: joinTextBlocks(asRecord(choice.message).content),
+      promptTokens: readUsageNumber(usage['prompt_tokens']),
+      completionTokens: readUsageNumber(usage['completion_tokens']),
+    };
   }
 
   private async postJson(
@@ -238,6 +307,7 @@ export class LlmService {
     url: string,
     headers: Record<string, string>,
     body: unknown,
+    timeoutMs: number,
   ): Promise<unknown> {
     let response: Response;
 
@@ -247,7 +317,7 @@ export class LlmService {
         headers: { accept: 'application/json', ...headers },
         body: JSON.stringify(body),
         cache: 'no-store',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
@@ -255,7 +325,7 @@ export class LlmService {
       if (timedOut) {
         throw new GatewayTimeoutException({
           code: 'AI_TIMEOUT',
-          message: `模型响应超时（${REQUEST_TIMEOUT_MS / 1000} 秒），请稍后重试或换用更快的模型`,
+          message: `模型响应超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试或换用更快的模型`,
         });
       }
 
@@ -330,6 +400,10 @@ function modelList(record: ModelProvider): string[] {
 
 function trimBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
+}
+
+function readUsageNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

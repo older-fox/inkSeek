@@ -1,7 +1,7 @@
 import type {
   ChatConversationKind,
   ChatMessageKind,
-  ChatPersonaValue,
+  ConversationPersonaValues,
   ChatPipelineConfigField,
   ChatPipelineDynamicInputs,
   ChatPipelineIoField,
@@ -9,6 +9,7 @@ import type {
   ChatPipelineNodeCategory,
   ChatPipelineNodeHelp,
   ChatPipelineVoiceValue,
+  MindTurnResult,
 } from '@inkseek/shared';
 import type { PipelineGraph, PipelineNode } from './pipeline-graph.js';
 
@@ -192,7 +193,7 @@ export interface PipelineNodeContext {
    * Persona card bound to this run, normalized with the same values the channel
    * snapshot exposes; null when the run has no persona (e.g. global debug).
    */
-  personaValues: Readonly<Record<string, ChatPersonaValue>> | null;
+  personaValues: Readonly<ConversationPersonaValues> | null;
   /** Live pipeline variable value; undefined when the key was never declared. */
   getVariable(key: string): unknown;
   /** Writes a pipeline variable for later cards in the same run. */
@@ -210,7 +211,7 @@ export interface PipelineNodeContext {
   readConversationPersona(
     kind: 'group' | 'private',
     externalId: string,
-  ): Promise<Record<string, ChatPersonaValue> | null>;
+  ): Promise<ConversationPersonaValues | null>;
   /** Waits `ms`; the runner owns the timer and cancels it on shutdown. */
   wait(ms: number): Promise<void>;
   /** Hashes the image, returns a cached description or asks a vision model. */
@@ -219,6 +220,16 @@ export interface PipelineNodeContext {
   chat(input: PipelineChatInput): Promise<PipelineChatResult>;
   /** Compresses a detailed prompt, reusing the Redis-cached result while its TTL holds. */
   compressPrompt(input: PipelinePromptCompressionInput): Promise<PipelinePromptCompressionResult>;
+  /**
+   * Runs one persona-mind turn. The mind owns retrieval, social calculus,
+   * tool calls, write-back and action execution; this hook only passes the
+   * current message and an optional mode override.
+   */
+  runMind(input: {
+    message?: PipelineMessage;
+    mode?: 'SHADOW' | 'APPROVAL' | 'LIVE';
+    trigger?: 'MESSAGE' | 'HEARTBEAT' | 'PROACTIVE' | 'MANUAL';
+  }): Promise<MindTurnResult>;
 }
 
 export interface PipelineNodeDefinition {

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  type OnModuleDestroy,
-  type OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatChannel } from '../generated/prisma/client.js';
 import { ChatEventsService } from './chat-events.service.js';
@@ -12,6 +7,7 @@ import { NapCatClient, type NapCatCloseInfo } from './napcat-client.js';
 import {
   externalIdOf,
   isOneBotMessageEvent,
+  isOneBotPokeEvent,
   userAvatarUrl,
   type OneBotEvent,
 } from './onebot.js';
@@ -201,21 +197,24 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`渠道 ${updated.displayName}（${updated.accountId}）已上线`);
   }
 
-  private async handleEvent(
-    connection: ManagedConnection,
-    event: OneBotEvent,
-  ): Promise<void> {
-    if (connection.disposed || !isOneBotMessageEvent(event)) {
+  private async handleEvent(connection: ManagedConnection, event: OneBotEvent): Promise<void> {
+    if (connection.disposed) {
+      return;
+    }
+
+    if (isOneBotPokeEvent(event)) {
+      await this.messages.ingestPoke(connection.channel, connection.client, event);
+      return;
+    }
+
+    if (!isOneBotMessageEvent(event)) {
       return;
     }
 
     await this.messages.ingest(connection.channel, connection.client, event);
   }
 
-  private async handleClose(
-    connection: ManagedConnection,
-    info: NapCatCloseInfo,
-  ): Promise<void> {
+  private async handleClose(connection: ManagedConnection, info: NapCatCloseInfo): Promise<void> {
     if (connection.disposed || connection.blocked || this.shuttingDown) {
       return;
     }

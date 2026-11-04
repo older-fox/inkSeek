@@ -1,0 +1,138 @@
+import {
+  Injectable,
+  Logger,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { PrismaService } from '../database/prisma.service.js';
+import { MindRuntimeService } from './mind-runtime.service.js';
+
+const TICK_MS = 30_000;
+const LEASE_MS = 2 * 60_000;
+
+@Injectable()
+export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(MindHeartbeatService.name);
+  private readonly workerId = randomUUID();
+  private timer: NodeJS.Timeout | null = null;
+  private running = false;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly runtime: MindRuntimeService,
+  ) {}
+
+  onModuleInit(): void {
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, TICK_MS);
+    this.logger.log('人格心智心跳已启动');
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  async trigger(personaId: string): Promise<boolean> {
+    const schedule = await this.prisma.personaSchedule.findUnique({ where: { personaId } });
+    if (!schedule) {
+      return false;
+    }
+    await this.prisma.personaSchedule.update({
+      where: { personaId },
+      data: {
+        nextWakeAt: new Date(),
+        reason: '手动唤醒',
+        leaseUntil: null,
+        leaseOwner: null,
+      },
+    });
+    return true;
+  }
+
+  private async tick(): Promise<void> {
+    if (this.running) {
+      return;
+    }
+    this.running = true;
+    try {
+      const now = new Date();
+      const due = await this.prisma.personaSchedule.findMany({
+        where: {
+          nextWakeAt: { lte: now },
+          OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }],
+        },
+        orderBy: { nextWakeAt: 'asc' },
+        take: 10,
+      });
+      for (const schedule of due) {
+        const claimed = await this.prisma.personaSchedule.updateMany({
+          where: {
+            id: schedule.id,
+            OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }],
+          },
+          data: {
+            leaseUntil: new Date(now.getTime() + LEASE_MS),
+            leaseOwner: this.workerId,
+          },
+        });
+        if (claimed.count === 0) {
+          continue;
+        }
+        await this.wake(schedule.personaId);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `心跳轮询失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async wake(personaId: string): Promise<void> {
+    try {
+      const settings = await this.prisma.chatMindSettings.findFirst({
+        where: { channel: { persona: { id: personaId } } },
+      });
+      if (settings && !settings.heartbeatEnabled) {
+        await this.reschedule(personaId, settings.wakeIntervalMinutes);
+        return;
+      }
+      const result = await this.runtime.heartbeat(personaId);
+      if (!result) {
+        // Runtime reschedules on its own paths; this is a safety net.
+        await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `人格 ${personaId} 心跳失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      const settings = await this.prisma.chatMindSettings.findFirst({
+        where: { channel: { persona: { id: personaId } } },
+      });
+      await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
+    } finally {
+      await this.prisma.personaSchedule.updateMany({
+        where: { personaId },
+        data: { leaseUntil: null, leaseOwner: null },
+      });
+    }
+  }
+
+  private async reschedule(personaId: string, minutes: number): Promise<void> {
+    await this.prisma.personaSchedule.updateMany({
+      where: { personaId },
+      data: {
+        nextWakeAt: new Date(Date.now() + minutes * 60_000),
+        leaseUntil: null,
+        leaseOwner: null,
+        reason: '心跳安全重排',
+      },
+    });
+  }
+}

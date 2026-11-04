@@ -14,24 +14,45 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
+import type { ChatChannelPersonaStateSnapshot, ChatPersonaValue } from '@inkseek/shared';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
 import { TimeZonePicker } from '@/components/persona-form-controls';
 import { PersonaRevisionList } from '@/components/persona-revision-list';
+import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
   PERSONA_ATTRIBUTE_COUNT,
+  PERSONA_FIELD_LABELS,
   PERSONA_GROUPS,
+  isStateField,
+  mergeStateValues,
   personaForChannel,
   readChannelPersonaOverrides,
-  writeChannelPersonaOverride,
+  clearChannelPersonaOverrides,
+  stateFieldInput,
+  stateMoodLabel,
   type PersonaField,
   type PersonaGroup,
   type PersonaValue,
 } from '@/lib/channel-persona';
 import type { Channel } from '@/lib/connections';
 import { PERSONA_TIMEZONE_OPTIONS } from '@/lib/persona-draft';
+import { chatChannelsQuery } from '@/lib/queries';
+import {
+  appendPersonaHistory,
+  formatPersonaValue,
+  type PersonaMetadata,
+} from '@/lib/persona-metadata';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -581,7 +602,12 @@ function PersonaFieldCard({
           <code className="min-w-0 break-all text-right font-mono text-[0.54rem] leading-5 text-mist-600">
             {field.key}
           </code>
-          {!editing && !inlineControl && (
+          {isStateField(field.key) ? (
+            <span className="shrink-0 rounded border border-jade-400/20 bg-jade-400/[0.07] px-1 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.08em] text-jade-300/80">
+              实时
+            </span>
+          ) : null}
+          {!editing && !inlineControl && !field.readonly && (
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -662,22 +688,178 @@ export function ChannelPersonaPanel({
   onClose: () => void;
 }) {
   const [activeGroupId, setActiveGroupId] = useState(PERSONA_GROUPS[0]?.id ?? '');
-  const [overrides, setOverrides] = useState<Record<string, PersonaValue>>({});
+  const [values, setValues] = useState<Record<string, PersonaValue> | null>(null);
+  const [liveState, setLiveState] = useState<ChatChannelPersonaStateSnapshot | null>(null);
+  const [meta, setMeta] = useState<PersonaMetadata | null>(null);
+  const [syncState, setSyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const contentRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const savingRef = useRef(false);
+  const pendingRef = useRef<{
+    channelId: string;
+    values: Record<string, PersonaValue>;
+    meta: PersonaMetadata;
+    clearLegacy: boolean;
+  } | null>(null);
+  const queryClient = useQueryClient();
   const persona = channel ? personaForChannel(channel) : null;
-  const values = persona ? { ...persona.values, ...overrides } : null;
   const activeGroup =
     PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PERSONA_GROUPS[0];
   const activeCount = activeGroup ? (GROUP_FIELD_COUNTS[activeGroup.id] ?? 0) : 0;
+  const displayValues = values ? mergeStateValues(values, liveState) : null;
+
+  const saveNow = useCallback(async () => {
+    if (savingRef.current) {
+      return;
+    }
+    const pending = pendingRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingRef.current = null;
+    savingRef.current = true;
+    setSyncState('saving');
+    try {
+      const summary = await api.saveChannelPersona(pending.channelId, {
+        values: toChatValues(pending.values),
+        history: pending.meta.history.map((entry) => ({ ...entry })),
+      });
+      queryClient.setQueryData(chatChannelsQuery.queryKey, (current) =>
+        current?.map((item) => (item.id === summary.id ? summary : item)),
+      );
+      if (pending.clearLegacy) {
+        clearChannelPersonaOverrides(pending.channelId);
+      }
+      setSyncState('saved');
+    } catch (error) {
+      setSyncState('error');
+      toast.error(error instanceof ApiError ? error.message : '人格属性保存失败，请稍后重试');
+    } finally {
+      savingRef.current = false;
+      if (pendingRef.current) {
+        void saveNow();
+      }
+    }
+  }, [queryClient]);
+
+  const queueSave = useCallback(
+    (channelId: string, next: Record<string, PersonaValue>, nextMeta: PersonaMetadata) => {
+      pendingRef.current = {
+        channelId,
+        values: next,
+        meta: nextMeta,
+        clearLegacy: pendingRef.current?.clearLegacy ?? false,
+      };
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        void saveNow();
+      }, 450);
+    },
+    [saveNow],
+  );
 
   useEffect(() => {
-    if (channel) {
-      setActiveGroupId(PERSONA_GROUPS[0]?.id ?? '');
-      setOverrides(readChannelPersonaOverrides(channel.id));
-    } else {
-      setOverrides({});
+    const snapshot = channel?.persona;
+    if (!snapshot) {
+      setLiveState(null);
+      return;
     }
-  }, [channel]);
+    setLiveState(snapshot.state ?? null);
+    let cancelled = false;
+    void api
+      .mindState(snapshot.id)
+      .then((state) => {
+        if (!cancelled) {
+          setLiveState(state);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [channel?.id, channel?.persona?.id]);
+
+  const saveStateField = useCallback(
+    async (key: string, value: PersonaValue) => {
+      const channelId = channel?.id;
+      const personaId = channel?.persona?.id;
+      const input = stateFieldInput(key, value);
+      if (!channelId || !personaId || !input) {
+        return;
+      }
+      setSyncState('saving');
+      try {
+        const next = await api.updateMindState(personaId, input);
+        setLiveState(next);
+        queryClient.setQueryData(chatChannelsQuery.queryKey, (current) =>
+          current?.map((item) =>
+            item.id === channelId && item.persona
+              ? { ...item, persona: { ...item.persona, state: next } }
+              : item,
+          ),
+        );
+        void queryClient.invalidateQueries({ queryKey: ['mind', 'overview', channelId] });
+        setSyncState('saved');
+      } catch (error) {
+        setSyncState('error');
+        toast.error(error instanceof ApiError ? error.message : '实时状态保存失败，请稍后重试');
+      }
+    },
+    [channel?.id, channel?.persona?.id, queryClient],
+  );
+
+  useEffect(() => {
+    if (channel?.id) {
+      setActiveGroupId(PERSONA_GROUPS[0]?.id ?? '');
+    }
+  }, [channel?.id]);
+
+  useEffect(() => {
+    if (!channel?.persona) {
+      setValues(null);
+      setMeta(null);
+      return;
+    }
+    if (pendingRef.current || savingRef.current) {
+      return;
+    }
+    const snapshot = channel.persona;
+    const legacy = readChannelPersonaOverrides(channel.id);
+    const next = { ...snapshot.values, ...legacy };
+    setValues(next);
+    setMeta(snapshot.meta);
+    if (Object.keys(legacy).length > 0) {
+      pendingRef.current = {
+        channelId: channel.id,
+        values: next,
+        meta: snapshot.meta,
+        clearLegacy: true,
+      };
+      void saveNow();
+    }
+  }, [channel?.id, channel?.persona?.meta.updatedAt, saveNow]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void saveNow();
+    };
+  }, [saveNow]);
+
+  const close = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    void saveNow();
+    onClose();
+  }, [saveNow, onClose]);
 
   useEffect(() => {
     if (!channel) {
@@ -690,13 +872,13 @@ export function ChannelPersonaPanel({
         return;
       }
       if (event.key === 'Escape') {
-        onClose();
+        close();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [channel, onClose]);
+  }, [channel, close]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -710,23 +892,35 @@ export function ChannelPersonaPanel({
   }
 
   const handleChange = (key: string, value: PersonaValue) => {
-    if (!channel) {
+    if (!channel || !values || !meta) {
       return;
     }
-    setOverrides((current) => ({ ...current, [key]: value }));
-    writeChannelPersonaOverride(channel.id, key, value);
+    if (isStateField(key)) {
+      void saveStateField(key, value);
+      return;
+    }
+    const label = PERSONA_FIELD_LABELS.get(key) ?? key;
+    const next = { ...values, [key]: value };
+    const nextMeta = appendPersonaHistory(meta, {
+      field: label,
+      from: formatPersonaValue(values[key]),
+      to: formatPersonaValue(value),
+    });
+    setValues(next);
+    setMeta(nextMeta);
+    queueSave(channel.id, next, nextMeta);
   };
 
   return createPortal(
     <AnimatePresence>
-      {channel && persona && values && (
+      {channel && persona && values && displayValues && (
         <motion.div
           key="channel-persona"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          onClick={onClose}
+          onClick={close}
           className="fixed inset-0 z-[110] flex items-stretch justify-center bg-[#05090e]/70 backdrop-blur-sm sm:items-center sm:p-6"
         >
           <motion.div
@@ -769,6 +963,12 @@ export function ChannelPersonaPanel({
                     渠道独立快照
                     {channel.persona ? ` · ${channel.persona.cardSerial}` : null}
                   </span>
+                  {liveState ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-brass-400/20 bg-brass-400/[0.07] px-2 py-0.5 font-mono text-[0.56rem] text-brass-200">
+                      此刻 {stateMoodLabel(liveState)}
+                      {liveState.currentActivity ? ` · ${liveState.currentActivity}` : ''}
+                    </span>
+                  ) : null}
                 </div>
 
                 <h2
@@ -785,6 +985,31 @@ export function ChannelPersonaPanel({
                   )}」`}
                 </p>
 
+                {liveState ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {[
+                      ['心情', liveState.moodValence],
+                      ['唤醒', liveState.moodArousal],
+                      ['掌控', liveState.moodDominance],
+                      ['精力', liveState.energy],
+                      ['健康', liveState.health],
+                      ['压力', liveState.stress],
+                      ['社交电量', liveState.socialBattery],
+                      ['注意力', liveState.attention],
+                      ['睡眠债', liveState.sleepDebt],
+                      ['整洁', liveState.grooming],
+                    ].map(([label, value]) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center gap-1 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.56rem] text-mist-500"
+                      >
+                        {label}
+                        <span className="text-mist-200">{value}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <PlatformChip platform={channel.platform} connector />
                   <span className="font-mono text-[0.6rem] tracking-[0.04em] text-mist-500">
@@ -798,7 +1023,7 @@ export function ChannelPersonaPanel({
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={close}
                 aria-label="关闭人格数据面板"
                 className="rounded-lg p-2 text-mist-600 transition hover:bg-mist-100/5 hover:text-mist-200"
               >
@@ -885,7 +1110,11 @@ export function ChannelPersonaPanel({
                     </div>
 
                     <div className="mt-4">
-                      <GroupSection group={activeGroup} values={values} onChange={handleChange} />
+                      <GroupSection
+                        group={activeGroup}
+                        values={displayValues}
+                        onChange={handleChange}
+                      />
                     </div>
 
                     {activeGroup.id === 'meta' ? (
@@ -898,9 +1127,16 @@ export function ChannelPersonaPanel({
 
             <footer className="relative flex flex-wrap items-center justify-between gap-2 border-t border-mist-100/[0.06] px-5 py-3 sm:px-7">
               <p className="font-mono text-[0.55rem] uppercase tracking-[0.16em] text-mist-600">
-                本地快照 · {PERSONA_ATTRIBUTE_COUNT} 项属性
+                渠道人格 · {PERSONA_ATTRIBUTE_COUNT} 项属性
               </p>
-              <p className="text-[0.68rem] text-mist-600">仅属于该渠道 · 编辑即时保存在本地</p>
+              <p className="text-[0.68rem] text-mist-600">
+                仅属于该渠道 ·{' '}
+                {syncState === 'saving'
+                  ? '正在保存…'
+                  : syncState === 'error'
+                    ? '保存失败，稍后重试'
+                    : '编辑即时保存到服务端'}
+              </p>
             </footer>
           </motion.div>
         </motion.div>
@@ -908,4 +1144,16 @@ export function ChannelPersonaPanel({
     </AnimatePresence>,
     document.body,
   );
+}
+
+function toChatValues(values: Record<string, PersonaValue>): Record<string, ChatPersonaValue> {
+  const result: Record<string, ChatPersonaValue> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (Array.isArray(value)) {
+      result[key] = [...(value as readonly string[])];
+    } else {
+      result[key] = value as string | number | boolean;
+    }
+  }
+  return result;
 }

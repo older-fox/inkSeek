@@ -40,6 +40,7 @@ import {
   type OneBotGroupInfo,
   type OneBotGroupMember,
   type OneBotMessageEvent,
+  type OneBotPokeEvent,
   type OneBotRequester,
   type OneBotSegment,
 } from './onebot.js';
@@ -358,6 +359,49 @@ export class ChatMessagesService {
         `处理 NapCat 消息失败：${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
       );
     }
+  }
+
+  /**
+   * Poke notices carry no message_id. Turn them into a synthetic text message
+   * so the conversation history, pipeline and mind all see the interaction.
+   * A `poke` segment is kept alongside the display text so directed pokes can
+   * be detected by target id instead of by matching names in the text.
+   */
+  async ingestPoke(
+    channel: ChatChannel,
+    client: OneBotRequester,
+    event: OneBotPokeEvent,
+  ): Promise<void> {
+    const userId = externalIdOf(event.user_id);
+    if (!userId || userId === channel.accountId) {
+      return;
+    }
+    const targetId = externalIdOf(event.target_id);
+    const groupId = externalIdOf(event.group_id);
+    const directed = targetId === channel.accountId;
+    const nickname = event.sender?.nickname?.trim() || event.nickname?.trim();
+    const card = event.sender?.card?.trim() || event.card?.trim();
+    const seconds = event.time ?? Math.floor(Date.now() / 1000);
+    const segments: OneBotSegment[] = [
+      { type: 'text', data: { text: directed ? '[戳了戳我]' : '[戳一戳]' } },
+      ...(directed ? [{ type: 'poke', data: { target_id: channel.accountId } }] : []),
+    ];
+
+    await this.ingest(channel, client, {
+      post_type: 'message',
+      message_type: groupId ? 'group' : 'private',
+      // Synthetic external id: NapCat does not provide a message id for pokes.
+      message_id: `poke:${seconds}:${userId}:${targetId ?? '-'}:${groupId ?? 'private'}`,
+      user_id: userId,
+      ...(groupId ? { group_id: groupId } : {}),
+      message: segments,
+      sender: {
+        user_id: userId,
+        ...(nickname ? { nickname } : {}),
+        ...(card ? { card } : {}),
+      },
+      time: seconds,
+    });
   }
 
   async send(

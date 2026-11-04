@@ -30,6 +30,10 @@ interface PipelineSelectProps {
   menuTitle?: string;
   menuWidth?: number;
   className?: string;
+  /** Shown when no option is selected; defaults to 未设置. */
+  placeholder?: string;
+  /** Show the raw value under each label. Disable for id/value pairs. */
+  showValue?: boolean;
   /** Renders an inline create row at the bottom of the menu. */
   create?: PipelineSelectCreate;
 }
@@ -57,6 +61,8 @@ export function PipelineSelect({
   menuTitle,
   menuWidth = 280,
   className,
+  placeholder = '未设置',
+  showValue = true,
   create,
 }: PipelineSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -293,7 +299,7 @@ export function PipelineSelect({
             current === null && 'text-mist-600',
           )}
         >
-          {current?.label ?? (value === '' ? '未设置' : value)}
+          {current?.label ?? (value === '' ? placeholder : value)}
         </span>
         <ChevronDown
           className={cn(
@@ -392,7 +398,7 @@ export function PipelineSelect({
                     <span className="block truncate text-[0.84rem] leading-5">
                       {option.label}
                     </span>
-                    {option.value !== '' && (
+                    {showValue && option.value !== '' && (
                       <span
                         className={cn(
                           'mt-0.5 block truncate font-mono text-[0.64rem] leading-4',

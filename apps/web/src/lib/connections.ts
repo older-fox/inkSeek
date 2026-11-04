@@ -146,36 +146,14 @@ const LEGACY_PERSONA_STORAGE_KEYS = [
   'inkseek-private-persona-values',
   'inkseek-private-persona-meta',
 ];
-const LEGACY_PERSONA_ID = /^qq-(group|private)-/;
 
 function purgeLegacyMockData(): void {
   try {
     window.localStorage.removeItem(LEGACY_MOCK_STORAGE_KEY);
-
+    // Conversation persona values now live in PersonaRelationship /
+    // PersonaGroupStance; these keys are no longer a data source.
     LEGACY_PERSONA_STORAGE_KEYS.forEach((key) => {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) {
-        return;
-      }
-
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== 'object') {
-        return;
-      }
-
-      const store = parsed as Record<string, unknown>;
-      let changed = false;
-
-      Object.keys(store).forEach((entryKey) => {
-        if (LEGACY_PERSONA_ID.test(entryKey)) {
-          delete store[entryKey];
-          changed = true;
-        }
-      });
-
-      if (changed) {
-        window.localStorage.setItem(key, JSON.stringify(store));
-      }
+      window.localStorage.removeItem(key);
     });
   } catch {
     // localStorage 可能不可用，忽略即可。

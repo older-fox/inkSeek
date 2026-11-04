@@ -961,7 +961,7 @@ const callPersona: PipelineNodeDefinition = {
   label: '人格调用',
   category: 'data',
   description:
-    '把文本里的 {name}、{age} 等占位符自动替换成本次运行绑定的人格卡参数，直接输出填充后的文本；没有左侧输入，未绑定人格时占位符为空。',
+    '把文本里的 {name}、{age} 等占位符自动替换成渠道人格的基本数值，直接输出填充后的文本；没有左侧输入，未绑定人格时占位符为空。',
   resizable: true,
   help: {
     notes: [
@@ -979,7 +979,7 @@ const callPersona: PipelineNodeDefinition = {
       label: '人格文本',
       kind: 'text',
       placeholder: '你将扮演{name}，年龄{age}，外貌{appearance}。',
-      hint: '用 {参数名} 占位符填入人格参数，例如 {name}、{age}、{appearance}；参数名与人格卡快照一致。',
+      hint: '用 {参数名} 占位符填入人格参数，例如 {name}、{age}、{appearance}；参数名与渠道人格一致。',
     },
   ],
   inputs: [],
@@ -1322,7 +1322,7 @@ const groupPersona: PipelineNodeDefinition = conversationPersonaNode({
   notes: [
     '会话标识必须来自管线变量：用「写入变量」把消息对象的「来源群号/QQ 号」（conversationExternalId）写进去，再在这里选择该变量；没有选择变量或值为空时输出空文本。',
     '只读本渠道内的群会话，不会隐式读取当前消息的 conversationKind，也不会在找不到时回退到私聊人格。',
-    '读取的是群聊人格面板已保存的属性；该群从未保存过人格记录时同样输出空文本。',
+    '读取的是该群在「关系与群」里保存的群态度，这是唯一真源；该群还没有记录时输出空文本。',
     '文本里的 {参数名} 会替换成对应属性，例如 {group_persona}、{topic}、{scene_rules}；未列出的名称保持原样，属性为空时替换为空字符串。',
     'found 只表示该群是否有已保存的人格记录，与模板内容是否为空无关。',
   ],
@@ -1339,7 +1339,7 @@ const privatePersona: PipelineNodeDefinition = conversationPersonaNode({
   notes: [
     '会话标识必须来自管线变量：用「写入变量」把消息对象的「来源群号/QQ 号」（conversationExternalId）写进去，再在这里选择该变量；没有选择变量或值为空时输出空文本。',
     '只读本渠道内的私聊联系人，不会隐式读取当前消息的 conversationKind，也不会在找不到时回退到群聊人格。',
-    '读取的是私聊人格面板已保存的属性；该联系人从未保存过人格记录时同样输出空文本。',
+    '读取的是该联系人在「关系与群」里保存的关系，这是唯一真源；该联系人还没有记录时输出空文本。',
     '选「整个快照」时 text 按中文名逐行输出全部已填属性；也可选单项属性直接输出。',
   ],
   kind: 'private',
@@ -3558,6 +3558,93 @@ const noteText: PipelineNodeDefinition = {
   run: () => ({ outputs: {} }),
 };
 
+const mindTurn: PipelineNodeDefinition = {
+  type: 'mind.turn',
+  version: 1,
+  label: '心智回合',
+  category: 'ai',
+  description:
+    '把当前消息交给人格心智：检索记忆、计算关系与场合、决定回不回、调用工具、生成多气泡动作并写回。是完整的人格循环，不是一次普通模型调用。',
+  resizable: true,
+  help: {
+    notes: [
+      '心智回合读取渠道当前绑定的人格、关系、群态和记忆；没有绑定人格时输出 engage=false。',
+      '模式 auto 使用渠道「心智」设置；shadow 只记录不发送；approval 生成待审动作；live 直接执行。',
+      '调试运行会自动降级为 shadow，不会真的发送消息。',
+      '工具循环、社交判断、记忆写入、关系变化都会记录在「心智」页的运行轨迹里。',
+      '一个消息只应有一个心智回合；如果同时在渠道设置里开启了 live 模式，处理器会直接走心智，不再运行整张图。',
+    ],
+  },
+  defaultConfig: { mode: 'auto' },
+  fields: [
+    {
+      key: 'mode',
+      label: '执行模式',
+      kind: 'select',
+      options: [
+        { value: 'auto', label: '跟随渠道设置' },
+        { value: 'shadow', label: '影子（不发送）' },
+        { value: 'approval', label: '审批后发送' },
+        { value: 'live', label: '直接发送' },
+      ],
+      hint: '调试运行始终使用影子模式。',
+    },
+  ],
+  inputs: [
+    {
+      key: 'message',
+      label: '消息对象',
+      kind: 'json',
+      description: '可选；不接线时使用本次管线运行的当前消息。',
+    },
+  ],
+  outputs: [
+    { key: 'engage', label: '是否回应', kind: 'boolean', description: '心智最终是否决定回应。' },
+    { key: 'reason', label: '理由', kind: 'text', description: '回或不回的原因。' },
+    { key: 'stance', label: '姿态', kind: 'text', description: '外在表现姿态。' },
+    { key: 'runId', label: '运行 ID', kind: 'text', description: '心智运行记录 ID。' },
+    { key: 'plan', label: '动作计划', kind: 'json', description: '气泡、表情、记忆写入、关系变化和待办。' },
+    { key: 'socialRead', label: '社交判断', kind: 'json', description: '注意、意愿、风险、责任与内心感受。' },
+    { key: 'felt', label: '内心', kind: 'text', description: '真实感受；可能与外在表现不同。' },
+    { key: 'shown', label: '外在', kind: 'text', description: '决定表现出来的样子。' },
+  ],
+  validateConfig: (config) => {
+    const mode = readOptionalString(config, 'mode') ?? 'auto';
+    if (!['auto', 'shadow', 'approval', 'live'].includes(mode)) {
+      throw new Error('执行模式无效');
+    }
+  },
+  run: async (context) => {
+    const configured = readOptionalString(context.node.config, 'mode') ?? 'auto';
+    const mode =
+      configured === 'shadow'
+        ? 'SHADOW'
+        : configured === 'approval'
+          ? 'APPROVAL'
+          : configured === 'live'
+            ? 'LIVE'
+            : undefined;
+    const raw = context.inputs['message'];
+    const inputMessage =
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? (raw as unknown as PipelineMessage)
+        : undefined;
+    const result = await context.runMind({ message: inputMessage, mode, trigger: 'MESSAGE' });
+    return {
+      outputs: {
+        engage: result.engage,
+        reason: result.reason,
+        stance: result.shown ?? result.plan?.stance ?? '',
+        runId: result.runId,
+        plan: result.plan,
+        socialRead: result.socialRead,
+        felt: result.felt?.label ?? '',
+        shown: result.shown ?? '',
+      },
+    };
+  },
+};
+
 const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   messageInput,
   messageOutput,
@@ -3570,6 +3657,7 @@ const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   receivedSenderId,
   chatCompletion,
   promptCompression,
+  mindTurn,
   constantValue,
   getVariable,
   setVariable,

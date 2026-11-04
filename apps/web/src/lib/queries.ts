@@ -55,11 +55,20 @@ export const chatMessagesQuery = (conversationId: string) =>
     staleTime: 5_000,
   });
 
-export const chatConversationPersonaQuery = (conversationId: string) =>
+export const mindRelationshipsQuery = (personaId: string) =>
   queryOptions({
-    queryKey: ['chat', 'persona', conversationId],
-    queryFn: () => api.chatConversationPersona(conversationId),
-    staleTime: 30_000,
+    queryKey: ['mind', 'relationships', personaId],
+    queryFn: () => api.mindRelationships(personaId),
+    enabled: Boolean(personaId),
+    staleTime: 5_000,
+  });
+
+export const mindGroupStancesQuery = (personaId: string) =>
+  queryOptions({
+    queryKey: ['mind', 'group-stances', personaId],
+    queryFn: () => api.mindGroupStances(personaId),
+    enabled: Boolean(personaId),
+    staleTime: 5_000,
   });
 
 export const pipelineGraphQuery = (ref: PipelineScopeRef) =>
@@ -86,6 +95,30 @@ export const pipelineRunQuery = (id: string) =>
   queryOptions({
     queryKey: ['pipeline', 'run', id],
     queryFn: () => api.pipelineRun(id),
+    enabled: Boolean(id),
+    staleTime: 10_000,
+  });
+
+export const mindOverviewQuery = (channelId: string) =>
+  queryOptions({
+    queryKey: ['mind', 'overview', channelId],
+    queryFn: () => api.mindOverview(channelId),
+    enabled: Boolean(channelId),
+    staleTime: 5_000,
+  });
+
+export const mindRunsQuery = (personaId: string, conversationId?: string) =>
+  queryOptions({
+    queryKey: ['mind', 'runs', personaId, conversationId ?? null],
+    queryFn: () => api.mindRuns(personaId, conversationId, 40),
+    enabled: Boolean(personaId),
+    staleTime: 3_000,
+  });
+
+export const mindRunQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['mind', 'run', id],
+    queryFn: () => api.mindRun(id),
     enabled: Boolean(id),
     staleTime: 10_000,
   });
