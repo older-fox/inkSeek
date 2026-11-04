@@ -70,6 +70,7 @@ const MAX_SCENE_MESSAGE = 160;
 const MAX_MEMORY_CONTENT = 140;
 const MAX_PROMPT_MEMORIES = 6;
 const MAX_PROMPT_MESSAGES = 12;
+const MAX_TOOL_RESULT = 6000;
 const PLANNER_MAX_TOKENS = 1200;
 
 @Injectable()
@@ -144,7 +145,7 @@ export class MindPlannerService {
       toolCalls.push(execution);
       prompt = `${prompt}\n\n工具 ${execution.name} 的结果：\n${truncate(
         JSON.stringify(execution.output ?? { error: execution.error }),
-        2400,
+        MAX_TOOL_RESULT,
       )}\n\n继续：如果信息够了就输出 final；否则调用下一个工具。只输出 JSON。`;
       if (toolCalls.length >= 4) {
         prompt = `${prompt}\n\n工具调用已经足够，请现在输出 final。`;
@@ -181,6 +182,7 @@ export class MindPlannerService {
       '- 你可以发表情：表情会作为独立图片气泡发出去，可以直接只发表情，也可以夹在文字气泡之间。想发表情时先用 tools.search 搜「表情」，再用 sticker.search 找；beats 里写 {"kind":"sticker","stickerId":"搜索结果里的 id","delayMs":800}。一次回复最多 1 个表情。',
       '- 想重新看某张表情（描述不准、想确认它的内容、文字或适用场景）时，用 tools.search 搜「表情」，再用 sticker.describe 传 stickerId（可带 focus）；它会重新识别并把新描述写回表情库。',
       '- 工具不会一次性全部列出。需要查历史、记忆、关系、群、表情、网页、时间或自身属性时，先调用 tools.search，再用返回的工具名调用；不要臆造工具。',
+      '- 需要关系细节（称呼、可公开范围、公开面具、边界、承诺、共同经历、对象档案）时，先搜「关系」再调用 relationship.get；它返回 37 项 attributes（含空值），可把其中任意 key 放进 relationship.update 的 attributes 写回。',
       '- 需要补充人设细节时，先搜索「属性」，再用返回的工具查看属性列表和具体值；不要凭空编造未写明的设定。',
       '- 已经通过工具调整过的关系，不要再在 relationshipSignals 里重复写同一维度。',
       '- 记忆最多 5 条：这轮只要出现可长期复用的新信息（对方的偏好、习惯、经历、近况、约定、边界、重要事件，或 TA 对你/对某事的明确态度），就写进 memoryWrites；不必等重大事件，也不要只记冲突。已经记过的同一件事不要重复写，纯寒暄不写。',
@@ -316,7 +318,7 @@ export class MindPlannerService {
       `【最近经历】\n${memorySection || '没有相关记忆'}`,
       wakeSection ? `【唤醒】\n${wakeSection}` : '',
       `【最近对话】\n${sceneSection || '没有消息'}`,
-      '【工具】\n工具不会一次性全部列出。需要历史、记忆、关系、群、表情、网页、时间或自身属性时，先调用 tools.search（query 写你想做的事），再用返回的工具名调用。不要臆造工具。',
+      '【工具】\n工具不会一次性全部列出。需要历史、记忆、关系、群、表情、网页、时间或自身属性时，先调用 tools.search（query 写你想做的事），再用返回的工具名调用。关系细节（称呼、公开范围、面具、边界、承诺、共同经历、对象档案）用 relationship.get 读取，它返回的 37 项 attributes 可直接作为 relationship.update 的 attributes 写回。不要臆造工具。',
       `【触发】\n${input.trigger}；模式：${input.mode}`,
       '现在做出判断。只输出 JSON。',
     ]

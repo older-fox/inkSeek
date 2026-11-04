@@ -196,8 +196,8 @@ interface SocialRead {
 
 - `history.search`：搜索本会话聊天记录，返回消息 `id`（`todo.create` 的邀请/答应 ID 来源）
 - `memory.search` / `memory.create`
-- `relationship.get`：返回 13 项数值和标签/称呼/边界/承诺/共同经历/公开范围/拉黑/静默等全部字段，并附带数值的行为含义
-- `relationship.update`：按需调整全部关系字段；数值走单轮跨度/每日上限/冷却，非数值字段直接写入
+- `relationship.get`：返回 13 项数值和标签/称呼/边界/承诺/共同经历/公开范围/公开面具/拉黑/静默等全部字段，并附带数值的行为含义；另返回 `attributes` 清单（37 项，含 key、中文标签、分组、类型、当前值，空值也列出）
+- `relationship.update`：按需调整全部关系字段；`attributes` 可直接写回 `relationship.get` 返回的任意属性键（37 项全覆盖，extras 合并写入），同名顶层参数仍可用；数值走单轮跨度/每日上限/冷却，非数值字段直接写入
 - `group.get`：读取当前群的状态与规则；私聊返回会话名与类型
 - `web.search`
 - `sticker.search`：返回表情 `id`、描述、标签与相似度；`id` 直接作为 `beats[].stickerId`
@@ -414,6 +414,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 私聊误判与记忆促进（2026-11-05）：修正 `writeBack` 在私聊里无条件调用群姿态 `markRead` 导致的「群会话不存在」——现在只在 GROUP 会话标记已读；情景记忆显著性门槛 85→75、普通冷却 6h→3h、显著冷却 45min→20min，并把「关系变化 ≥8」修正为 ≥4（规划器单轮信号上限本来就是 5，旧条件永远不成立）；规划器改为对可长期复用的新信息主动写记忆，规划输出上限 1000→1200 tokens；私聊情景不再记到群名下。心智页页签改为固定高度容器内滚动、长列表懒渲染，并加入可关闭、可调间隔的自动刷新与手动刷新，后台刷新不覆盖未保存的设置草稿。
 - 唤醒节奏：常规/安静/最短/最长间隔与“自主安排唤醒”开关可从页面保存，规划器的 `nextWakeAt` 会被夹在设定区间内；心跳兜底重排使用同一组配置。
 - 作息参考与自主唤醒（2026-11-05）：长时事件不再固定 8 小时。规划器新增【作息】简报（上次睡眠、清醒时长、睡眠债、`sleep_depth` 与非约束性时长建议），`START` 必须由模型写 `plannedEndAt`，兜底时长按睡眠债估算；活动类型放开为任意离场事项。唤醒改为被点名时调用 `mind.long-event.wake` 自主判断，输出 `{wake,urgency,reason}`，新增 `JUDGMENT` 结束原因；全局唤醒词表删除，`wakeKeywords` 仅作参考与模型失败时的兜底。心跳改用 `markHeartbeat`，不再刷新 `lastWakeAt` 或扣睡眠债。
+- 关系属性清单与任意写回（2026-11-05）：37 项关系属性（关系数值 10、关系描述 11、边界与同意 7、对象档案 9）收口到 shared `relationship-attributes`，区分一等字段与 `extras` 键。`relationship.get` 返回完整 `attributes`（key/中文标签/分组/类型/当前值，空值也列出）；`relationship.update` 新增 `attributes` 对象，可把清单里的任意 key 写回，extras 与已有键合并、未提及的键保留。非数值字段直写，数值仍走漂移限幅。规划器工具结果截断 2400→6000 字，提示词补充「关系细节先搜关系、读取 attributes、再写回」的指引。
 - 属性单一真源（2026-11-04）：删除 `PersonaRelationship.baseValues`；把 `ChatPrivatePersona`/`ChatGroupPersona` 迁移进 `PersonaRelationship`/`PersonaGroupStance` 后删表；对话页人格面板改读这两张表；渠道人格面板改为服务端保存并写入 `ChatChannelPersona.history`；`PersonaState` 仍是唯一动态状态，渠道快照只做读时投影。
 - 计划同意与记忆节流（2026-11-04）：`todos` 需邀请/答应两条消息并通过时序、间隔、否定词、点名校验；普通情景记忆不再每轮写入，阈值与冷却时间见第 5 节。
 - 提示词日志（2026-11-04）：所有 `LlmService.complete` 调用与人格 AI 编写都会写入 `LlmPromptLog`，插入后裁剪到最近 200 条。

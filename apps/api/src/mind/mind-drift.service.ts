@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  ActionPlan,
-  PersonaGroupStanceUpdateInput,
-  PersonaRelationshipRecord,
-  PersonaRelationshipUpdateInput,
-  RelationshipSignal,
+import {
+  relationshipAttributePatch,
+  type ActionPlan,
+  type PersonaGroupStanceUpdateInput,
+  type PersonaRelationshipRecord,
+  type PersonaRelationshipUpdateInput,
+  type RelationshipAttributeRejection,
+  type RelationshipSignal,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
@@ -131,24 +133,44 @@ export class MindDriftService {
     contactId: string;
     numeric: Record<string, number>;
     fields?: Omit<PersonaRelationshipUpdateInput, 'contactId'>;
+    attributes?: unknown;
     reason?: string;
   }): Promise<{
     contactId: string;
     applied: Record<string, number>;
     blocked: string[];
     relationship: PersonaRelationshipRecord;
+    attributesUpdated: string[];
+    attributesRejected: RelationshipAttributeRejection[];
   }> {
     const current = await this.relationships.get(input.personaId, input.contactId);
-    const ledger = await this.loadLedger(input.personaId);
+    const attributePatch =
+      input.attributes === undefined ? null : relationshipAttributePatch(input.attributes, current);
+    const numeric = { ...attributePatch?.numeric, ...input.numeric };
     const patch: PersonaRelationshipUpdateInput = {
       contactId: input.contactId,
+      ...attributePatch?.fields,
       ...input.fields,
     };
+    const ledger = await this.loadLedger(input.personaId);
     const applied: Record<string, number> = {};
     const blocked: string[] = [];
+    const attributesUpdated = attributePatch?.updated ?? [];
+    const attributesRejected = attributePatch?.rejected ?? [];
+
+    if (Object.keys(numeric).length === 0 && Object.keys(patch).length <= 1) {
+      return {
+        contactId: input.contactId,
+        applied,
+        blocked,
+        relationship: current,
+        attributesUpdated,
+        attributesRejected,
+      };
+    }
 
     for (const field of RELATION_FIELDS) {
-      const desiredRaw = input.numeric[field];
+      const desiredRaw = numeric[field];
       if (typeof desiredRaw !== 'number' || !Number.isFinite(desiredRaw)) {
         continue;
       }
@@ -185,7 +207,14 @@ export class MindDriftService {
       kind: 'TOOL',
       reason: input.reason || '人格通过工具调整关系',
     });
-    return { contactId: input.contactId, applied, blocked, relationship };
+    return {
+      contactId: input.contactId,
+      applied,
+      blocked,
+      relationship,
+      attributesUpdated,
+      attributesRejected,
+    };
   }
 
   private async applyActivity(

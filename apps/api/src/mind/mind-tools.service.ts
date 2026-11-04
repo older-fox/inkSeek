@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  MindSettingsRecord,
-  PersonaMemoryRecord,
-  PersonaRelationshipUpdateInput,
-  PersonaStateUpdateInput,
+import {
+  relationshipAttributes,
+  type MindSettingsRecord,
+  type PersonaMemoryRecord,
+  type PersonaRelationshipUpdateInput,
+  type PersonaStateUpdateInput,
 } from '@inkseek/shared';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service.js';
@@ -121,15 +122,17 @@ export const MIND_TOOL_CATALOG = [
   {
     name: 'relationship.get',
     description:
-      '读取自己对某个联系人的完整关系，包括 13 项数值、标签、称呼、边界、承诺、共同经历、公开范围、拉黑与静默。',
+      '读取自己对某个联系人的完整关系：13 项数值、标签、称呼、边界、承诺、共同经历、公开范围、公开面具、拉黑与静默。另返回 attributes 清单，覆盖 37 项关系属性（key、中文标签、分组、类型与当前值，空值也会列出），可直接作为 relationship.update 的 attributes 写回。',
     input: { contactId: 'string? 联系人 ID/QQ/昵称，默认当前对话对象' },
   },
   {
     name: 'relationship.update',
     description:
-      '按需调整某个联系人的关系属性。数值为绝对值，服务端仍按单轮跨度/每日上限/冷却限幅；标签、称呼、边界、承诺、公开范围等非数值字段直接写入。调整前可先用 relationship.get 查看现状。',
+      '按需调整某个联系人的关系属性。attributes 可传 relationship.get 返回的任意属性键（37 项全覆盖），也可用同名顶层参数；数值为绝对值，服务端仍按单轮跨度/每日上限/冷却限幅；标签、称呼、边界、承诺、公开范围、对象档案等非数值字段直接写入。调整前可先用 relationship.get 查看现状与可用键。',
     input: {
       contactId: 'string? 联系人 ID/QQ/昵称，默认当前对话对象',
+      attributes:
+        'object? 37 项属性键 → 新值；键取自 relationship.get 的 attributes，例如 {"per_obj_shame":30,"obj_profile.user_topics":["雨天","旧书"]}',
       affinity: 'number? -100..100',
       trust: 'number? -100..100',
       intimacy: 'number? -100..100',
@@ -639,6 +642,7 @@ export class MindToolsService {
     }
     const relationship = await this.relationships.get(context.scene.persona.id, contactId);
     return {
+      attributes: relationshipAttributes(relationship),
       id: relationship.id,
       contactId: relationship.contactId,
       externalId: relationship.externalId,
@@ -706,7 +710,18 @@ export class MindToolsService {
     if (args['mutedUntil'] !== undefined) {
       fields.mutedUntil = parseMutedUntil(args['mutedUntil']);
     }
-    if (Object.keys(numeric).length === 0 && Object.keys(fields).length === 0) {
+    const attributes = args['attributes'];
+    if (
+      attributes !== undefined &&
+      (!attributes || typeof attributes !== 'object' || Array.isArray(attributes))
+    ) {
+      throw new Error('attributes 需要对象；键取自 relationship.get 返回的 attributes');
+    }
+    if (
+      attributes === undefined &&
+      Object.keys(numeric).length === 0 &&
+      Object.keys(fields).length === 0
+    ) {
       throw new Error('至少提供一个要调整的字段');
     }
     const result = await this.drift.applyRelationshipPatch({
@@ -714,12 +729,15 @@ export class MindToolsService {
       contactId,
       numeric,
       fields,
+      attributes,
       reason: readString(args['reason']),
     });
     return {
       contactId: result.contactId,
       applied: result.applied,
       blocked: result.blocked,
+      updated: result.attributesUpdated,
+      rejected: result.attributesRejected,
     };
   }
 
