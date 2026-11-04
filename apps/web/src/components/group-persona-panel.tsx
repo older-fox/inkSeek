@@ -1,18 +1,9 @@
-import {
-  Activity,
-  ChevronRight,
-  Database,
-  SlidersHorizontal,
-  Users,
-  X,
-  type LucideIcon,
-} from 'lucide-react';
+import { Activity, ChevronRight, SlidersHorizontal, Users, X, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
 import { PersonaFieldCard } from '@/components/persona-field-controls';
-import { PersonaMetadataView } from '@/components/persona-metadata-view';
 import { cn } from '@/lib/cn';
 import { useConversationPersona } from '@/lib/conversation-persona';
 import { GROUP_ATTRIBUTE_COUNT, GROUP_PERSONA_GROUPS } from '@/lib/group-persona';
@@ -20,7 +11,6 @@ import { personaForChannel, type PersonaValue } from '@/lib/channel-persona';
 import type { Channel, SourcedConversation } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-const META_TAB_ID = 'metadata';
 
 const GROUP_ICONS: Record<string, LucideIcon> = {
   scene: Users,
@@ -49,11 +39,10 @@ export function GroupPersonaPanel({
   const [activeGroupId, setActiveGroupId] = useState(GROUP_PERSONA_GROUPS[0]?.id ?? '');
   const contentRef = useRef<HTMLDivElement>(null);
   const persona = channel ? personaForChannel(channel) : null;
-  const { values, meta, ready, error, syncState, update, flush } = useConversationPersona(
+  const { values, ready, error, syncState, update, flush } = useConversationPersona(
     conversation,
     'GROUP',
   );
-  const metadataActive = activeGroupId === META_TAB_ID;
   const activeGroup =
     GROUP_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? GROUP_PERSONA_GROUPS[0];
 
@@ -98,8 +87,8 @@ export function GroupPersonaPanel({
     return null;
   }
 
-  const handleChange = (key: string, label: string, value: PersonaValue) => {
-    update(key, label, value);
+  const handleChange = (key: string, value: PersonaValue) => {
+    update(key, value);
   };
 
   return createPortal(
@@ -241,45 +230,6 @@ export function GroupPersonaPanel({
                     </button>
                   );
                 })}
-
-                <span aria-hidden="true" className="my-1 hidden h-px bg-mist-100/[0.06] md:block" />
-                <button
-                  type="button"
-                  data-active={metadataActive ? 'true' : 'false'}
-                  onClick={() => setActiveGroupId(META_TAB_ID)}
-                  className={cn(
-                    'group flex shrink-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition md:w-full',
-                    metadataActive
-                      ? 'bg-brass-400/[0.09] text-brass-200'
-                      : 'text-mist-500 hover:bg-mist-100/[0.04] hover:text-mist-300',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'grid size-7 shrink-0 place-items-center rounded-lg border transition',
-                      metadataActive
-                        ? 'border-brass-400/30 bg-brass-400/10 text-brass-300'
-                        : 'border-mist-100/[0.07] bg-ink-950/30 text-mist-600 group-hover:text-mist-400',
-                    )}
-                  >
-                    <Database className="size-3.5" strokeWidth={1.7} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block whitespace-nowrap text-[0.78rem] md:truncate">
-                      元数据
-                    </span>
-                    <span className="mt-0.5 hidden font-mono text-[0.54rem] tracking-[0.12em] text-mist-600 md:block">
-                      快照信息 · {meta ? `${meta.history.length} 条` : '—'}
-                    </span>
-                  </span>
-                  <ChevronRight
-                    className={cn(
-                      'hidden size-3 shrink-0 md:block',
-                      metadataActive ? 'text-brass-300' : 'text-mist-600/60',
-                    )}
-                    strokeWidth={2}
-                  />
-                </button>
               </nav>
 
               <div
@@ -302,64 +252,52 @@ export function GroupPersonaPanel({
                   </div>
                 ) : (
                   <AnimatePresence mode="wait" initial={false}>
-                    {metadataActive && meta ? (
-                      <motion.div
-                        key={META_TAB_ID}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.2, ease: EASE }}
-                      >
-                        <PersonaMetadataView meta={meta} source="database" />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key={activeGroup.id}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.2, ease: EASE }}
-                      >
-                        <div className="flex flex-wrap items-end justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
-                                {activeGroup.title}
-                              </h3>
-                              <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
-                                {activeGroup.tagline}
+                    <motion.div
+                      key={activeGroup.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2, ease: EASE }}
+                    >
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
+                              {activeGroup.title}
+                            </h3>
+                            <span className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-brass-400/70">
+                              {activeGroup.tagline}
+                            </span>
+                            {activeGroup.transient && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-signal-400/25 bg-signal-400/[0.08] px-2 py-0.5 font-mono text-[0.54rem] tracking-[0.1em] text-signal-400">
+                                <span
+                                  className="size-1 rounded-full bg-signal-400"
+                                  aria-hidden="true"
+                                />
+                                随会话销毁
                               </span>
-                              {activeGroup.transient && (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-signal-400/25 bg-signal-400/[0.08] px-2 py-0.5 font-mono text-[0.54rem] tracking-[0.1em] text-signal-400">
-                                  <span
-                                    className="size-1 rounded-full bg-signal-400"
-                                    aria-hidden="true"
-                                  />
-                                  随会话销毁
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
-                              {activeGroup.description}
-                            </p>
+                            )}
                           </div>
-                          <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
-                            {activeGroup.fields.length} 项
-                          </span>
+                          <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
+                            {activeGroup.description}
+                          </p>
                         </div>
+                        <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
+                          {activeGroup.fields.length} 项
+                        </span>
+                      </div>
 
-                        <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
-                          {activeGroup.fields.map((field) => (
-                            <PersonaFieldCard
-                              key={field.key}
-                              field={field}
-                              value={values[field.key]}
-                              onChange={(next) => handleChange(field.key, field.label, next)}
-                            />
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
+                      <div className="mt-4 grid grid-flow-row-dense gap-2 md:grid-cols-2">
+                        {activeGroup.fields.map((field) => (
+                          <PersonaFieldCard
+                            key={field.key}
+                            field={field}
+                            value={values[field.key]}
+                            onChange={(next) => handleChange(field.key, next)}
+                          />
+                        ))}
+                      </div>
+                    </motion.div>
                   </AnimatePresence>
                 )}
               </div>

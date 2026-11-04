@@ -1,17 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints, Workflow } from 'lucide-react';
+import { Link, useSearch } from '@tanstack/react-router';
+import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { GhostButton, PrimaryButton } from '@/components/button';
 import { ChannelPersonaPanel } from '@/components/channel-persona-panel';
 import { ConnectChannelDialog } from '@/components/connect-channel-dialog';
-import {
-  ChannelAvatar,
-  ConnectionStatusPill,
-  PlatformChip,
-} from '@/components/connection-bits';
+import { ChannelAvatar, ConnectionStatusPill, PlatformChip } from '@/components/connection-bits';
 import { api, ApiError } from '@/lib/api';
 import { clearChannelPersonaOverrides } from '@/lib/channel-persona';
 import { cn } from '@/lib/cn';
@@ -86,15 +82,6 @@ function ChannelCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
-          <Link
-            to="/pipeline"
-            search={{ scope: 'channel', scopeId: channel.id }}
-            aria-label={`编辑 ${channel.displayName} 的消息管线`}
-            title="消息管线"
-            className="rounded-lg p-2 text-mist-600 transition hover:bg-jade-400/10 hover:text-jade-300"
-          >
-            <Workflow className="size-3.5" />
-          </Link>
           <button
             type="button"
             onClick={onOpenPersona}
@@ -318,9 +305,23 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
 export function ConnectionsPage() {
   const channels = useChannels();
   const queryClient = useQueryClient();
+  const search = useSearch({ strict: false }) as { persona?: string };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [personaChannelId, setPersonaChannelId] = useState<string | null>(null);
   const personaChannel = channels.find((channel) => channel.id === personaChannelId) ?? null;
+  const appliedPersonaRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const requested = search.persona;
+    if (!requested || appliedPersonaRef.current === requested) {
+      return;
+    }
+    if (!channels.some((channel) => channel.id === requested)) {
+      return;
+    }
+    appliedPersonaRef.current = requested;
+    setPersonaChannelId(requested);
+  }, [search.persona, channels]);
 
   const deleteMutation = useMutation({
     mutationFn: (channel: Channel) => api.deleteChatChannel(channel.id),

@@ -61,7 +61,7 @@ interface ResolvedProvider {
 
 /**
  * Text and vision completions against the configured model providers. The
- * pipeline consumes this service; persona authoring keeps its own JSON flow.
+ * persona mind consumes this service; persona authoring keeps its own JSON flow.
  */
 @Injectable()
 export class LlmService {

@@ -27,10 +27,8 @@ import {
   type ForwardWrite,
 } from './chat-forward.service.js';
 import { ChatMediaService, type StoredMedia } from './chat-media.service.js';
-import {
-  ChatMessageProcessor,
-  type PersistedChatMessage,
-} from './chat-message-processor.service.js';
+import type { ChatMessageQuote } from './chat-message.types.js';
+import { ChatMessageProcessor } from './chat-message-processor.service.js';
 import { buildParts, extractContent, findForwardSegment } from './message-content.js';
 import {
   externalIdOf,
@@ -320,7 +318,7 @@ export class ChatMessagesService {
         conversationId: conversation.id,
       });
 
-      // The pipeline's message object carries voice transcripts, so a voice
+      // The mind's message snapshot carries voice transcripts, so a voice
       // message waits for NapCat before running. Text/image messages do not.
       let voices = message.voices;
       if (voiceAssets.length > 0) {
@@ -363,7 +361,7 @@ export class ChatMessagesService {
 
   /**
    * Poke notices carry no message_id. Turn them into a synthetic text message
-   * so the conversation history, pipeline and mind all see the interaction.
+   * so the conversation history and mind both see the interaction.
    * A `poke` segment is kept alongside the display text so directed pokes can
    * be detected by target id instead of by matching names in the text.
    */
@@ -1032,7 +1030,7 @@ export class ChatMessagesService {
       const segments = normalizeSegments(result?.message ?? []);
       const content = extractContent(segments);
       // The quoted message may only exist on QQ's side; store its images next
-      // to ours so pipeline runs keep a stable reference after URLs expire.
+      // to ours so the quote keeps a stable reference after URLs expire.
       const images = (
         await Promise.all(
           segments
@@ -1109,9 +1107,7 @@ export class ChatMessagesService {
         sentAt: parsed.sentAt,
       });
     } catch (error) {
-      this.logger.warn(
-        `消息处理占位管线执行失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+      this.logger.warn(`消息处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -1299,7 +1295,7 @@ function quoteFromRecord(record: MessageView): ChatQuoteSummary | null {
   return externalId ? unavailableQuote(externalId) : null;
 }
 
-function quoteContextOf(value: Prisma.JsonValue | null): PersistedChatMessage['quote'] {
+function quoteContextOf(value: Prisma.JsonValue | null): ChatMessageQuote | null {
   const quote = quoteFromSnapshot(value);
 
   if (!quote || quote.status !== 'RESOLVED') {

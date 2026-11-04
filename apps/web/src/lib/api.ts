@@ -10,12 +10,7 @@ import type {
   ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
-  ChatPipelineGraphSnapshot,
-  ChatPipelineRunDetail,
-  ChatPipelineRunSummary,
-  ChatPipelineScope,
   ChatSendMessageInput,
-  DebugChatPipelineRunInput,
   AgentActionRecord,
   AgentIntentionRecord,
   AgentRunDetail,
@@ -24,23 +19,21 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   LoginInput,
-  MindOverview,
   MindSettingsRecord,
   MindSettingsUpdateInput,
   ModelProviderInput,
+  PersonaChangeRecord,
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
   PersonaJournalRecord,
+  PersonaLongEventRecord,
   PersonaMemoryCreateInput,
   PersonaMemoryQueryInput,
   PersonaMemoryRecord,
-  PersonaMemoryUpdateInput,
   PersonaRelationshipRecord,
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
-  StickerImageCandidate,
-  StickerImportInput,
   StickerRecord,
   ModelProviderSaveResult,
   PersonaAiGenerateInput,
@@ -48,14 +41,11 @@ import type {
   PersonaAiProviderOption,
   PersonaRecord,
   PersonaSummary,
-  PersonaVersionDetail,
-  PipelineScopeRef,
   RedisConnectionInput,
   RedisProbeResult,
   RedisSettingsInput,
   RedisSettingsResult,
   SaveChannelPersonaInput,
-  SaveChatPipelineGraphInput,
   SavePersonaInput,
   SettingsOverview,
 } from '@inkseek/shared';
@@ -153,10 +143,6 @@ export const api = {
     request<void>(`/chat/channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   personas: () => request<PersonaSummary[]>('/personas'),
   persona: (id: string) => request<PersonaRecord>(`/personas/${encodeURIComponent(id)}`),
-  personaVersion: (id: string, version: number) =>
-    request<PersonaVersionDetail>(
-      `/personas/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}`,
-    ),
   createPersona: (input: SavePersonaInput) =>
     request<PersonaRecord>('/personas', {
       method: 'POST',
@@ -199,45 +185,6 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
-  pipelineRuns: (limit = 30, filter?: PipelineRunFilter) => {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (filter?.graphId) {
-      params.set('graphId', filter.graphId);
-    }
-    if (filter?.scope) {
-      params.set('scope', filter.scope);
-      if (filter.scopeId) {
-        params.set('scopeId', filter.scopeId);
-      }
-    }
-    return request<ChatPipelineRunSummary[]>(`/pipeline/runs?${params.toString()}`);
-  },
-  pipelineRun: (id: string) =>
-    request<ChatPipelineRunDetail>(`/pipeline/runs/${encodeURIComponent(id)}`),
-  pipelineGraph: (ref: PipelineScopeRef) => {
-    const params = new URLSearchParams({ scope: ref.scope });
-    if (ref.scopeId) {
-      params.set('scopeId', ref.scopeId);
-    }
-    return request<ChatPipelineGraphSnapshot>(`/pipeline/graph?${params.toString()}`);
-  },
-  savePipelineGraph: (input: SaveChatPipelineGraphInput) =>
-    request<ChatPipelineGraphSnapshot>('/pipeline/graph', {
-      method: 'PUT',
-      body: JSON.stringify(input),
-    }),
-  followPipelineGraph: (ref: PipelineScopeRef) =>
-    request<ChatPipelineGraphSnapshot>('/pipeline/graph/follow', {
-      method: 'POST',
-      body: JSON.stringify(ref),
-    }),
-  debugPipelineRun: (input: DebugChatPipelineRunInput) =>
-    request<ChatPipelineRunDetail>('/pipeline/debug-runs', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
-  mindOverview: (channelId: string) =>
-    request<MindOverview>(`/mind/overview/${encodeURIComponent(channelId)}`),
   mindSettings: (channelId: string) =>
     request<MindSettingsRecord>(`/mind/settings/${encodeURIComponent(channelId)}`),
   updateMindSettings: (channelId: string, input: MindSettingsUpdateInput) =>
@@ -254,6 +201,10 @@ export const api = {
     }),
   mindRelationships: (personaId: string) =>
     request<PersonaRelationshipRecord[]>(`/mind/relationships/${encodeURIComponent(personaId)}`),
+  mindRelationshipByExternalId: (personaId: string, externalId: string) =>
+    request<PersonaRelationshipRecord>(
+      `/mind/relationships/${encodeURIComponent(personaId)}/contact/${encodeURIComponent(externalId)}`,
+    ),
   updateMindRelationship: (personaId: string, input: PersonaRelationshipUpdateInput) =>
     request<PersonaRelationshipRecord>(`/mind/relationships/${encodeURIComponent(personaId)}`, {
       method: 'PATCH',
@@ -284,11 +235,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  updateMindMemory: (id: string, input: PersonaMemoryUpdateInput) =>
-    request<PersonaMemoryRecord>(`/mind/memories/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    }),
   deleteMindMemory: (id: string) =>
     request<void>(`/mind/memories/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   mindTodos: (personaId: string) =>
@@ -300,6 +246,26 @@ export const api = {
     }),
   mindIntentions: (personaId: string) =>
     request<AgentIntentionRecord[]>(`/mind/intentions/${encodeURIComponent(personaId)}`),
+  mindChanges: (
+    personaId: string,
+    input: { scope?: string; targetId?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const params = new URLSearchParams({
+      limit: String(input.limit ?? 50),
+      offset: String(input.offset ?? 0),
+    });
+    if (input.scope) params.set('scope', input.scope);
+    if (input.targetId) params.set('targetId', input.targetId);
+    return request<PersonaChangeRecord[]>(
+      `/mind/changes/${encodeURIComponent(personaId)}?${params.toString()}`,
+    );
+  },
+  mindLongEvents: (personaId: string, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return request<PersonaLongEventRecord[]>(
+      `/mind/long-events/${encodeURIComponent(personaId)}?${params.toString()}`,
+    );
+  },
   mindRuns: (personaId: string, conversationId?: string, limit = 30, offset = 0) => {
     const params = new URLSearchParams({
       personaId,
@@ -334,29 +300,4 @@ export const api = {
   mindHeartbeat: (personaId: string) =>
     request<boolean>(`/mind/heartbeat/${encodeURIComponent(personaId)}`, { method: 'POST' }),
   mindStickers: () => request<StickerRecord[]>('/mind/stickers'),
-  mindStickerImages: (channelId: string, limit = 48) => {
-    const params = new URLSearchParams({ channelId, limit: String(limit) });
-    return request<StickerImageCandidate[]>(`/mind/stickers/images?${params.toString()}`);
-  },
-  importMindSticker: (input: StickerImportInput) =>
-    request<StickerRecord>('/mind/stickers/import', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
-  scanMindStickers: (describe = false) =>
-    request<{ scanned: number; created: number; described: number }>('/mind/stickers/scan', {
-      method: 'POST',
-      body: JSON.stringify({ describe }),
-    }),
-  searchMindStickers: (query: string, limit = 12) => {
-    const params = new URLSearchParams({ q: query, limit: String(limit) });
-    return request<StickerRecord[]>(`/mind/stickers/search?${params.toString()}`);
-  },
 };
-
-export interface PipelineRunFilter {
-  scope?: ChatPipelineScope;
-  scopeId?: string | null;
-  /** Watch every namespace running this graph; used by debug mode. */
-  graphId?: string | null;
-}

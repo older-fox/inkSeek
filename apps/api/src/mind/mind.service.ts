@@ -8,12 +8,11 @@ import type {
   AgentTodoCreateInput,
   AgentTodoRecord,
   AgentTodoUpdateInput,
-  ConversationPersonaValues,
   LlmPromptLogRecord,
-  MindOverview,
   MindPromptLogQueryInput,
   MindSettingsRecord,
   MindSettingsUpdateInput,
+  PersonaChangeRecord,
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
   PersonaJournalRecord,
@@ -22,8 +21,6 @@ import type {
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
-  StickerImageCandidate,
-  StickerImportInput,
   StickerRecord,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
@@ -36,7 +33,6 @@ import type {
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
 import { MindRuntimeService } from './mind-runtime.service.js';
-import { MindSceneService } from './mind-scene.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
 import {
@@ -62,117 +58,47 @@ export class MindService {
     private readonly executor: MindActionExecutor,
     private readonly heartbeat: MindHeartbeatService,
     private readonly stickers: StickerService,
-    private readonly scenes: MindSceneService,
   ) {}
 
-  async overview(channelId: string): Promise<MindOverview> {
-    const persona = await this.prisma.chatChannelPersona.findUnique({
-      where: { channelId },
-    });
-    if (!persona) {
-      return {
-        persona: null,
-        settings: null,
-        state: null,
-        relationships: [],
-        groupStances: [],
-        memories: [],
-        todos: [],
-        intentions: [],
-        runs: [],
-        journal: [],
-        stickers: await this.stickers.list(),
-        longEvent: null,
-        longEvents: [],
-        stateChanges: [],
-      };
-    }
-    const settings = await this.settingsService.get(channelId);
-    const [
-      state,
-      relationships,
-      groupStances,
-      memories,
-      todos,
-      intentions,
-      runs,
-      journal,
-      stickers,
-      longEvent,
-      longEvents,
-      stateChanges,
-    ] = await Promise.all([
-      this.states.get(persona.id),
-      this.relationships.list(persona.id),
-      this.stances.list(persona.id),
-      this.memories.list({ personaId: persona.id, limit: 50, offset: 0 }),
-      this.prisma.agentTodo.findMany({
-        where: { personaId: persona.id, status: { not: 'CANCELLED' } },
-        orderBy: [{ status: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
-        take: 50,
-      }),
-      this.prisma.agentIntention.findMany({
-        where: { personaId: persona.id },
+  listChanges(
+    personaId: string,
+    input: { scope?: string; targetId?: string; limit: number; offset: number },
+  ): Promise<PersonaChangeRecord[]> {
+    return this.prisma.personaChangeLog
+      .findMany({
+        where: {
+          personaId,
+          ...(input.scope ? { scope: input.scope } : {}),
+          ...(input.targetId ? { targetId: input.targetId } : {}),
+        },
         orderBy: { createdAt: 'desc' },
-        take: 20,
-      }),
-      this.prisma.agentRun.findMany({
-        where: { personaId: persona.id },
-        orderBy: { startedAt: 'desc' },
-        take: 20,
-        include: { conversation: { select: { name: true } } },
-      }),
-      this.prisma.personaJournal.findMany({
-        where: { personaId: persona.id },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      }),
-      this.stickers.list(),
-      this.longEvents.active(persona.id),
-      this.longEvents.list(persona.id, 10),
-      this.prisma.personaStateChange.findMany({
-        where: { personaId: persona.id },
-        orderBy: { createdAt: 'desc' },
-        take: 30,
-      }),
-    ]);
+        take: Math.max(1, Math.min(200, input.limit)),
+        skip: Math.max(0, input.offset),
+      })
+      .then((rows) =>
+        rows.map((change) => ({
+          id: change.id,
+          personaId: change.personaId,
+          scope: change.scope,
+          targetId: change.targetId,
+          field: change.field,
+          beforeValue: change.beforeValue,
+          afterValue: change.afterValue,
+          delta: change.delta,
+          reason: change.reason,
+          source: change.source,
+          runId: change.runId,
+          createdAt: change.createdAt.toISOString(),
+        })),
+      );
+  }
 
-    return {
-      persona: {
-        id: persona.id,
-        channelId: persona.channelId,
-        cardId: persona.cardId,
-        name: persona.name,
-        identity: persona.identity,
-        quote: persona.quote,
-        accent: persona.accent,
-        base: numericValues(persona.values),
-      },
-      settings,
-      state,
-      relationships,
-      groupStances,
-      memories,
-      todos: todos.map(toTodoRecord),
-      intentions: intentions.map(toIntentionRecord),
-      runs: runs.map((run) => toRunSummary(run, run.conversation?.name ?? null)),
-      journal: journal.map(toJournalRecord),
-      stickers,
-      longEvent: longEvent ? toLongEventRecord(longEvent) : null,
-      longEvents,
-      stateChanges: stateChanges.map((change) => ({
-        id: change.id,
-        personaId: change.personaId,
-        field: change.field,
-        beforeValue: change.beforeValue,
-        afterValue: change.afterValue,
-        delta: change.delta,
-        reason: change.reason,
-        source: change.source,
-        runId: change.runId,
-        createdAt: change.createdAt.toISOString(),
-      })),
-    };
+  listLongEvents(personaId: string, limit = 20) {
+    return this.longEvents.list(personaId, limit);
+  }
+
+  relationshipByExternalId(personaId: string, externalId: string) {
+    return this.relationships.getByExternalId(personaId, externalId);
   }
 
   getSettings(channelId: string): Promise<MindSettingsRecord> {
@@ -381,53 +307,12 @@ export class MindService {
     return this.executor.approve(id);
   }
 
-  /**
-   * Pipeline persona cards read the same single-source relationship/stance
-   * rows. A missing row returns null instead of creating empty data.
-   */
-  async conversationPersonaValues(
-    kind: 'GROUP' | 'PRIVATE',
-    channelId: string,
-    externalId: string,
-  ): Promise<ConversationPersonaValues | null> {
-    const persona = await this.prisma.chatChannelPersona.findUnique({
-      where: { channelId },
-      select: { id: true },
-    });
-    if (!persona) {
-      return null;
-    }
-    return kind === 'GROUP'
-      ? this.stances.valuesForExternalId(persona.id, externalId)
-      : this.relationships.valuesForExternalId(persona.id, externalId);
-  }
-
   triggerHeartbeat(personaId: string): Promise<boolean> {
     return this.heartbeat.trigger(personaId);
   }
 
-  async scanStickers(describe: boolean) {
-    return this.stickers.scan(describe);
-  }
-
-  listStickers() {
+  listStickers(): Promise<StickerRecord[]> {
     return this.stickers.list();
-  }
-
-  recentStickerImages(channelId: string, limit = 48): Promise<StickerImageCandidate[]> {
-    return this.stickers.recentImages(channelId, limit);
-  }
-
-  importSticker(input: StickerImportInput): Promise<StickerRecord> {
-    return this.stickers.importFromReceived(input);
-  }
-
-  searchStickers(query: string, limit: number) {
-    return this.stickers.search(query, limit);
-  }
-
-  async conversationScene(channelId: string, conversationId: string) {
-    return this.scenes.buildFromConversation(channelId, conversationId);
   }
 }
 
@@ -471,46 +356,6 @@ function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
-}
-
-function numericValues(value: unknown): Record<string, number> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-  const metadataKeys = new Set([
-    'card_serial',
-    'card_experience',
-    'card_traits',
-    'card_physical',
-    'created_at',
-    'updated_at',
-    'time_zone',
-  ]);
-  /**
-   * These numeric card keys are leftovers from the pre-PersonaState design.
-   * Live values are owned by PersonaState, so the overview must not present the
-   * stale card copies as "basic values".
-   */
-  const stateOwnedKeys = new Set([
-    'mood_tags',
-    'mood_intensity',
-    'stress',
-    'social_battery',
-    'doing_now',
-    'location',
-    'grooming',
-  ]);
-  const result: Record<string, number> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (metadataKeys.has(key) || stateOwnedKeys.has(key)) {
-      continue;
-    }
-    const number = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
-    if (Number.isFinite(number)) {
-      result[key] = number;
-    }
-  }
-  return result;
 }
 
 function toPromptLogRecord(row: LlmPromptLog): LlmPromptLogRecord {

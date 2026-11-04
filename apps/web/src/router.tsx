@@ -15,7 +15,6 @@ import { ConnectionsPage } from '@/pages/connections-page';
 import { GroupChatsPage } from '@/pages/group-chats-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
-import { MessagePipelinePage } from '@/pages/message-pipeline-page';
 import { MindPage } from '@/pages/mind-page';
 import { PersonasPage } from '@/pages/personas-page';
 import { PrivateChatsPage } from '@/pages/private-chats-page';
@@ -117,30 +116,16 @@ const personasRoute = createRoute({
   component: PersonasPage,
 });
 
-const messagePipelineRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/pipeline',
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { scope?: 'global' | 'channel' | 'persona'; scopeId?: string } => {
-    const scope =
-      search.scope === 'channel' || search.scope === 'persona' || search.scope === 'global'
-        ? search.scope
-        : undefined;
-    return {
-      scope,
-      scopeId:
-        typeof search.scopeId === 'string' && search.scopeId.length > 0
-          ? search.scopeId
-          : undefined,
-    };
-  },
-  component: MessagePipelinePage,
-});
-
 const mindRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/mind',
+  validateSearch: (search: Record<string, unknown>): { channelId?: string; tab?: string } => ({
+    channelId:
+      typeof search.channelId === 'string' && search.channelId.length > 0
+        ? search.channelId
+        : undefined,
+    tab: typeof search.tab === 'string' && search.tab.length > 0 ? search.tab : undefined,
+  }),
   component: MindPage,
 });
 
@@ -153,6 +138,10 @@ const connectionsLayoutRoute = createRoute({
 const connectionsRoute = createRoute({
   getParentRoute: () => connectionsLayoutRoute,
   path: '/connections',
+  validateSearch: (search: Record<string, unknown>): { persona?: string } => ({
+    persona:
+      typeof search.persona === 'string' && search.persona.length > 0 ? search.persona : undefined,
+  }),
   component: ConnectionsPage,
 });
 
@@ -210,7 +199,6 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     personasRoute,
-    messagePipelineRoute,
     mindRoute,
     connectionsLayoutRoute.addChildren([connectionsRoute, privateChatsRoute, groupChatsRoute]),
     settingsRoute,

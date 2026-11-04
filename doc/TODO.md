@@ -15,7 +15,10 @@
   - 入库与分段：`apps/api/src/chat/chat-messages.service.ts`（`extractContent` / `buildParts`）
   - 上下文组装：`apps/api/src/chat/chat-message-processor.service.ts`
 
-## 消息管线对前端与日志系统不透明
+## ~~消息管线对前端与日志系统不透明~~（已完成，2026-11-05）
+
+- 结论：消息管线已整体删除，不再维护独立的事件表与 `/pipeline` 页面。运行轨迹改由 `AgentRun` / `AgentStep` / `AgentAction` 承担，前端在心智页「运行轨迹」页签中按 runId 展示裁决、工具步骤与投递结果；`SKIPPED` 也会落运行记录并写明原因。
+- 以下为历史设计记录，保留供追溯。
 
 - 现状：一条消息经过 接收 → 归一 → 裁决 → 生成 → 投递 时，各阶段只存在于进程内的调用栈里。
   前端拿不到任何阶段信息，`/pipeline` 页面只能做静态占位；日志里也没有统一的运行标识，
@@ -31,7 +34,7 @@
 - 关联位置：
   - 消息处理：`apps/api/src/chat/chat-message-processor.service.ts`
   - 入库：`apps/api/src/chat/chat-messages.service.ts`
-  - 占位页面：`apps/web/src/pages/message-pipeline-page.tsx`
+  - 占位页面：~~`apps/web/src/pages/message-pipeline-page.tsx`~~（已随管线删除）
 
 ## 图片落盘去重与哈希映射（内容寻址存储）
 

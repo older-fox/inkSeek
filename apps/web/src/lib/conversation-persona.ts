@@ -4,8 +4,6 @@ import {
   stancePatchFromValues,
   stanceToPersonaValues,
   type ChatConversationKind,
-  type PersonaGroupStanceRecord,
-  type PersonaRelationshipRecord,
 } from '@inkseek/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,13 +12,8 @@ import { ApiError, api } from '@/lib/api';
 import type { PersonaValue } from '@/lib/channel-persona';
 import type { SourcedConversation } from '@/lib/connections';
 import { groupPersonaDefaults } from '@/lib/group-persona';
-import { appendPersonaHistory, formatPersonaValue, type PersonaMetadata } from '@/lib/persona-metadata';
 import { privatePersonaDefaults } from '@/lib/private-persona';
-import {
-  chatChannelsQuery,
-  mindGroupStancesQuery,
-  mindRelationshipsQuery,
-} from '@/lib/queries';
+import { chatChannelsQuery, mindGroupStancesQuery, mindRelationshipsQuery } from '@/lib/queries';
 
 const SAVE_DELAY_MS = 500;
 
@@ -28,18 +21,16 @@ export type PersonaSyncState = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface ConversationPersonaEditor {
   values: Record<string, PersonaValue> | null;
-  meta: PersonaMetadata | null;
   ready: boolean;
   error: boolean;
   syncState: PersonaSyncState;
-  update: (key: string, label: string, value: PersonaValue) => void;
+  update: (key: string, value: PersonaValue) => void;
   flush: () => void;
 }
 
 interface Draft {
   conversationId: string;
   values: Record<string, PersonaValue>;
-  meta: PersonaMetadata;
 }
 
 interface PendingSave {
@@ -112,20 +103,6 @@ export function useConversationPersona(
     () => (conversation ? { ...defaults, ...(overrides ?? {}) } : null),
     [conversation, defaults, overrides],
   );
-  const updatedAt =
-    (entity as PersonaRelationshipRecord | PersonaGroupStanceRecord | null)?.updatedAt ?? null;
-  const meta = useMemo<PersonaMetadata | null>(
-    () =>
-      conversation
-        ? {
-            createdAt: updatedAt ?? new Date(0).toISOString(),
-            updatedAt: updatedAt ?? new Date(0).toISOString(),
-            history: [],
-          }
-        : null,
-    [conversation, updatedAt],
-  );
-
   const runSave = useCallback(async () => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -188,7 +165,7 @@ export function useConversationPersona(
   }, [runSave]);
 
   const update = useCallback(
-    (key: string, label: string, value: PersonaValue) => {
+    (key: string, value: PersonaValue) => {
       if (!conversationId || !personaId || !values || !entity) {
         return;
       }
@@ -198,12 +175,7 @@ export function useConversationPersona(
         return;
       }
       const nextValues = { ...values, [key]: value };
-      const nextMeta = appendPersonaHistory(meta ?? { createdAt: '', updatedAt: '', history: [] }, {
-        field: label,
-        from: formatPersonaValue(values[key]),
-        to: formatPersonaValue(value),
-      });
-      setDraft({ conversationId, values: nextValues, meta: nextMeta });
+      setDraft({ conversationId, values: nextValues });
       pendingRef.current = {
         conversationId,
         personaId,
@@ -220,12 +192,11 @@ export function useConversationPersona(
         void runSave();
       }, SAVE_DELAY_MS);
     },
-    [conversationId, personaId, values, entity, kind, relationship, meta, runSave],
+    [conversationId, personaId, values, entity, kind, relationship, runSave],
   );
 
   return {
     values,
-    meta: conversation ? meta : null,
     ready: Boolean(personaId) && entityQuery.isSuccess && Boolean(entity),
     error: entityQuery.isError || Boolean(personaId && entityQuery.isSuccess && !entity),
     syncState,

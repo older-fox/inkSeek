@@ -35,6 +35,11 @@ import { ChannelAvatar, PlatformChip, SyncPill } from '@/components/connection-b
 import { ForwardMessageCard } from '@/components/forward-message';
 import { GroupPersonaPanel } from '@/components/group-persona-panel';
 import { ImageLightbox } from '@/components/image-lightbox';
+import {
+  ContactRelationshipPanel,
+  type ChatContactBrief,
+} from '@/components/mind/contact-relationship-panel';
+import { PersonaBriefPanel } from '@/components/mind/persona-brief-panel';
 import { PrivatePersonaPanel } from '@/components/private-persona-panel';
 import { VoiceBar } from '@/components/voice-bar';
 import { api, ApiError } from '@/lib/api';
@@ -60,8 +65,7 @@ function initialsOf(name: string): string {
 }
 
 type MessagePartGroup =
-  | { kind: 'bubble'; parts: ChatMessagePart[] }
-  | { kind: 'standalone'; part: ChatMessagePart };
+  { kind: 'bubble'; parts: ChatMessagePart[] } | { kind: 'standalone'; part: ChatMessagePart };
 
 function groupMessageParts(parts: ChatMessagePart[]): MessagePartGroup[] {
   const groups: MessagePartGroup[] = [];
@@ -114,9 +118,7 @@ function QuoteStrip({ quote, self }: { quote: ChatQuoteSummary; self: boolean })
     <div
       className={cn(
         'flex min-w-0 flex-col gap-0.5 rounded-lg border-l-2 px-2.5 py-1.5 text-left',
-        self
-          ? 'border-brass-300/60 bg-ink-950/30'
-          : 'border-jade-300/50 bg-ink-950/35',
+        self ? 'border-brass-300/60 bg-ink-950/30' : 'border-jade-300/50 bg-ink-950/35',
       )}
     >
       {resolved && quote.authorName && (
@@ -152,10 +154,7 @@ function QuoteStrip({ quote, self }: { quote: ChatQuoteSummary; self: boolean })
         }
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target.animate(
-          [
-            { backgroundColor: 'rgba(212, 175, 55, 0.16)' },
-            { backgroundColor: 'transparent' },
-          ],
+          [{ backgroundColor: 'rgba(212, 175, 55, 0.16)' }, { backgroundColor: 'transparent' }],
           { duration: 1200, easing: 'ease-out' },
         );
       }}
@@ -171,11 +170,15 @@ function MessageBubble({
   kind,
   selfAvatar,
   selfInitial,
+  onAuthorClick,
+  onSelfClick,
 }: {
   message: ChatMessage;
   kind: ConversationKind;
   selfAvatar: string | null;
   selfInitial: string;
+  onAuthorClick?: () => void;
+  onSelfClick?: () => void;
 }) {
   const avatarAccent = message.self ? 'brass' : kind === 'group' ? 'jade' : 'brass';
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
@@ -184,142 +187,178 @@ function MessageBubble({
   return (
     <>
       <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.24, ease: EASE }}
-      data-message-id={message.id}
-      className={cn('flex items-end gap-2', message.self ? 'justify-end' : 'justify-start')}
-    >
-      {!message.self && (
-        <ChannelAvatar
-          src={message.avatarUrl}
-          initials={initialsOf(message.author)}
-          accent={avatarAccent}
-          size="sm"
-          title={`QQ ${message.authorId}`}
-          className="size-7 rounded-full text-[0.58rem]"
-        />
-      )}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.24, ease: EASE }}
+        data-message-id={message.id}
+        className={cn('flex items-end gap-2', message.self ? 'justify-end' : 'justify-start')}
+      >
+        {!message.self &&
+          (onAuthorClick ? (
+            <button
+              type="button"
+              onClick={onAuthorClick}
+              aria-label={`查看 TA 对 ${message.author} 的关系`}
+              title={`查看对 ${message.author} 的关系`}
+              className="shrink-0 rounded-full transition hover:ring-2 hover:ring-brass-400/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+            >
+              <ChannelAvatar
+                src={message.avatarUrl}
+                initials={initialsOf(message.author)}
+                accent={avatarAccent}
+                size="sm"
+                title={`QQ ${message.authorId}`}
+                className="size-7 rounded-full text-[0.58rem]"
+              />
+            </button>
+          ) : (
+            <ChannelAvatar
+              src={message.avatarUrl}
+              initials={initialsOf(message.author)}
+              accent={avatarAccent}
+              size="sm"
+              title={`QQ ${message.authorId}`}
+              className="size-7 shrink-0 rounded-full text-[0.58rem]"
+            />
+          ))}
 
-      <div className={cn('max-w-[78%]', message.self && 'flex flex-col items-end')}>
-        {!message.self && kind === 'group' && (
-          <p className="mb-1 flex flex-wrap items-center gap-1.5 pl-1 text-[0.56rem] text-mist-600">
-            <span className="text-mist-400">{message.authorCard || message.author}</span>
-            {message.authorCard && <span>{message.author}</span>}
-            <span className="font-mono text-[0.48rem] text-mist-600">QQ {message.authorId}</span>
-          </p>
-        )}
-        {(message.parts.length > 0 || message.quote) && (
-          <div
-            className={cn(
-              'flex flex-col gap-1.5',
-              message.self ? 'items-end' : 'items-start',
-            )}
-          >
-            {message.quote && groups[0]?.kind !== 'bubble' && (
-              <QuoteStrip quote={message.quote} self={message.self} />
-            )}
-            {groups.map((group, groupIndex) => {
-              if (group.kind === 'bubble') {
-                const hasText =
-                  group.parts.some((part) => part.type === 'text') ||
-                  (groupIndex === 0 && Boolean(message.quote));
-                return (
-                  <div
-                    key={`${message.id}-bubble-${groupIndex}`}
-                    className={cn(
-                      'flex max-w-full flex-col gap-1 overflow-hidden',
-                      hasText ? 'px-3.5 py-2' : 'p-1',
-                      message.self
-                        ? 'rounded-2xl rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
-                        : 'rounded-2xl rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
-                    )}
-                  >
-                    {groupIndex === 0 && message.quote && (
-                      <QuoteStrip quote={message.quote} self={message.self} />
-                    )}
-                    {group.parts.map((part, index) => {
-                      const key = `${message.id}-part-${groupIndex}-${index}`;
-                      if (part.type === 'text') {
+        <div className={cn('max-w-[78%]', message.self && 'flex flex-col items-end')}>
+          {!message.self && kind === 'group' && (
+            <p className="mb-1 flex flex-wrap items-center gap-1.5 pl-1 text-[0.56rem] text-mist-600">
+              <span className="text-mist-400">{message.authorCard || message.author}</span>
+              {message.authorCard && <span>{message.author}</span>}
+              <span className="font-mono text-[0.48rem] text-mist-600">QQ {message.authorId}</span>
+            </p>
+          )}
+          {(message.parts.length > 0 || message.quote) && (
+            <div
+              className={cn('flex flex-col gap-1.5', message.self ? 'items-end' : 'items-start')}
+            >
+              {message.quote && groups[0]?.kind !== 'bubble' && (
+                <QuoteStrip quote={message.quote} self={message.self} />
+              )}
+              {groups.map((group, groupIndex) => {
+                if (group.kind === 'bubble') {
+                  const hasText =
+                    group.parts.some((part) => part.type === 'text') ||
+                    (groupIndex === 0 && Boolean(message.quote));
+                  return (
+                    <div
+                      key={`${message.id}-bubble-${groupIndex}`}
+                      className={cn(
+                        'flex max-w-full flex-col gap-1 overflow-hidden',
+                        hasText ? 'px-3.5 py-2' : 'p-1',
+                        message.self
+                          ? 'rounded-2xl rounded-br-md border border-brass-400/20 bg-brass-400/[0.12]'
+                          : 'rounded-2xl rounded-bl-md border border-mist-100/[0.07] bg-ink-950/35',
+                      )}
+                    >
+                      {groupIndex === 0 && message.quote && (
+                        <QuoteStrip quote={message.quote} self={message.self} />
+                      )}
+                      {group.parts.map((part, index) => {
+                        const key = `${message.id}-part-${groupIndex}-${index}`;
+                        if (part.type === 'text') {
+                          return (
+                            <p
+                              key={key}
+                              className={cn(
+                                'whitespace-pre-wrap text-left text-[0.76rem] leading-6',
+                                message.self ? 'text-mist-100' : 'text-mist-200',
+                              )}
+                            >
+                              {part.text}
+                            </p>
+                          );
+                        }
+                        if (part.type !== 'image') {
+                          return null;
+                        }
                         return (
-                          <p
+                          <button
                             key={key}
+                            type="button"
+                            onClick={() =>
+                              setViewer({
+                                src: part.image.url,
+                                alt: `图片 ${part.image.position + 1}`,
+                              })
+                            }
+                            aria-label={`预览图片 ${part.image.position + 1}`}
                             className={cn(
-                              'whitespace-pre-wrap text-left text-[0.76rem] leading-6',
-                              message.self ? 'text-mist-100' : 'text-mist-200',
+                              'block cursor-zoom-in',
+                              message.self ? 'self-end' : 'self-start',
                             )}
                           >
-                            {part.text}
-                          </p>
+                            <img
+                              src={part.image.url}
+                              alt={`图片 ${part.image.position + 1}`}
+                              loading="lazy"
+                              className="max-h-64 max-w-[16rem] rounded-lg object-cover"
+                            />
+                          </button>
                         );
-                      }
-                      if (part.type !== 'image') {
-                        return null;
-                      }
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() =>
-                            setViewer({
-                              src: part.image.url,
-                              alt: `图片 ${part.image.position + 1}`,
-                            })
-                          }
-                          aria-label={`预览图片 ${part.image.position + 1}`}
-                          className={cn(
-                            'block cursor-zoom-in',
-                            message.self ? 'self-end' : 'self-start',
-                          )}
-                        >
-                          <img
-                            src={part.image.url}
-                            alt={`图片 ${part.image.position + 1}`}
-                            loading="lazy"
-                            className="max-h-64 max-w-[16rem] rounded-lg object-cover"
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              }
+                      })}
+                    </div>
+                  );
+                }
 
-              const part = group.part;
-              const key = `${message.id}-part-${groupIndex}`;
-              if (part.type === 'forward') {
-                return (
-                  <ForwardMessageCard
-                    key={key}
-                    messageId={message.id}
-                    forward={part.forward}
-                    self={message.self}
-                  />
-                );
-              }
-              if (part.type === 'voice') {
-                return <VoiceBar key={key} voice={part.voice} self={message.self} />;
-              }
-              return null;
-            })}
-          </div>
-        )}
-        <p className="mt-1 px-1 font-mono text-[0.48rem] text-mist-600" title={`QQ ${message.authorId}`}>
-          {message.time}
-        </p>
-      </div>
+                const part = group.part;
+                const key = `${message.id}-part-${groupIndex}`;
+                if (part.type === 'forward') {
+                  return (
+                    <ForwardMessageCard
+                      key={key}
+                      messageId={message.id}
+                      forward={part.forward}
+                      self={message.self}
+                    />
+                  );
+                }
+                if (part.type === 'voice') {
+                  return <VoiceBar key={key} voice={part.voice} self={message.self} />;
+                }
+                return null;
+              })}
+            </div>
+          )}
+          <p
+            className="mt-1 px-1 font-mono text-[0.48rem] text-mist-600"
+            title={`QQ ${message.authorId}`}
+          >
+            {message.time}
+          </p>
+        </div>
 
-      {message.self && (
-        <ChannelAvatar
-          src={message.avatarUrl ?? selfAvatar}
-          initials={selfInitial}
-          accent="brass"
-          size="sm"
-          title={`QQ ${message.authorId}`}
-          className="size-7 rounded-full text-[0.58rem]"
-        />
-      )}
-    </motion.div>
+        {message.self &&
+          (onSelfClick ? (
+            <button
+              type="button"
+              onClick={onSelfClick}
+              aria-label="查看人格简报"
+              title="查看人格简报"
+              className="shrink-0 rounded-full transition hover:ring-2 hover:ring-brass-400/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+            >
+              <ChannelAvatar
+                src={message.avatarUrl ?? selfAvatar}
+                initials={selfInitial}
+                accent="brass"
+                size="sm"
+                title={`QQ ${message.authorId}`}
+                className="size-7 rounded-full text-[0.58rem]"
+              />
+            </button>
+          ) : (
+            <ChannelAvatar
+              src={message.avatarUrl ?? selfAvatar}
+              initials={selfInitial}
+              accent="brass"
+              size="sm"
+              title={`QQ ${message.authorId}`}
+              className="size-7 shrink-0 rounded-full text-[0.58rem]"
+            />
+          ))}
+      </motion.div>
 
       <AnimatePresence>
         {viewer && (
@@ -361,7 +400,9 @@ function ConversationRow({
         initials={conversation.initials}
         accent={conversation.accent}
         size="sm"
-        title={kind === 'group' ? `群号 ${conversation.externalId}` : `QQ ${conversation.externalId}`}
+        title={
+          kind === 'group' ? `群号 ${conversation.externalId}` : `QQ ${conversation.externalId}`
+        }
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
@@ -391,9 +432,7 @@ function ConversationRow({
             {PLATFORMS[conversation.platform].name}
           </span>
           {kind === 'group' && conversation.members !== undefined && (
-            <span className="font-mono text-[0.5rem] text-mist-600">
-              {conversation.members} 人
-            </span>
+            <span className="font-mono text-[0.5rem] text-mist-600">{conversation.members} 人</span>
           )}
           <span className="ml-auto font-mono text-[0.48rem] text-mist-600">
             {kind === 'group' ? `群 ${conversation.externalId}` : `QQ ${conversation.externalId}`}
@@ -623,6 +662,8 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
   const [personaOpen, setPersonaOpen] = useState(false);
+  const [contactBrief, setContactBrief] = useState<ChatContactBrief | null>(null);
+  const [briefOpen, setBriefOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -675,6 +716,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   );
 
   const activeChannel = channels.find((channel) => channel.id === activeConversation?.source.id);
+  const persona = activeChannel?.persona ?? null;
   const selfName = activeConversation?.source.displayName ?? activeChannel?.displayName ?? '我';
   const selfInitial = initialsOf(selfName);
   const selfAvatar = activeConversation?.source.avatarUrl ?? activeChannel?.avatarUrl ?? null;
@@ -748,6 +790,8 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   useEffect(() => {
     setAttachments([]);
     setPersonaOpen(false);
+    setContactBrief(null);
+    setBriefOpen(false);
   }, [selectedId]);
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
@@ -940,17 +984,41 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                 <ArrowLeft className="size-4" />
               </button>
 
-              <ChannelAvatar
-                src={activeConversation.avatarUrl}
-                initials={activeConversation.initials}
-                accent={activeConversation.accent}
-                size="sm"
-                title={
-                  kind === 'group'
-                    ? `群号 ${activeConversation.externalId}`
-                    : `QQ ${activeConversation.externalId}`
-                }
-              />
+              {persona ? (
+                <button
+                  type="button"
+                  onClick={() => setPersonaOpen(true)}
+                  aria-label={
+                    kind === 'group' ? '查看群关系立场与人格参数' : '查看对这个人的关系与人格参数'
+                  }
+                  title={kind === 'group' ? '群关系立场' : '关系与人格参数'}
+                  className="shrink-0 rounded-full transition hover:ring-2 hover:ring-brass-400/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40"
+                >
+                  <ChannelAvatar
+                    src={activeConversation.avatarUrl}
+                    initials={activeConversation.initials}
+                    accent={activeConversation.accent}
+                    size="sm"
+                    title={
+                      kind === 'group'
+                        ? `群号 ${activeConversation.externalId}`
+                        : `QQ ${activeConversation.externalId}`
+                    }
+                  />
+                </button>
+              ) : (
+                <ChannelAvatar
+                  src={activeConversation.avatarUrl}
+                  initials={activeConversation.initials}
+                  accent={activeConversation.accent}
+                  size="sm"
+                  title={
+                    kind === 'group'
+                      ? `群号 ${activeConversation.externalId}`
+                      : `QQ ${activeConversation.externalId}`
+                  }
+                />
+              )}
 
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-2">
@@ -1036,6 +1104,18 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
                         kind={kind}
                         selfAvatar={selfAvatar}
                         selfInitial={selfInitial}
+                        onAuthorClick={
+                          persona
+                            ? () =>
+                                setContactBrief({
+                                  externalId: message.authorId,
+                                  name: message.author,
+                                  avatarUrl: message.avatarUrl,
+                                  accent: kind === 'group' ? 'jade' : 'brass',
+                                })
+                            : undefined
+                        }
+                        onSelfClick={persona ? () => setBriefOpen(true) : undefined}
                       />
                     ))}
                   </div>
@@ -1140,6 +1220,25 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
           channel={activeChannel ?? null}
           onClose={() => setPersonaOpen(false)}
         />
+      )}
+
+      {persona && (
+        <>
+          <ContactRelationshipPanel
+            personaId={persona.id}
+            contact={contactBrief}
+            onClose={() => setContactBrief(null)}
+          />
+          <PersonaBriefPanel
+            open={briefOpen}
+            channelId={activeChannel?.id ?? ''}
+            personaId={persona.id}
+            name={persona.name}
+            identity={persona.identity}
+            quote={persona.quote}
+            onClose={() => setBriefOpen(false)}
+          />
+        </>
       )}
     </div>
   );

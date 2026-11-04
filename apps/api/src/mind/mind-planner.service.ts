@@ -38,6 +38,7 @@ import {
   readString,
   readStringArray,
   type MindScene,
+  type MindSleepBrief,
   type MindWakeBrief,
   type ToolExecution,
 } from './mind.types.js';
@@ -51,6 +52,7 @@ export interface PlannerInput {
   mode: string;
   trigger: 'MESSAGE' | 'HEARTBEAT' | 'PROACTIVE' | 'MANUAL';
   wakeBrief?: MindWakeBrief;
+  sleepBrief?: MindSleepBrief;
 }
 
 export interface PlannerResult {
@@ -186,7 +188,8 @@ export class MindPlannerService {
       `- self.traits 只允许 ${SELF_TRAIT_KEYS.join('|')}；每项 -1..1，最多 2 项，只写这轮真的改变了你的地方，没变就省略。self.activity 只有正在做的事确实变了才写。`,
       '- groupStance 只作用于当前群，字段 comfort/belonging/attention/formality/speakRate/audienceRisk，每项 -2..2，最多 3 项；topic 只有话题真的变了才写。私聊不要写。',
       '- 只有双方明确邀请并明确答应后才写 todos。consent 必须同时给出邀请消息 ID 和答应消息 ID：先用 history.search 找到这两条消息，用它返回的 id 字段，且两条都要在最近对话里；自己的愿望、"下次吧"、群里没有点名你的邀请都不算。',
-      '- 想长时间离开（睡觉、专注、出门等）时写 longEvent：{"action":"START","kind":"SLEEP","title":"睡觉","plannedEndAt":"ISO","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."}。事件期间普通消息不会叫醒你；只有窗口内被点到 wakeMentions 次、出现唤醒关键词或到计划结束才会醒。事件结束后你会自己评估这段经历对身体各项指标的影响并结算，不套固定公式。主动结束写 {"action":"END","reason":"..."}。',
+      '- 想离开一阵时写 longEvent，活动可以是任何事：睡觉、打盹、洗澡、吃饭、上厕所、出门、专注做事等。格式：{"action":"START","kind":"SLEEP","title":"睡觉","plannedEndAt":"ISO","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."}。plannedEndAt 必填，时长由你结合【作息】参考和自己的感觉决定，不要固定套用某个小时数，非睡眠活动也一样。wakeKeywords 只是你留给自己的在意词，仅供叫醒判断参考，不是硬规则。',
+      '- 事件期间普通消息通常不会打断你；被点名时，醒不醒由你自己判断（会参考睡眠深度、当下状态、谁在叫你、事情急不急），计划结束一定会醒。事件结束后你会自己评估这段经历对身体各项指标的影响并结算，不套固定公式。主动结束写 {"action":"END","reason":"..."}。',
       '- 你的情绪是全局底色：心情差就自然对所有人偏沉，不要对一个人冷、对另一个人热；除非你对那个人好感非常高（65 以上）才允许明显例外。',
       input.settings.selfScheduleEnabled
         ? `- 可以自己安排下次醒来 nextWakeAt，但必须落在 ${input.settings.wakeMinMinutes}-${input.settings.wakeMaxMinutes} 分钟之后。`
@@ -288,6 +291,8 @@ export class MindPlannerService {
       })),
     );
 
+    const sleepSection = input.sleepBrief ? formatSleepBrief(input.sleepBrief) : '';
+
     const wakeSection = input.wakeBrief
       ? [
           `到期待办：${input.wakeBrief.dueTodos.map((todo) => todo.title).join('；') || '无'}`,
@@ -303,6 +308,7 @@ export class MindPlannerService {
         ? `【表达】\n${voice}${banned ? `${voice ? '；' : ''}禁用语：${banned}` : ''}`
         : '',
       `【此刻】\n${stateLine}\n正在做：${activity}`,
+      sleepSection ? `【作息】\n${sleepSection}` : '',
       `【对话对象】\n${targetSection}`,
       others ? `【在场】\n${others}` : '',
       `【这个群】\n${groupSection}`,
@@ -754,6 +760,56 @@ function moodLabel(state: PersonaState): string {
   if (state.moodArousal > 70) return `亢奋·${base}`;
   if (state.moodArousal < 30) return `倦怠·${base}`;
   return base;
+}
+
+function formatSleepBrief(brief: MindSleepBrief): string {
+  const last = brief.lastSleep
+    ? `上次睡觉「${brief.lastSleep.title}」实际 ${formatDuration(brief.lastSleep.minutes)}${
+        brief.lastSleep.plannedMinutes
+          ? `（计划 ${formatDuration(brief.lastSleep.plannedMinutes)}）`
+          : ''
+      }，${formatClockTime(brief.lastSleep.endedAt, brief.timeZone)} 结束`
+    : '上次睡觉：没有记录';
+  const awake =
+    brief.awakeMinutes === null
+      ? '已经清醒：未知'
+      : `已经清醒 ${formatDuration(brief.awakeMinutes)}`;
+  const suggestion =
+    brief.suggestion.action === 'NONE' || brief.suggestion.minutes === null
+      ? `参考：${brief.suggestion.reason}。这只是参考，你可以按自己的感觉决定。`
+      : `参考：${brief.suggestion.action === 'NAP' ? '可以打盹' : '可以睡觉'}约 ${brief.suggestion.minutes} 分钟（${brief.suggestion.reason}）。这只是参考，你可以自己决定睡多久或做别的事。`;
+  return [
+    `现在 ${brief.localTime}（${brief.timeZone}）；睡眠深度 ${brief.sleepDepth}/4（0 很浅、4 很深，越深越难叫醒）。`,
+    `${last}；${awake}。`,
+    `睡眠债 ${brief.sleepDebt}（0 不困 .. 100 很困）；精力 ${brief.energy}、健康 ${brief.health}、压力 ${brief.stress}。`,
+    suggestion,
+  ].join('\n');
+}
+
+function formatDuration(minutes: number): string {
+  const rounded = Math.max(1, Math.round(minutes));
+  const hours = Math.floor(rounded / 60);
+  const rest = rounded % 60;
+  if (hours === 0) {
+    return `${rest} 分钟`;
+  }
+  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
+}
+
+function formatClockTime(iso: string, timeZone?: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: timeZone && timeZone !== 'server-local' ? timeZone : undefined,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }
 }
 
 function silencePlan(reason: string): ActionPlan {

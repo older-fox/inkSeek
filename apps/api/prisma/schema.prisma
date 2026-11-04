@@ -81,7 +81,6 @@ model PersonaCard {
   updatedAt      DateTime @updatedAt
 
   versions     PersonaVersion[]
-  pipelineRuns ChatPipelineRun[]
 
   @@index([name])
   @@index([updatedAt])
@@ -125,35 +124,6 @@ enum ChatMessageKind {
   FORWARD
 }
 
-enum ChatPipelineRunStatus {
-  RUNNING
-  SUCCEEDED
-  FAILED
-  INTERRUPTED
-}
-
-enum ChatPipelineNodeStatus {
-  RUNNING
-  SUCCEEDED
-  SKIPPED
-  FAILED
-  CANCELLED
-}
-
-/// Graph namespace. `GLOBAL` is the system template; channels and personas
-/// inherit it until they save their own copy.
-enum ChatPipelineScope {
-  GLOBAL
-  CHANNEL
-  PERSONA
-}
-
-/// `DEBUG` runs execute the real graph but never commit effects (no replies).
-enum ChatPipelineRunMode {
-  LIVE
-  DEBUG
-}
-
 /// Namespace root. Every contact, conversation, message and future persona
 /// snapshot belongs to exactly one channel; group/private scopes never create
 /// their own namespace.
@@ -175,7 +145,6 @@ model ChatChannel {
   contacts        ChatContact[]
   conversations   ChatConversation[]
   messages        ChatMessageRecord[]
-  pipelineRuns    ChatPipelineRun[]
   persona         ChatChannelPersona?
   mindSettings    ChatMindSettings?
   relationships   PersonaRelationship[]
@@ -209,7 +178,6 @@ model ChatChannelPersona {
   updatedAt  DateTime    @updatedAt
 
   state         PersonaState?
-  schedule      PersonaSchedule?
   relationships PersonaRelationship[]
   groupStances  PersonaGroupStance[]
   memories      PersonaMemory[]
@@ -218,9 +186,8 @@ model ChatChannelPersona {
   runs          AgentRun[]
   actions       AgentAction[]
   journal       PersonaJournal[]
-  driftEvents   PersonaDriftEvent[]
   longEvents    PersonaLongEvent[]
-  stateChanges  PersonaStateChange[]
+  changes       PersonaChangeLog[]
 }
 
 /// A channel-scoped participant. The same QQ number under another channel is a
@@ -261,7 +228,6 @@ model ChatConversation {
   updatedAt          DateTime             @updatedAt
 
   messages     ChatMessageRecord[]
-  pipelineRuns ChatPipelineRun[]
   members      ChatGroupMember[]
   groupStances PersonaGroupStance[]
   agentRuns    AgentRun[]
@@ -317,7 +283,6 @@ model ChatMessageRecord {
   images       ChatImageAsset[]
   voices       ChatVoiceAsset[]
   forward      ChatForward?
-  pipelineRuns ChatPipelineRun[]
 
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
@@ -484,98 +449,11 @@ model ChatForwardNodeVoice {
   @@index([nodeId, position])
 }
 
-/// One execution of a pipeline graph for a persisted message. Runs pin the
-/// graphId + graphVersion so a later graph edit does not rewrite history.
-model ChatPipelineRun {
-  id             String                @id @default(cuid())
-  graphId        String
-  graphVersion   Int
-  status         ChatPipelineRunStatus @default(RUNNING)
-  scope          ChatPipelineScope     @default(GLOBAL)
-  scopeId        String?
-  mode           ChatPipelineRunMode   @default(LIVE)
-  channelId      String?
-  channel        ChatChannel?          @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversationId String?
-  conversation   ChatConversation?     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  messageId      String?
-  message        ChatMessageRecord?    @relation(fields: [messageId], references: [id], onDelete: SetNull)
-  personaCardId  String?
-  persona        PersonaCard?          @relation(fields: [personaCardId], references: [id], onDelete: SetNull)
-  startedAt      DateTime              @default(now())
-  finishedAt     DateTime?
-  durationMs     Int?
-  error          String?
-  /// Final namespaced node outputs, kept for debugging and future replay.
-  variables      Json?
-  /// Final pipeline variable values after the run: `{ [key]: value }`.
-  variableValues Json?
-  /// Effects requested by nodes. Debug runs store them here instead of committing.
-  effects        Json?
-  /// Simulated message for debug runs: `{ text, senderName }`.
-  debugInput     Json?
-  nodes          ChatPipelineNodeRun[]
-
-  @@index([channelId, startedAt])
-  @@index([conversationId, startedAt])
-  @@index([messageId])
-  @@index([personaCardId])
-  @@index([scope, scopeId, startedAt])
-  @@index([startedAt])
-}
-
-/// Immutable per-node trace. Skipped nodes are recorded too, so branches are
-/// visible without reading the graph definition. A node row is created when the
-/// node starts (RUNNING, no finish time) and updated when it settles, so long
-/// waits are visible while they happen.
-model ChatPipelineNodeRun {
-  id          String                 @id @default(cuid())
-  runId       String
-  run         ChatPipelineRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
-  nodeId      String
-  nodeType    String
-  nodeVersion Int
-  status      ChatPipelineNodeStatus
-  startedAt   DateTime
-  finishedAt  DateTime?
-  durationMs  Int?
-  input       Json?
-  output      Json?
-  error       String?
-
-  @@index([runId, startedAt])
-}
-
-/// Editable node graph, one row per namespace: the global template, a channel
-/// copy, or a persona copy. Channels and personas have no row while they simply
-/// follow their parent; saving creates the row (copy-on-write). The version
-/// bumps only when the structure or configuration changes, not when a card is
-/// merely dragged around the canvas. Revision bumps on every write and is the
-/// optimistic-concurrency token for editors.
-model ChatPipelineGraph {
-  id            String            @id @default(cuid())
-  scope         ChatPipelineScope @default(GLOBAL)
-  /// Channel id or persona card id; empty string for the global template.
-  scopeId       String            @default("")
-  name          String
-  version       Int               @default(1)
-  revision      Int               @default(0)
-  schemaVersion Int               @default(1)
-  nodes         Json
-  edges         Json
-  /// Graph-level variables: `[{ key, value }]`. Runs start from these values.
-  variables     Json?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-
-  @@unique([scope, scopeId])
-}
-
 // ---------------------------------------------------------------------------
 // Persona mind: continuous self, relationships, memory, agenda and action log.
 // ---------------------------------------------------------------------------
 
-/// OFF keeps the classic pipeline. SHADOW records a mind turn without sending.
+/// OFF disables the mind runtime. SHADOW records a turn without sending.
 /// APPROVAL stores pending actions for an operator. LIVE executes the plan.
 enum PersonaMindMode {
   OFF
@@ -743,10 +621,18 @@ model PersonaState {
   health          Int                 @default(80)
   grooming        Int                 @default(70)
   lastWakeAt      DateTime?
+  /// Next heartbeat wake; survives the lease so state and scheduler share one row.
   nextWakeAt      DateTime?
   lastHeartbeatAt DateTime?
+  /// Heartbeat worker lease. Null when no worker owns the wake.
+  leaseUntil      DateTime?
+  leaseOwner      String?
+  /// Why the next wake was scheduled (manual, heartbeat safety net, plan...).
+  wakeReason      String              @default("")
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+
+  @@index([nextWakeAt])
 }
 
 /// Agent-authored block of time (sleep, focus, away). While ACTIVE, ordinary
@@ -777,22 +663,29 @@ model PersonaLongEvent {
   @@index([personaId, status, startedAt])
 }
 
-/// Field-level audit trail for PersonaState. Numeric fields store numbers in
-/// beforeValue/afterValue; activity/location store strings.
-model PersonaStateChange {
+/// Append-only audit for every live value: state, self traits, relationships and
+/// group stances. One row per field change; it doubles as the drift quota
+/// ledger, so no separate drift-event table is needed.
+model PersonaChangeLog {
   id          String             @id @default(cuid())
   personaId   String
   persona     ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  /// STATE | SELF | RELATION | GROUP
+  scope       String             @default("STATE")
+  /// Contact id / conversation id; empty for STATE and SELF.
+  targetId    String             @default("")
   field       String
   beforeValue Json?
   afterValue  Json?
   delta       Int?
   reason      String             @default("")
+  /// MANUAL | DRIFT | TOOL | EVENT | EMOTION | TURN | HEARTBEAT | ...
   source      String             @default("")
   runId       String?
   createdAt   DateTime           @default(now())
 
   @@index([personaId, createdAt])
+  @@index([personaId, scope, targetId, field, createdAt])
 }
 
 /// Relationship toward one channel contact. `base*` is the operator-authored
@@ -833,25 +726,9 @@ model PersonaRelationship {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
-  events PersonaRelationshipEvent[]
-
   @@unique([personaId, contactId])
   @@index([channelId, contactId])
   @@index([personaId, updatedAt])
-}
-
-/// Append-only relation deltas, so the UI can explain why the live value moved.
-model PersonaRelationshipEvent {
-  id             String              @id @default(cuid())
-  relationshipId String
-  relationship   PersonaRelationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
-  kind           String
-  delta          Json
-  reason         String              @default("")
-  sourceMemoryId String?
-  createdAt      DateTime            @default(now())
-
-  @@index([relationshipId, createdAt])
 }
 
 /// Attitude toward one group conversation.
@@ -885,26 +762,6 @@ model PersonaGroupStance {
 
   @@unique([personaId, conversationId])
   @@index([channelId, conversationId])
-}
-
-/// Append-only ledger of post-turn attribute drift. It exists only to enforce
-/// per-turn spans, daily caps and cooldowns; the live values stay on the
-/// persona card, relationship and stance rows.
-model PersonaDriftEvent {
-  id        String             @id @default(cuid())
-  personaId String
-  persona   ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  /// SELF | RELATION | GROUP | ACTIVITY
-  scope     String
-  /// Contact id / conversation id; empty for SELF and ACTIVITY.
-  targetId  String             @default("")
-  key       String
-  delta     Int
-  reason    String             @default("")
-  createdAt DateTime           @default(now())
-
-  @@index([personaId, scope, targetId, key, createdAt])
-  @@index([personaId, createdAt])
 }
 
 /// One durable memory. Embeddings are stored as Float[] so the first version does
@@ -947,18 +804,6 @@ model PersonaMemory {
   @@index([personaId, subjectType, subjectId])
   @@index([channelId, conversationId, occurredAt])
   @@index([personaId, consolidatedAt])
-}
-
-model PersonaMemoryLink {
-  id        String   @id @default(cuid())
-  fromId    String
-  toId      String
-  relation  String
-  weight    Int      @default(50)
-  createdAt DateTime @default(now())
-
-  @@unique([fromId, toId, relation])
-  @@index([toId])
 }
 
 /// Persona-authored (or operator-authored) future task with a wake condition.
@@ -1008,22 +853,6 @@ model AgentIntention {
   updatedAt      DateTime             @updatedAt
 
   @@index([personaId, status, earliestAt])
-}
-
-/// Heartbeat lease row. One row per persona; workers claim due rows.
-model PersonaSchedule {
-  id           String   @id @default(cuid())
-  personaId    String   @unique
-  persona      ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  nextWakeAt   DateTime @default(now())
-  lastWakeAt   DateTime?
-  leaseUntil   DateTime?
-  leaseOwner   String?
-  reason       String   @default("")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@index([nextWakeAt])
 }
 
 /// One mind turn, including heartbeat and proactive turns.

@@ -41,26 +41,18 @@ export class PersonaStateService {
         ? (persona.values as Record<string, unknown>)
         : {};
     const cardGrooming = Number(values['grooming']);
-    const state = await this.prisma.personaState.upsert({
+    return this.prisma.personaState.upsert({
       where: { personaId },
       create: {
         personaId,
+        nextWakeAt: new Date(Date.now() + SCHEDULE_LEAD_MS),
+        wakeReason: '首次唤醒',
         ...(Number.isFinite(cardGrooming)
           ? { grooming: clamp(Math.round(cardGrooming), 0, 100) }
           : {}),
       },
       update: {},
     });
-    await this.prisma.personaSchedule.upsert({
-      where: { personaId },
-      create: {
-        personaId,
-        nextWakeAt: new Date(Date.now() + SCHEDULE_LEAD_MS),
-        reason: '首次唤醒',
-      },
-      update: {},
-    });
-    return state;
   }
 
   async get(personaId: string): Promise<PersonaStateRecord> {
@@ -158,21 +150,11 @@ export class PersonaStateService {
     });
   }
 
-  async markWake(personaId: string, meta?: StateChangeMeta): Promise<void> {
-    const state = await this.ensure(personaId);
-    const now = new Date();
-    const next = await this.prisma.personaState.update({
+  /** Heartbeat cadence only. Waking up is recorded by event settlement (`applyBodyDeltas`). */
+  async markHeartbeat(personaId: string): Promise<void> {
+    await this.prisma.personaState.updateMany({
       where: { personaId },
-      data: {
-        lastWakeAt: now,
-        lastHeartbeatAt: now,
-        sleepDebt: clamp(state.sleepDebt - 2, 0, 100),
-      },
-    });
-    await this.logChanges(personaId, state, next, {
-      reason: meta?.reason ?? '醒来',
-      source: meta?.source ?? 'WAKE',
-      runId: meta?.runId,
+      data: { lastHeartbeatAt: new Date() },
     });
   }
 
@@ -252,6 +234,14 @@ export class PersonaStateService {
     });
   }
 
+  /** Schedule the next heartbeat and clear any worker lease in one write. */
+  async scheduleWake(personaId: string, nextWakeAt: Date, reason: string): Promise<void> {
+    await this.prisma.personaState.updateMany({
+      where: { personaId },
+      data: { nextWakeAt, wakeReason: reason, leaseUntil: null, leaseOwner: null },
+    });
+  }
+
   async persona(personaId: string): Promise<MindPersona> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -304,7 +294,7 @@ export class PersonaStateService {
     after: PersonaState,
     meta: StateChangeMeta,
   ): Promise<void> {
-    const rows: Prisma.PersonaStateChangeCreateManyInput[] = [];
+    const rows: Prisma.PersonaChangeLogCreateManyInput[] = [];
     const reason = meta.reason ?? '';
     const source = meta.source ?? 'SYSTEM';
 
@@ -316,6 +306,8 @@ export class PersonaStateService {
       }
       rows.push({
         personaId,
+        scope: 'STATE',
+        targetId: '',
         field,
         beforeValue: previous,
         afterValue: next,
@@ -334,6 +326,8 @@ export class PersonaStateService {
       }
       rows.push({
         personaId,
+        scope: 'STATE',
+        targetId: '',
         field,
         beforeValue: previous,
         afterValue: next,
@@ -347,7 +341,7 @@ export class PersonaStateService {
       return;
     }
     try {
-      await this.prisma.personaStateChange.createMany({ data: rows });
+      await this.prisma.personaChangeLog.createMany({ data: rows });
     } catch {
       // History is auxiliary; a failed audit row must not break the state write.
     }

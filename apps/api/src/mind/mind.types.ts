@@ -1,20 +1,15 @@
 import type {
   ChatChannelPersona,
-  ChatContact,
   ChatConversation,
-  ChatMessageRecord,
   PersonaGroupStance,
-  PersonaRelationship,
   PersonaState,
 } from '../generated/prisma/client.js';
-import type { PipelineMessage } from '../chat/pipeline/pipeline-types.js';
+import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 
 export type MindPersona = ChatChannelPersona;
 export type MindState = PersonaState;
-export type MindRelationship = PersonaRelationship & { contact: ChatContact };
 export type MindGroupStance = PersonaGroupStance & { conversation: ChatConversation };
 export type MindConversation = ChatConversation;
-export type MindMessage = ChatMessageRecord;
 
 export interface SceneMessage {
   id: string;
@@ -58,11 +53,36 @@ export interface SceneCastMember {
 export interface MindScene {
   persona: MindPersona;
   conversation: MindConversation;
-  anchor: PipelineMessage;
+  anchor: ChatMessageSnapshot;
   messages: SceneMessage[];
   cast: SceneCastMember[];
   stance: MindGroupStance | null;
   startedAt: Date;
+}
+
+/** Non-binding rest reference: the model still decides whether and how long to leave. */
+export interface MindSleepBrief {
+  localTime: string;
+  timeZone: string;
+  /** 0 (very light sleeper) .. 4 (very deep sleeper). */
+  sleepDepth: number;
+  lastSleep: {
+    kind: string;
+    title: string;
+    minutes: number;
+    plannedMinutes: number | null;
+    endedAt: string;
+  } | null;
+  awakeMinutes: number | null;
+  sleepDebt: number;
+  energy: number;
+  health: number;
+  stress: number;
+  suggestion: {
+    action: 'SLEEP' | 'NAP' | 'NONE';
+    minutes: number | null;
+    reason: string;
+  };
 }
 
 export interface MindWakeBrief {
@@ -94,13 +114,6 @@ export interface MindWakeBrief {
   unconsolidatedCount: number;
 }
 
-export interface ToolCall {
-  thought?: string;
-  tool?: string;
-  input?: unknown;
-  final?: unknown;
-}
-
 export interface ToolExecution {
   name: string;
   input: unknown;
@@ -129,14 +142,6 @@ export const MIND_MAX_RELATIONSHIP_DELTA = 5;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
-}
-
-export function scorePercent(value: unknown, fallback = 50): number {
-  return typeof value === 'number' && Number.isFinite(value) ? clamp(value, 0, 100) : fallback;
-}
-
-export function scoreSigned(value: unknown, fallback = 0): number {
-  return typeof value === 'number' && Number.isFinite(value) ? clamp(value, -100, 100) : fallback;
 }
 
 export function readString(value: unknown, fallback = ''): string {

@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { PipelineMessage } from '../chat/pipeline/pipeline-types.js';
+import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { ImageDescriptionService } from '../chat/image-description.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
@@ -48,7 +48,7 @@ export class MindSceneService {
   ) {}
 
   async buildFromMessage(
-    message: PipelineMessage,
+    message: ChatMessageSnapshot,
     imageDescriptionPrompt = '',
   ): Promise<MindScene | null> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
@@ -128,18 +128,8 @@ export class MindSceneService {
     if (!last) {
       return null;
     }
-    const anchor = toPipelineMessage(last, conversation);
+    const anchor = toChatMessageSnapshot(last, conversation);
     return this.buildFromMessage(anchor, imageDescriptionPrompt);
-  }
-
-  async loadConversation(channelId: string, conversationId: string): Promise<ChatConversation> {
-    const conversation = await this.prisma.chatConversation.findFirst({
-      where: { id: conversationId, channelId },
-    });
-    if (!conversation) {
-      throw new NotFoundException({ code: 'CONVERSATION_NOT_FOUND', message: '会话不存在' });
-    }
-    return conversation;
   }
 
   async recentMessages(
@@ -180,7 +170,7 @@ export class MindSceneService {
    * to bypass the reply-avoid window without paying for a full scene build.
    */
   async isDirectedMention(
-    message: PipelineMessage,
+    message: ChatMessageSnapshot,
     persona: { name: string; values: unknown },
   ): Promise<boolean> {
     const values =
@@ -247,11 +237,11 @@ export class MindSceneService {
   }
 
   /**
-   * Vision descriptions are the only image payload the planner can read. The
-   * mind path bypasses pipeline media.describe nodes, so missing descriptions
-   * are generated here and written back to the shared media row. Anchor images
-   * go first, then the most recent messages; the cap keeps a backlog of old
-   * images from turning one turn into a burst of vision calls.
+   * Vision descriptions are the only image payload the planner can read, so
+   * missing descriptions are generated here and written back to the shared
+   * media row. Anchor images go first, then the most recent messages; the cap
+   * keeps a backlog of old images from turning one turn into a burst of vision
+   * calls.
    */
   private async describeMissingImages(
     rows: MessageWithAssets[],
@@ -471,10 +461,10 @@ function mentionsAccount(segments: unknown, accountId: string): boolean {
   });
 }
 
-export function toPipelineMessage(
+export function toChatMessageSnapshot(
   record: ChatMessageRecord,
   conversation: ChatConversation,
-): PipelineMessage {
+): ChatMessageSnapshot {
   return {
     messageId: record.id,
     channelId: record.channelId,

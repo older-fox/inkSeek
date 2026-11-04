@@ -15,7 +15,9 @@ import {
   agentIntentionCreateSchema,
   agentTodoCreateSchema,
   agentTodoUpdateSchema,
+  mindChangeQuerySchema,
   mindJournalQuerySchema,
+  mindLongEventQuerySchema,
   mindPromptLogQuerySchema,
   mindRunQuerySchema,
   mindSettingsUpdateSchema,
@@ -25,12 +27,12 @@ import {
   personaMemoryUpdateSchema,
   personaRelationshipUpdateSchema,
   personaStateUpdateSchema,
-  stickerScanSchema,
-  stickerImportSchema,
   type AgentIntentionCreateInput,
   type AgentTodoCreateInput,
   type AgentTodoUpdateInput,
+  type MindChangeQueryInput,
   type MindJournalQueryInput,
+  type MindLongEventQueryInput,
   type MindPromptLogQueryInput,
   type MindRunQueryInput,
   type MindSettingsUpdateInput,
@@ -40,8 +42,6 @@ import {
   type PersonaMemoryUpdateInput,
   type PersonaRelationshipUpdateInput,
   type PersonaStateUpdateInput,
-  type StickerScanInput,
-  type StickerImportInput,
 } from '@inkseek/shared';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
@@ -57,12 +57,6 @@ export class MindController {
     private readonly mind: MindService,
     private readonly memories: PersonaMemoryService,
   ) {}
-
-  @Get('overview/:channelId')
-  @ApiOperation({ summary: '读取渠道人格心智总览' })
-  overview(@Param('channelId') channelId: string) {
-    return this.mind.overview(channelId);
-  }
 
   @Get('settings/:channelId')
   @ApiOperation({ summary: '读取渠道心智模式' })
@@ -94,16 +88,40 @@ export class MindController {
     return this.mind.updateState(personaId, input);
   }
 
+  @Get('long-events/:personaId')
+  @ApiOperation({ summary: '读取长时事件列表' })
+  longEvents(
+    @Param('personaId') personaId: string,
+    @Query(new ZodValidationPipe(mindLongEventQuerySchema)) query: MindLongEventQueryInput,
+  ) {
+    return this.mind.listLongEvents(personaId, query.limit);
+  }
+
   @Post('long-events/:personaId/end')
   @ApiOperation({ summary: '手动结束当前长时事件' })
   endLongEvent(@Param('personaId') personaId: string) {
     return this.mind.endLongEvent(personaId);
   }
 
+  @Get('changes/:personaId')
+  @ApiOperation({ summary: '读取统一变动历史' })
+  changes(
+    @Param('personaId') personaId: string,
+    @Query(new ZodValidationPipe(mindChangeQuerySchema)) query: MindChangeQueryInput,
+  ) {
+    return this.mind.listChanges(personaId, query);
+  }
+
   @Get('relationships/:personaId')
   @ApiOperation({ summary: '读取人格关系列表' })
   relationships(@Param('personaId') personaId: string) {
     return this.mind.listRelationships(personaId);
+  }
+
+  @Get('relationships/:personaId/contact/:externalId')
+  @ApiOperation({ summary: '读取人格对某个外部联系人的关系' })
+  relationship(@Param('personaId') personaId: string, @Param('externalId') externalId: string) {
+    return this.mind.relationshipByExternalId(personaId, externalId);
   }
 
   @Patch('relationships/:personaId')
@@ -251,32 +269,8 @@ export class MindController {
   }
 
   @Get('stickers')
-  @ApiOperation({ summary: '读取本地表情库' })
+  @ApiOperation({ summary: '读取 Agent 收藏的表情库' })
   stickers() {
     return this.mind.listStickers();
-  }
-
-  @Get('stickers/images')
-  @ApiOperation({ summary: '读取渠道最近收到的图片，供收藏为表情' })
-  stickerImages(@Query('channelId') channelId: string, @Query('limit') limit?: string) {
-    return this.mind.recentStickerImages(channelId, Number(limit ?? 48) || 48);
-  }
-
-  @Post('stickers/import')
-  @ApiOperation({ summary: '把一张收到的图片加入表情库' })
-  importSticker(@Body(new ZodValidationPipe(stickerImportSchema)) input: StickerImportInput) {
-    return this.mind.importSticker(input);
-  }
-
-  @Post('stickers/scan')
-  @ApiOperation({ summary: '扫描本地表情目录' })
-  scanStickers(@Body(new ZodValidationPipe(stickerScanSchema)) input: StickerScanInput) {
-    return this.mind.scanStickers(input.describe);
-  }
-
-  @Get('stickers/search')
-  @ApiOperation({ summary: '按情绪/场景搜索表情' })
-  searchStickers(@Query('q') query: string, @Query('limit') limit?: string) {
-    return this.mind.searchStickers(query ?? '', Number(limit ?? 12) || 12);
   }
 }

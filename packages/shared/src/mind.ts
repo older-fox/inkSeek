@@ -346,19 +346,6 @@ export interface LlmPromptLogRecord {
   createdAt: string;
 }
 
-export interface StickerImageCandidate {
-  id: string;
-  mediaId: string | null;
-  url: string;
-  width: number | null;
-  height: number | null;
-  mimeType: string | null;
-  description: string | null;
-  author: string;
-  sentAt: string;
-  collected: boolean;
-}
-
 export interface MindPersonaSummary {
   id: string;
   channelId: string;
@@ -371,29 +358,13 @@ export interface MindPersonaSummary {
   base: Record<string, number>;
 }
 
-export interface MindOverview {
-  persona: MindPersonaSummary | null;
-  settings: MindSettingsRecord | null;
-  state: PersonaStateRecord | null;
-  relationships: PersonaRelationshipRecord[];
-  groupStances: PersonaGroupStanceRecord[];
-  memories: PersonaMemoryRecord[];
-  todos: AgentTodoRecord[];
-  intentions: AgentIntentionRecord[];
-  runs: AgentRunSummary[];
-  journal: PersonaJournalRecord[];
-  stickers: StickerRecord[];
-  /** The active agent-authored long event, if any. */
-  longEvent: PersonaLongEventRecord | null;
-  /** Recent long events, newest first (includes the active one). */
-  longEvents: PersonaLongEventRecord[];
-  /** Recent self-state changes, newest first. */
-  stateChanges: PersonaStateChangeRecord[];
-}
-
-export interface PersonaStateChangeRecord {
+export interface PersonaChangeRecord {
   id: string;
   personaId: string;
+  /** STATE | SELF | RELATION | GROUP */
+  scope: string;
+  /** Contact id / conversation id; empty for STATE and SELF. */
+  targetId: string;
   field: string;
   beforeValue: unknown;
   afterValue: unknown;
@@ -585,8 +556,8 @@ export const mindSettingsUpdateSchema = z.object({
   wakeMinMinutes: z.number().int().min(1).max(1440).optional(),
   wakeMaxMinutes: z.number().int().min(1).max(10080).optional(),
   quietIntervalMinutes: z.number().int().min(1).max(1440).optional(),
-  dailyMessageBudget: z.number().int().min(1).max(500).optional(),
-  dailyProactiveBudget: z.number().int().min(0).max(50).optional(),
+  dailyMessageBudget: z.number().int().min(0).max(500).optional(),
+  dailyProactiveBudget: z.number().int().min(-9999).max(50).optional(),
   maxBeats: z.number().int().min(1).max(8).optional(),
   minBeatDelayMs: z.number().int().min(0).max(30_000).optional(),
   maxBeatDelayMs: z.number().int().min(0).max(60_000).optional(),
@@ -776,6 +747,21 @@ export const mindRunQuerySchema = z.object({
 
 export type MindRunQueryInput = z.infer<typeof mindRunQuerySchema>;
 
+export const mindChangeQuerySchema = z.object({
+  scope: z.enum(['STATE', 'SELF', 'RELATION', 'GROUP']).optional(),
+  targetId: z.string().max(64).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export type MindChangeQueryInput = z.infer<typeof mindChangeQuerySchema>;
+
+export const mindLongEventQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type MindLongEventQueryInput = z.infer<typeof mindLongEventQuerySchema>;
+
 export const mindJournalQuerySchema = z.object({
   personaId: z.string().min(1).max(64),
   limit: z.coerce.number().int().min(1).max(100).default(30),
@@ -789,22 +775,3 @@ export const mindPromptLogQuerySchema = z.object({
 });
 
 export type MindPromptLogQueryInput = z.infer<typeof mindPromptLogQuerySchema>;
-
-export const stickerScanSchema = z.object({
-  describe: z.boolean().optional().default(false),
-});
-
-export type StickerScanInput = z.infer<typeof stickerScanSchema>;
-
-export const stickerImportSchema = z
-  .object({
-    imageUrl: z.string().max(2000).optional(),
-    mediaId: z.string().max(64).optional(),
-    tags: z.array(z.string().max(40)).max(12).optional(),
-    describe: z.boolean().optional().default(true),
-  })
-  .refine((input) => Boolean(input.imageUrl || input.mediaId), {
-    message: '需要图片地址或媒体 ID',
-  });
-
-export type StickerImportInput = z.infer<typeof stickerImportSchema>;

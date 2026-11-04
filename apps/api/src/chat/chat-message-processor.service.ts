@@ -1,52 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MindRuntimeService } from '../mind/mind-runtime.service.js';
 import { MindSettingsService } from '../mind/mind-settings.service.js';
-import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
-import type { PipelineMessage } from './pipeline/pipeline-types.js';
+import type { ChatMessageSnapshot } from './chat-message.types.js';
 import { PrivateBurstService } from './private-burst.service.js';
 
-export type PersistedChatMessage = PipelineMessage;
-
 /**
- * Hand-off point between ingest and the behavior engines. Ingest stores the
- * message first, then hands a self-contained snapshot to either the classic
- * pipeline or the persona mind. Pipeline/mind failures are logged here and
- * never propagate back into message persistence.
+ * Hand-off point between ingest and the persona mind. Ingest stores the
+ * message first, then hands a self-contained snapshot to the mind. Failures are
+ * logged here and never propagate back into message persistence.
  */
 @Injectable()
 export class ChatMessageProcessor {
   private readonly logger = new Logger(ChatMessageProcessor.name);
 
   constructor(
-    private readonly pipeline: ChatPipelineRunner,
     private readonly mind: MindRuntimeService,
     private readonly mindSettings: MindSettingsService,
     private readonly burst: PrivateBurstService,
   ) {}
 
-  async process(message: PersistedChatMessage): Promise<void> {
+  async process(message: ChatMessageSnapshot): Promise<void> {
     try {
       if (message.isSelf) {
-        await this.pipeline.run(message);
         return;
       }
 
       const settings = await this.mindSettings.get(message.channelId);
-      if (settings.mode === 'LIVE' || settings.mode === 'APPROVAL') {
-        if (message.conversationKind === 'PRIVATE' && settings.privateBurstSeconds > 0) {
-          this.burst.schedule(message, settings.privateBurstSeconds, (messages, quietSeconds) =>
-            this.handleBurst(messages, quietSeconds),
-          );
-          return;
-        }
-        const result = await this.mind.turn({ message, trigger: 'MESSAGE' });
-        if (result.skipped && !result.suppressed) {
-          await this.pipeline.run(message);
-        }
+      if (settings.mode === 'OFF') {
         return;
       }
-
-      await this.pipeline.run(message);
 
       if (settings.mode === 'SHADOW') {
         void this.mind
@@ -56,13 +38,22 @@ export class ChatMessageProcessor {
               `影子心智运行失败：${error instanceof Error ? error.message : String(error)}`,
             );
           });
+        return;
       }
+
+      if (message.conversationKind === 'PRIVATE' && settings.privateBurstSeconds > 0) {
+        this.burst.schedule(message, settings.privateBurstSeconds, (messages, quietSeconds) =>
+          this.handleBurst(messages, quietSeconds),
+        );
+        return;
+      }
+      await this.mind.turn({ message, trigger: 'MESSAGE' });
     } catch (error) {
       this.logger.warn(`消息处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private async handleBurst(messages: PersistedChatMessage[], quietSeconds: number): Promise<void> {
+  private async handleBurst(messages: ChatMessageSnapshot[], quietSeconds: number): Promise<void> {
     const last = messages[messages.length - 1];
     if (!last) {
       return;
@@ -76,9 +67,6 @@ export class ChatMessageProcessor {
           );
         });
     }
-    const result = await this.mind.turn({ message: last, trigger: 'MESSAGE' });
-    if (result.skipped && !result.suppressed) {
-      await this.pipeline.run(last);
-    }
+    await this.mind.turn({ message: last, trigger: 'MESSAGE' });
   }
 }

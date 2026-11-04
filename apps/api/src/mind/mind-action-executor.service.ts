@@ -83,7 +83,10 @@ export class MindActionExecutor {
         });
         continue;
       }
-      if (budgetUsed >= input.settings.dailyMessageBudget) {
+      if (
+        input.settings.dailyMessageBudget > 0 &&
+        budgetUsed >= input.settings.dailyMessageBudget
+      ) {
         await this.prisma.agentAction.update({
           where: { id: action.id },
           data: { status: 'SKIPPED', error: '今日消息额度已用完' },

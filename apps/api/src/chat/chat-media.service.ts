@@ -223,7 +223,7 @@ export class ChatMediaService implements OnModuleInit {
   /**
    * Turns a stored media reference (local `/api/v1/media/images/...` path, a
    * data URL, or a remote http(s) URL) into a data URL that the NapCat send
-   * path accepts. Pipeline image ports carry these references, never bytes.
+   * path accepts. Callers carry these references, never bytes.
    */
   async toDataUrl(reference: string): Promise<string> {
     const trimmed = reference.trim();

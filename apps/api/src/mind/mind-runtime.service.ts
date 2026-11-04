@@ -11,7 +11,7 @@ import type {
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AgentStep, PersonaState } from '../generated/prisma/client.js';
-import type { PipelineMessage } from '../chat/pipeline/pipeline-types.js';
+import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
@@ -70,7 +70,7 @@ export class MindRuntimeService implements OnModuleInit {
   }
 
   async turn(input: {
-    message: PipelineMessage;
+    message: ChatMessageSnapshot;
     mode?: PersonaMindMode;
     trigger?: Trigger;
   }): Promise<MindTurnResult> {
@@ -110,6 +110,9 @@ export class MindRuntimeService implements OnModuleInit {
       reason: string;
       keyword: string | null;
       mentions: number;
+      urgency: number | null;
+      judgeReason: string | null;
+      judgeSource: string;
       effects: unknown;
     } | null = null;
     if (boundPersona && activeEvent) {
@@ -121,11 +124,12 @@ export class MindRuntimeService implements OnModuleInit {
             new Date(now.getTime() - activeEvent.wakeWindowMinutes * 60_000),
           )
         : 0;
-      const evaluation = this.longEvents.evaluateWake(activeEvent, {
+      const evaluation = await this.longEvents.judgeWake(activeEvent, {
         now,
         directed,
         recentMentions,
         text: input.message.text,
+        senderName: input.message.senderName,
       });
       if (directed) {
         await this.longEvents.noteStimulus(activeEvent.id);
@@ -146,6 +150,9 @@ export class MindRuntimeService implements OnModuleInit {
           reason: evaluation.reason ?? 'MENTIONS',
           keyword: evaluation.keyword,
           mentions: recentMentions,
+          urgency: evaluation.urgency,
+          judgeReason: evaluation.judgeReason,
+          judgeSource: evaluation.source,
           effects: finished.effects,
         };
       } else {
@@ -172,6 +179,13 @@ export class MindRuntimeService implements OnModuleInit {
           stepOutput: {
             skipped: true,
             triggerCount: activeEvent.triggerCount + (directed ? 1 : 0),
+            decision: {
+              wake: evaluation.wake,
+              urgency: evaluation.urgency,
+              reason: evaluation.judgeReason,
+              source: evaluation.source,
+              error: evaluation.error ?? null,
+            },
           },
         });
         return skipped(reason, { runId, suppressed: true });
@@ -213,6 +227,11 @@ export class MindRuntimeService implements OnModuleInit {
 
     const startedAt = new Date();
     const state = await this.states.ensure(scene.persona.id);
+    const sleepBrief = await this.longEvents.sleepBrief(
+      scene.persona.id,
+      state,
+      scene.persona.values as Record<string, unknown> | null,
+    );
     const query = buildMemoryQuery(scene);
     const memories = await this.memories.searchForScene(scene, query, 10);
     const decision = this.social.buildDecision({ scene, state, memories });
@@ -245,6 +264,9 @@ export class MindRuntimeService implements OnModuleInit {
           wakeReason: eventWake.reason,
           keyword: eventWake.keyword,
           mentions: eventWake.mentions,
+          urgency: eventWake.urgency,
+          judgeReason: eventWake.judgeReason,
+          judgeSource: eventWake.judgeSource,
           effects: eventWake.effects,
         },
         0,
@@ -307,6 +329,7 @@ export class MindRuntimeService implements OnModuleInit {
         settings,
         mode,
         trigger: input.trigger ?? 'MESSAGE',
+        sleepBrief,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -454,7 +477,11 @@ export class MindRuntimeService implements OnModuleInit {
     if (!settings.heartbeatEnabled || settings.mode === 'OFF') {
       return null;
     }
-    const state = await this.states.ensure(personaId);
+    const proactiveUsed = await this.proactiveSendsToday(personaId);
+    const proactiveAllowed =
+      settings.proactiveEnabled &&
+      (settings.dailyProactiveBudget < 0 || proactiveUsed < settings.dailyProactiveBudget);
+    let state = await this.states.ensure(personaId);
     const now = new Date();
     const values = persona.values as Record<string, unknown> | null;
     const timeZone = readString(values?.['time_zone']) || null;
@@ -465,14 +492,17 @@ export class MindRuntimeService implements OnModuleInit {
     if (activeEvent) {
       if (activeEvent.plannedEndAt && now >= activeEvent.plannedEndAt) {
         await this.longEvents.finish(activeEvent.id, 'PLANNED');
+        state = await this.states.ensure(personaId);
       } else {
         const minutes = activeEvent.plannedEndAt
           ? Math.max(1, Math.ceil((activeEvent.plannedEndAt.getTime() - now.getTime()) / 60_000))
           : effectiveWakeMinutes(settings, quiet);
-        await this.reschedule(personaId, minutes, '长时事件进行中', { markWake: false });
+        await this.reschedule(personaId, minutes, '长时事件进行中', { heartbeat: false });
         return null;
       }
     }
+
+    const sleepBrief = await this.longEvents.sleepBrief(personaId, state, values);
 
     const dueTodos = await this.prisma.agentTodo.findMany({
       where: {
@@ -486,15 +516,16 @@ export class MindRuntimeService implements OnModuleInit {
       orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
       take: 5,
     });
-    const dueIntentions = await this.prisma.agentIntention.findMany({
-      where: { personaId, status: 'PENDING', earliestAt: { lte: now } },
-      orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }],
-      take: 5,
-    });
+    const dueIntentions = proactiveAllowed
+      ? await this.prisma.agentIntention.findMany({
+          where: { personaId, status: 'PENDING', earliestAt: { lte: now } },
+          orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }],
+          take: 5,
+        })
+      : [];
     const unconsolidated = await this.memories.countUnconsolidated(personaId);
 
     if (dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2) {
-      await this.states.markWake(personaId);
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '无到期事项');
       return null;
     }
@@ -517,7 +548,7 @@ export class MindRuntimeService implements OnModuleInit {
       (await this.replyLock.active(conversationId))
     ) {
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '回复回避窗口内', {
-        markWake: false,
+        heartbeat: false,
       });
       return null;
     }
@@ -572,9 +603,9 @@ export class MindRuntimeService implements OnModuleInit {
     };
 
     const mode: PersonaMindMode =
-      settings.mode === 'LIVE' && settings.proactiveEnabled
+      settings.mode === 'LIVE' && proactiveAllowed
         ? 'LIVE'
-        : settings.mode === 'APPROVAL'
+        : settings.mode === 'APPROVAL' && proactiveAllowed
           ? 'APPROVAL'
           : 'SHADOW';
     const query = [
@@ -608,6 +639,7 @@ export class MindRuntimeService implements OnModuleInit {
         mode,
         trigger: 'HEARTBEAT',
         wakeBrief,
+        sleepBrief,
       });
       await this.step(
         run.id,
@@ -692,7 +724,7 @@ export class MindRuntimeService implements OnModuleInit {
         dueTodos.map((todo) => todo.id),
         dueIntentions.map((intent) => intent.id),
         plan,
-        actions.length > 0,
+        actions.some((action) => action.status === 'SENT'),
       );
       if (!plan.nextWakeAt || !settings.selfScheduleEnabled) {
         await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), plan.reason);
@@ -892,11 +924,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
     if (plan.nextWakeAt && settings.selfScheduleEnabled) {
       const nextWakeAt = clampWakeAt(settings, new Date(plan.nextWakeAt));
-      await this.states.setNextWakeAt(scene.persona.id, nextWakeAt);
-      await this.prisma.personaSchedule.updateMany({
-        where: { personaId: scene.persona.id },
-        data: { nextWakeAt, reason: '人格自己安排的唤醒' },
-      });
+      await this.states.scheduleWake(scene.persona.id, nextWakeAt, '人格自己安排的唤醒');
     }
     if (scene.conversation.kind === 'GROUP' && social.attention >= 55) {
       await this.stances.markRead(scene.persona.id, scene.conversation.id);
@@ -917,7 +945,7 @@ export class MindRuntimeService implements OnModuleInit {
   /** Keeps an earlier private-chat fragment visible even though only the last
    * message of the burst runs a real turn. */
   async recordMergedMessage(
-    message: PipelineMessage,
+    message: ChatMessageSnapshot,
     meta: { batchSize: number; quietSeconds: number },
   ): Promise<void> {
     if (message.isSelf) {
@@ -953,7 +981,7 @@ export class MindRuntimeService implements OnModuleInit {
 
   private async recordSkippedRun(input: {
     personaId: string;
-    message: PipelineMessage;
+    message: ChatMessageSnapshot;
     mode: PersonaMindMode;
     trigger: Trigger;
     reason: string;
@@ -1059,20 +1087,30 @@ export class MindRuntimeService implements OnModuleInit {
     return row?.id ?? null;
   }
 
+  /** Counts unsolicited runs that actually sent, so the daily budget caps topics, not beats. */
+  private async proactiveSendsToday(personaId: string): Promise<number> {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return this.prisma.agentRun.count({
+      where: {
+        personaId,
+        trigger: { in: ['PROACTIVE', 'HEARTBEAT'] },
+        startedAt: { gte: start },
+        actions: { some: { status: 'SENT' } },
+      },
+    });
+  }
+
   private async reschedule(
     personaId: string,
     minutes: number,
     reason: string,
-    options?: { markWake?: boolean },
+    options?: { heartbeat?: boolean },
   ): Promise<void> {
     const nextWakeAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
-    await this.prisma.personaSchedule.updateMany({
-      where: { personaId },
-      data: { nextWakeAt, reason, leaseUntil: null, leaseOwner: null },
-    });
-    await this.states.setNextWakeAt(personaId, nextWakeAt);
-    if (options?.markWake !== false) {
-      await this.states.markWake(personaId);
+    await this.states.scheduleWake(personaId, nextWakeAt, reason);
+    if (options?.heartbeat !== false) {
+      await this.states.markHeartbeat(personaId);
     }
   }
 
@@ -1205,7 +1243,7 @@ function buildMemoryQuery(scene: MindScene): string {
     .slice(0, 2000);
 }
 
-function compactMessageScene(message: PipelineMessage) {
+function compactMessageScene(message: ChatMessageSnapshot) {
   return {
     conversationId: message.conversationId,
     conversationName: null,

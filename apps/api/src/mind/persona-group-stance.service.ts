@@ -1,12 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  ConversationPersonaValues,
-  PersonaGroupStanceRecord,
-  PersonaGroupStanceUpdateInput,
-} from '@inkseek/shared';
-import { stanceToPersonaValues } from '@inkseek/shared';
+import type { PersonaGroupStanceRecord, PersonaGroupStanceUpdateInput } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatConversation, PersonaGroupStance, Prisma } from '../generated/prisma/client.js';
+import { jsonOrNull, jsonValue } from './mind-json.js';
 import { clamp, type MindPersona } from './mind.types.js';
 
 @Injectable()
@@ -37,16 +33,8 @@ export class PersonaGroupStanceService {
     });
   }
 
+  /** Existing rows only: opening a group creates its row on demand. */
   async list(personaId: string): Promise<PersonaGroupStanceRecord[]> {
-    const persona = await this.persona(personaId);
-    const groups = await this.prisma.chatConversation.findMany({
-      where: { channelId: persona.channelId, kind: 'GROUP' },
-      orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-      take: 200,
-    });
-    for (const group of groups) {
-      await this.ensure(personaId, group.id);
-    }
     const rows = await this.prisma.personaGroupStance.findMany({
       where: { personaId },
       include: { conversation: true },
@@ -54,22 +42,6 @@ export class PersonaGroupStanceService {
       take: 200,
     });
     return rows.map(toRecord);
-  }
-
-  /** Read-only projection for pipeline persona cards; no row is created. */
-  async valuesForExternalId(
-    personaId: string,
-    externalId: string,
-  ): Promise<ConversationPersonaValues | null> {
-    const persona = await this.persona(personaId);
-    const row = await this.prisma.personaGroupStance.findFirst({
-      where: {
-        personaId,
-        conversation: { channelId: persona.channelId, kind: 'GROUP', externalId },
-      },
-      include: { conversation: true },
-    });
-    return row ? stanceToPersonaValues(toRecord(row)) : null;
   }
 
   async get(personaId: string, conversationId: string): Promise<PersonaGroupStanceRecord> {
@@ -84,25 +56,70 @@ export class PersonaGroupStanceService {
   async update(
     personaId: string,
     input: PersonaGroupStanceUpdateInput,
+    meta?: { source?: string; reason?: string },
   ): Promise<PersonaGroupStanceRecord> {
     const stance = await this.ensure(personaId, input.conversationId);
     const data: Prisma.PersonaGroupStanceUpdateInput = {};
-    if (input.comfort !== undefined) data.comfort = clamp(input.comfort, 0, 100);
-    if (input.belonging !== undefined) data.belonging = clamp(input.belonging, 0, 100);
-    if (input.attention !== undefined) data.attention = clamp(input.attention, 0, 100);
-    if (input.formality !== undefined) data.formality = clamp(input.formality, 0, 100);
-    if (input.speakRate !== undefined) data.speakRate = clamp(input.speakRate, 0, 100);
-    if (input.audienceRisk !== undefined) data.audienceRisk = clamp(input.audienceRisk, 0, 100);
-    if (input.role !== undefined) data.role = input.role;
-    if (input.narrative !== undefined) data.narrative = input.narrative;
-    if (input.boundaries !== undefined) data.boundaries = jsonOrNull(input.boundaries);
-    if (input.tabooTopics !== undefined) data.tabooTopics = jsonOrNull(input.tabooTopics);
-    if (input.sceneRules !== undefined) data.sceneRules = input.sceneRules;
-    if (input.mentionOnly !== undefined) data.mentionOnly = input.mentionOnly;
-    if (input.topic !== undefined) data.topic = input.topic;
-    if (input.phase !== undefined) data.phase = input.phase;
-    if (input.extras !== undefined) data.extras = jsonOrNull(input.extras);
+    const changes: Prisma.PersonaChangeLogCreateManyInput[] = [];
+    const source = meta?.source ?? 'ADMIN_EDIT';
+    const reason = meta?.reason ?? '操作员手动调整群态度';
+    const logField = (field: string, before: unknown, after: unknown, delta?: number) => {
+      if (before === after) {
+        return;
+      }
+      changes.push({
+        personaId,
+        scope: 'GROUP',
+        targetId: input.conversationId,
+        field,
+        beforeValue: jsonValue(before),
+        afterValue: jsonValue(after),
+        delta: delta ?? null,
+        reason,
+        source,
+      });
+    };
+    const numeric = [
+      'comfort',
+      'belonging',
+      'attention',
+      'formality',
+      'speakRate',
+      'audienceRisk',
+    ] as const;
+    for (const field of numeric) {
+      const next = input[field];
+      if (next === undefined) {
+        continue;
+      }
+      const clamped = clamp(next, 0, 100);
+      data[field] = clamped;
+      logField(field, stance[field], clamped, clamped - stance[field]);
+    }
+    const text = ['role', 'narrative', 'sceneRules', 'topic', 'phase'] as const;
+    for (const field of text) {
+      const next = input[field];
+      if (next === undefined) {
+        continue;
+      }
+      data[field] = next;
+      logField(field, stance[field], next);
+    }
+    const json = ['boundaries', 'tabooTopics', 'extras'] as const;
+    for (const field of json) {
+      if (input[field] !== undefined) {
+        data[field] = jsonOrNull(input[field]);
+        logField(field, stance[field], input[field]);
+      }
+    }
+    if (input.mentionOnly !== undefined) {
+      data.mentionOnly = input.mentionOnly;
+      logField('mentionOnly', stance.mentionOnly, input.mentionOnly);
+    }
     await this.prisma.personaGroupStance.update({ where: { id: stance.id }, data });
+    if (changes.length > 0) {
+      await this.prisma.personaChangeLog.createMany({ data: changes });
+    }
     return this.get(personaId, input.conversationId);
   }
 
@@ -123,13 +140,6 @@ export class PersonaGroupStanceService {
     }
     return persona;
   }
-}
-
-function jsonOrNull(value: unknown): Prisma.InputJsonValue {
-  if (value === null || value === undefined) {
-    return {};
-  }
-  return value as Prisma.InputJsonValue;
 }
 
 function toRecord(

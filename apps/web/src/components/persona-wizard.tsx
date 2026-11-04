@@ -1122,7 +1122,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
               options={LEVEL_OPTIONS.sleepDepth}
               onChange={(value) => update('sleep_depth', value)}
               required
-              hint="决定 TA 被消息吵醒的概率与反应。"
+              hint="数值越高睡得越沉。被点名时由 TA 结合睡眠深度和事情轻重，自己判断醒不醒。"
             />
           </div>
         );

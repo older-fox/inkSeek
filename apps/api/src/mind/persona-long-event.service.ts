@@ -5,11 +5,17 @@ import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaLongEvent, PersonaState } from '../generated/prisma/client.js';
 import { selfTraitLines } from './mind-behavior.js';
 import { MindSettingsService } from './mind-settings.service.js';
-import { parseJsonObject, readString } from './mind.types.js';
+import {
+  localHour,
+  parseJsonObject,
+  readNumber,
+  readString,
+  type MindSleepBrief,
+} from './mind.types.js';
 import { PersonaStateService } from './persona-state.service.js';
 
 export type LongEventWakeReason =
-  'PLANNED' | 'MENTIONS' | 'KEYWORD' | 'MANUAL' | 'AGENT_END' | 'REPLACED';
+  'PLANNED' | 'MENTIONS' | 'KEYWORD' | 'JUDGMENT' | 'MANUAL' | 'AGENT_END' | 'REPLACED';
 
 export const LONG_EVENT_METRICS = [
   'moodValence',
@@ -54,20 +60,11 @@ export interface LongEventWakeEvaluation {
   reason: LongEventWakeReason | null;
   keyword: string | null;
   mentions: number;
+  urgency: number | null;
+  judgeReason: string | null;
+  source: 'RULE' | 'MODEL' | 'FALLBACK';
+  error?: string;
 }
-
-const DEFAULT_WAKE_KEYWORDS = [
-  '醒醒',
-  '起床',
-  '快醒',
-  '别睡了',
-  '紧急',
-  '急事',
-  '救命',
-  '出事',
-  '马上回',
-  '快回我',
-];
 
 const KIND_ACTIVITY: Record<string, string> = {
   SLEEP: '睡觉',
@@ -79,9 +76,11 @@ const KIND_ACTIVITY: Record<string, string> = {
 
 const MIN_EVENT_MS = 10 * 60 * 1000;
 const MAX_EVENT_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_SLEEP_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_EVENT_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_EVENT_MS = 60 * 60 * 1000;
+const MIN_SLEEP_FALLBACK_MS = 5 * 60 * 60 * 1000;
+const MAX_SLEEP_FALLBACK_MS = 10 * 60 * 60 * 1000;
 const SETTLEMENT_TIMEOUT_MS = 20_000;
+const WAKE_JUDGE_TIMEOUT_MS = 12_000;
 
 @Injectable()
 export class PersonaLongEventService {
@@ -122,7 +121,8 @@ export class PersonaLongEventService {
     }
 
     const kind = normalizeKind(draft.kind);
-    const plannedEndAt = resolvePlannedEnd(now, kind, draft.plannedEndAt);
+    const state = await this.states.ensure(personaId);
+    const plannedEndAt = resolvePlannedEnd(now, kind, draft.plannedEndAt, state.sleepDebt);
     const event = await this.prisma.personaLongEvent.create({
       data: {
         personaId,
@@ -166,7 +166,7 @@ export class PersonaLongEventService {
     const claimed = await this.prisma.personaLongEvent.updateMany({
       where: { id: eventId, status: 'ACTIVE' },
       data: {
-        status: wakeReason === 'PLANNED' ? 'COMPLETED' : 'CANCELLED',
+        status: wakeReason === 'PLANNED' || wakeReason === 'JUDGMENT' ? 'COMPLETED' : 'CANCELLED',
         endedAt: now,
         wakeReason,
       },
@@ -201,11 +201,7 @@ export class PersonaLongEventService {
       },
     );
     const soon = new Date(now.getTime() + 60_000);
-    await this.prisma.personaSchedule.updateMany({
-      where: { personaId: event.personaId },
-      data: { nextWakeAt: soon, reason: '长时事件结束', leaseUntil: null, leaseOwner: null },
-    });
-    await this.states.setNextWakeAt(event.personaId, soon);
+    await this.states.scheduleWake(event.personaId, soon, '长时事件结束');
     return { event, effects };
   }
 
@@ -249,29 +245,212 @@ export class PersonaLongEventService {
     });
   }
 
-  evaluateWake(
+  /** Backend facts plus a non-binding duration suggestion for the planner prompt. */
+  async sleepBrief(
+    personaId: string,
+    state: PersonaState,
+    values: Record<string, unknown> | null,
+  ): Promise<MindSleepBrief> {
+    const now = new Date();
+    const zone = readString(values?.['time_zone']).trim() || null;
+    const sleepDepth = clampInt(readNumber(values?.['sleep_depth'], 2), 2, 0, 4);
+    const last = await this.prisma.personaLongEvent.findFirst({
+      where: {
+        personaId,
+        kind: { in: ['SLEEP', 'NAP'] },
+        status: { in: ['COMPLETED', 'CANCELLED'] },
+        endedAt: { not: null },
+      },
+      orderBy: { endedAt: 'desc' },
+    });
+    const lastEnd = last?.endedAt ?? state.lastWakeAt;
+    const awakeMinutes = lastEnd
+      ? Math.max(0, Math.round((now.getTime() - lastEnd.getTime()) / 60_000))
+      : null;
+    const endedAt = last?.endedAt ?? null;
+    return {
+      localTime: localClock(now, zone),
+      timeZone: zone ?? 'server-local',
+      sleepDepth,
+      lastSleep:
+        last && endedAt
+          ? {
+              kind: last.kind,
+              title: last.title || KIND_ACTIVITY[last.kind] || last.kind,
+              minutes: Math.max(
+                1,
+                Math.round((endedAt.getTime() - last.startedAt.getTime()) / 60_000),
+              ),
+              plannedMinutes: last.plannedEndAt
+                ? Math.max(
+                    1,
+                    Math.round((last.plannedEndAt.getTime() - last.startedAt.getTime()) / 60_000),
+                  )
+                : null,
+              endedAt: endedAt.toISOString(),
+            }
+          : null,
+      awakeMinutes,
+      sleepDebt: state.sleepDebt,
+      energy: state.energy,
+      health: state.health,
+      stress: state.stress,
+      suggestion: suggestRest({
+        hour: localHour(now, zone),
+        sleepDebt: state.sleepDebt,
+        energy: state.energy,
+        awakeMinutes,
+        sleepDepth,
+      }),
+    };
+  }
+
+  /**
+   * Planned end wakes without a model call. Being addressed wakes only if the
+   * persona decides it is worth it; a model failure falls back to the event's
+   * own reminder words and mention threshold.
+   */
+  async judgeWake(
     event: PersonaLongEvent,
     input: {
       now: Date;
       directed: boolean;
       recentMentions: number;
       text: string;
+      senderName?: string;
     },
-  ): LongEventWakeEvaluation {
+  ): Promise<LongEventWakeEvaluation> {
+    const base: LongEventWakeEvaluation = {
+      wake: false,
+      reason: null,
+      keyword: null,
+      mentions: input.recentMentions,
+      urgency: null,
+      judgeReason: null,
+      source: 'RULE',
+    };
     if (event.plannedEndAt && input.now >= event.plannedEndAt) {
-      return { wake: true, reason: 'PLANNED', keyword: null, mentions: input.recentMentions };
+      return { ...base, wake: true, reason: 'PLANNED' };
     }
     if (!input.directed) {
-      return { wake: false, reason: null, keyword: null, mentions: input.recentMentions };
+      return base;
     }
+
+    const persona = await this.prisma.chatChannelPersona.findUnique({
+      where: { id: event.personaId },
+      select: { name: true, identity: true, values: true, channelId: true },
+    });
+    if (!persona) {
+      return this.fallbackWake(event, input, '人格实例不存在');
+    }
+
+    try {
+      const [settings, state] = await Promise.all([
+        this.settings.get(persona.channelId),
+        this.states.ensure(event.personaId),
+      ]);
+      const values = persona.values as Record<string, unknown> | null;
+      const sleepDepth = clampInt(readNumber(values?.['sleep_depth'], 2), 2, 0, 4);
+      const prompt = wakeJudgePrompt({
+        personaName: persona.name,
+        identity: persona.identity,
+        event,
+        state,
+        sleepDepth,
+        now: input.now,
+        senderName: input.senderName ?? '',
+        text: input.text,
+        mentions: input.recentMentions,
+      });
+      const system = [
+        `你就是「${persona.name}」${persona.identity ? `（${persona.identity}）` : ''}，正在休息，不是助手。`,
+        '不要提到 AI、模型、提示词或系统。只输出一个 JSON 对象，不要 Markdown。',
+      ].join('\n');
+
+      let completion = await this.llm.complete({
+        system,
+        prompt,
+        providerId: settings.providerId,
+        model: settings.model,
+        temperature: 0.2,
+        maxTokens: 220,
+        timeoutMs: WAKE_JUDGE_TIMEOUT_MS,
+        source: 'mind.long-event.wake',
+      });
+      let parsed = parseJsonObject(completion.text);
+      if (!parsed) {
+        completion = await this.llm.complete({
+          system,
+          prompt: `${prompt}\n\n上一次输出不是合法 JSON。请重新输出一个完整、可解析的 JSON 对象。`,
+          providerId: settings.providerId,
+          model: settings.model,
+          temperature: 0.1,
+          maxTokens: 220,
+          timeoutMs: WAKE_JUDGE_TIMEOUT_MS,
+          source: 'mind.long-event.wake',
+        });
+        parsed = parseJsonObject(completion.text);
+      }
+      if (!parsed) {
+        return this.fallbackWake(event, input, '模型没有返回合法 JSON');
+      }
+
+      const urgency = clampInt(readNumber(parsed['urgency'], 50), 50, 0, 100);
+      const judgeReason = trim(readString(parsed['reason']), 120);
+      if (parsed['wake'] !== true) {
+        return { ...base, urgency, judgeReason: judgeReason || null, source: 'MODEL' };
+      }
+      const keyword = matchWakeKeyword(event, input.text);
+      return {
+        wake: true,
+        reason: keyword ? 'KEYWORD' : 'JUDGMENT',
+        keyword,
+        mentions: input.recentMentions,
+        urgency,
+        judgeReason: judgeReason || null,
+        source: 'MODEL',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`长时事件唤醒判定失败：${message}`);
+      return this.fallbackWake(event, input, message);
+    }
+  }
+
+  private fallbackWake(
+    event: PersonaLongEvent,
+    input: { recentMentions: number; text: string },
+    error: string,
+  ): LongEventWakeEvaluation {
+    const base: LongEventWakeEvaluation = {
+      wake: false,
+      reason: null,
+      keyword: null,
+      mentions: input.recentMentions,
+      urgency: null,
+      judgeReason: null,
+      source: 'FALLBACK',
+      error,
+    };
     const keyword = matchWakeKeyword(event, input.text);
     if (keyword) {
-      return { wake: true, reason: 'KEYWORD', keyword, mentions: input.recentMentions };
+      return {
+        ...base,
+        wake: true,
+        reason: 'KEYWORD',
+        keyword,
+        judgeReason: `判定失败，命中提醒词「${keyword}」`,
+      };
     }
     if (input.recentMentions >= event.wakeMentions) {
-      return { wake: true, reason: 'MENTIONS', keyword: null, mentions: input.recentMentions };
+      return {
+        ...base,
+        wake: true,
+        reason: 'MENTIONS',
+        judgeReason: `判定失败，点名达到 ${event.wakeMentions} 次`,
+      };
     }
-    return { wake: false, reason: null, keyword: null, mentions: input.recentMentions };
+    return { ...base, judgeReason: '判定失败，未达到提醒阈值，继续休息' };
   }
 
   private async settle(
@@ -322,6 +501,12 @@ export class PersonaLongEventService {
         plannedMinutes,
         endedAt,
         state,
+        sleepDepth: clampInt(
+          readNumber((persona.values as Record<string, unknown> | null)?.['sleep_depth'], 2),
+          2,
+          0,
+          4,
+        ),
         wakeText: opts?.wakeText ?? '',
       });
       const system = [
@@ -415,6 +600,7 @@ function settlementPrompt(input: {
   plannedMinutes: number | null;
   endedAt: Date;
   state: PersonaState;
+  sleepDepth: number;
   wakeText: string;
 }): string {
   const { event, state } = input;
@@ -442,6 +628,7 @@ function settlementPrompt(input: {
     `计划时长：${input.plannedMinutes ? `${input.plannedMinutes} 分钟` : '没有计划结束'}`,
     `实际时长：${input.actualMinutes} 分钟`,
     `事件期间被点名：${event.triggerCount} 次`,
+    `睡眠深度 ${input.sleepDepth}/4（越高越难被叫醒）`,
     input.wakeText ? `叫醒你的消息：「${input.wakeText.slice(0, 200)}」` : '',
     `结束时间：${input.endedAt.toISOString()}`,
     '',
@@ -461,6 +648,123 @@ function settlementPrompt(input: {
     .join('\n');
 }
 
+function wakeJudgePrompt(input: {
+  personaName: string;
+  identity: string;
+  event: PersonaLongEvent;
+  state: PersonaState;
+  sleepDepth: number;
+  now: Date;
+  senderName: string;
+  text: string;
+  mentions: number;
+}): string {
+  const elapsedMinutes = Math.max(
+    0,
+    Math.round((input.now.getTime() - input.event.startedAt.getTime()) / 60_000),
+  );
+  const plannedMinutes = input.event.plannedEndAt
+    ? Math.round((input.event.plannedEndAt.getTime() - input.event.startedAt.getTime()) / 60_000)
+    : null;
+  const depthLabel =
+    input.sleepDepth >= 4
+      ? '很深，很难被叫醒'
+      : input.sleepDepth === 3
+        ? '偏深，要费点劲'
+        : input.sleepDepth === 1
+          ? '偏浅，容易醒'
+          : input.sleepDepth === 0
+            ? '很浅，一有动静就会醒'
+            : '一般';
+  const keywords = input.event.wakeKeywords.filter(Boolean);
+  return [
+    `你正在「${input.event.title || input.event.kind}」中（${input.event.kind}），不是助手。`,
+    input.event.reason ? `开始原因：${input.event.reason}` : '',
+    `已经过去 ${elapsedMinutes} 分钟${plannedMinutes ? `，原计划 ${plannedMinutes} 分钟` : ''}。`,
+    `睡眠深度 ${input.sleepDepth}/4（${depthLabel}）。`,
+    `现在：精力 ${input.state.energy}、睡眠债 ${input.state.sleepDebt}、压力 ${input.state.stress}、心情好坏 ${input.state.moodValence}。`,
+    `最近 ${input.event.wakeWindowMinutes} 分钟内被点名 ${input.mentions} 次；平时大约 ${input.event.wakeMentions} 次才算一直被叫。`,
+    keywords.length > 0 ? `睡前你在意的词：${keywords.join('、')}（只是参考，不是硬规则）。` : '',
+    '',
+    `现在${input.senderName ? `「${input.senderName}」` : '有人'}对你说：「${input.text.slice(0, 300)}」`,
+    '',
+    '判断你要不要现在醒来：谁在叫你、语气急不急、事情是不是真的重要、你睡得多深、身体有多累。',
+    '普通闲聊、可以晚点回的消息，就继续休息；真正的急事、重要的人、反复叫你，可以考虑醒。',
+    '不要因为被叫了一次就机械醒来，也不要无视明显紧急的事。',
+    '只输出 JSON：{"wake":true|false,"urgency":0-100,"reason":"不超过40字的内心理由"}',
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
+function suggestRest(input: {
+  hour: number;
+  sleepDebt: number;
+  energy: number;
+  awakeMinutes: number | null;
+  sleepDepth: number;
+}): MindSleepBrief['suggestion'] {
+  const awakeHours = input.awakeMinutes === null ? null : input.awakeMinutes / 60;
+  const night = input.hour >= 21 || input.hour < 6;
+  const afternoon = input.hour >= 12 && input.hour < 17;
+  const sleepDepthExtra = (input.sleepDepth - 2) * 15;
+
+  if (
+    night ||
+    input.sleepDebt >= 55 ||
+    input.energy <= 25 ||
+    (awakeHours !== null && awakeHours >= 17)
+  ) {
+    const base = 420 + (input.sleepDebt - 35) * 2.5 + sleepDepthExtra;
+    const minutes = Math.min(600, Math.max(300, Math.round(base / 15) * 15));
+    const facts = [
+      night ? '现在是夜里' : '',
+      input.sleepDebt >= 35 ? `睡眠债 ${input.sleepDebt}` : '',
+      awakeHours !== null ? `已经清醒约 ${Math.round(awakeHours)} 小时` : '',
+      input.energy <= 25 ? '精力很低' : '',
+    ].filter(Boolean);
+    return {
+      action: 'SLEEP',
+      minutes,
+      reason: `${facts.join('，')}；按恢复需要大约 ${minutes} 分钟，但你可以自己决定`,
+    };
+  }
+
+  if (afternoon && input.sleepDebt >= 35 && input.energy <= 50) {
+    const minutes = Math.min(60, Math.max(20, Math.round((30 + sleepDepthExtra) / 5) * 5));
+    return {
+      action: 'NAP',
+      minutes,
+      reason: `下午有点累（睡眠债 ${input.sleepDebt}），可以小睡 ${minutes} 分钟，也可以不睡`,
+    };
+  }
+
+  return {
+    action: 'NONE',
+    minutes: null,
+    reason:
+      awakeHours === null
+        ? '没有可靠的睡眠记录，按你现在的感觉决定'
+        : `已经清醒约 ${Math.round(awakeHours)} 小时、睡眠债 ${input.sleepDebt}，现在不一定要睡`,
+  };
+}
+
+function localClock(date: Date, timeZone?: string | null): string {
+  try {
+    if (timeZone) {
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(date);
+    }
+  } catch {
+    // Fall back to server local time.
+  }
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 function readSettlement(value: unknown): LongEventSettlement | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as LongEventSettlement)
@@ -473,12 +777,13 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Only the words the persona left for itself; there is no global wake list. */
 export function matchWakeKeyword(
   event: Pick<PersonaLongEvent, 'wakeKeywords'>,
   text: string,
 ): string | null {
   const normalized = text.replace(/\s+/gu, '');
-  const keywords = [...DEFAULT_WAKE_KEYWORDS, ...event.wakeKeywords]
+  const keywords = event.wakeKeywords
     .map((keyword) => keyword.replace(/\s+/gu, ''))
     .filter(Boolean);
   return keywords.find((keyword) => normalized.includes(keyword)) ?? null;
@@ -491,7 +796,9 @@ function wakeReasonLabel(reason: LongEventWakeReason): string {
     case 'MENTIONS':
       return '重复点名';
     case 'KEYWORD':
-      return '强制叫醒';
+      return '被在意的话叫醒';
+    case 'JUDGMENT':
+      return '自己判断醒来';
     case 'MANUAL':
       return '手动结束';
     case 'AGENT_END':
@@ -503,11 +810,20 @@ function wakeReasonLabel(reason: LongEventWakeReason): string {
   }
 }
 
-function resolvePlannedEnd(now: Date, kind: string, plannedEndAt?: string): Date {
-  const fallback = kind === 'SLEEP' ? DEFAULT_SLEEP_MS : DEFAULT_EVENT_MS;
+function resolvePlannedEnd(now: Date, kind: string, plannedEndAt?: string, sleepDebt = 40): Date {
   const parsed = plannedEndAt ? new Date(plannedEndAt) : null;
   if (!parsed || Number.isNaN(parsed.getTime())) {
-    return new Date(now.getTime() + fallback);
+    const fallbackMs =
+      kind === 'SLEEP' || kind === 'NAP'
+        ? Math.min(
+            MAX_SLEEP_FALLBACK_MS,
+            Math.max(
+              MIN_SLEEP_FALLBACK_MS,
+              (300 + Math.max(0, Math.min(100, sleepDebt)) * 3) * 60_000,
+            ),
+          )
+        : DEFAULT_EVENT_MS;
+    return new Date(now.getTime() + fallbackMs);
   }
   return new Date(
     Math.min(

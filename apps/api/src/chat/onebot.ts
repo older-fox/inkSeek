@@ -124,7 +124,7 @@ export function isOneBotPokeEvent(event: OneBotEvent): event is OneBotPokeEvent 
 /**
  * NapCat normally pushes an array of message segments. When the account is
  * configured with string post format we keep the raw text as-is; CQ code
- * parsing is intentionally left to the future message pipeline.
+ * parsing is not supported.
  */
 export function normalizeSegments(message: OneBotSegment[] | string): OneBotSegment[] {
   if (Array.isArray(message)) {

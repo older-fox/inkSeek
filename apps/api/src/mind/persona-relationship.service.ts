@@ -1,13 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
-  ConversationPersonaValues,
   PersonaRelationshipRecord,
   PersonaRelationshipUpdateInput,
   RelationshipSignal,
 } from '@inkseek/shared';
-import { relationshipToPersonaValues } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatContact, PersonaRelationship, Prisma } from '../generated/prisma/client.js';
+import { jsonOrNull, jsonValue } from './mind-json.js';
 import { clamp, MIND_MAX_RELATIONSHIP_DELTA, type MindPersona } from './mind.types.js';
 
 const DIMENSIONS = [
@@ -50,18 +49,8 @@ export class PersonaRelationshipService {
     });
   }
 
+  /** Existing rows only: opening a contact creates its row on demand. */
   async list(personaId: string): Promise<PersonaRelationshipRecord[]> {
-    const persona = await this.persona(personaId);
-    const contacts = await this.prisma.chatContact.findMany({
-      where: { channelId: persona.channelId },
-      orderBy: [{ lastSeenAt: 'desc' }],
-      take: 300,
-    });
-    for (const contact of contacts) {
-      await this.ensureForContact(personaId, contact.id);
-    }
-    // No cap: a low-affinity contact with memories must still be findable.
-    // Recent interactions sort first so the list is usable at a glance.
     const rows = await this.prisma.personaRelationship.findMany({
       where: { personaId },
       include: { contact: true },
@@ -70,20 +59,16 @@ export class PersonaRelationshipService {
     return rows.map(toRecord);
   }
 
-  /** Read-only projection for pipeline persona cards; no row is created. */
-  async valuesForExternalId(
-    personaId: string,
-    externalId: string,
-  ): Promise<ConversationPersonaValues | null> {
+  async getByExternalId(personaId: string, externalId: string): Promise<PersonaRelationshipRecord> {
     const persona = await this.persona(personaId);
-    const row = await this.prisma.personaRelationship.findFirst({
-      where: {
-        personaId,
-        contact: { channelId: persona.channelId, externalId },
-      },
-      include: { contact: true },
+    const contact = await this.prisma.chatContact.findFirst({
+      where: { channelId: persona.channelId, externalId },
+      select: { id: true },
     });
-    return row ? relationshipToPersonaValues(toRecord(row)) : null;
+    if (!contact) {
+      throw new NotFoundException({ code: 'CONTACT_NOT_FOUND', message: '联系人不存在' });
+    }
+    return this.get(personaId, contact.id);
   }
 
   async get(personaId: string, contactId: string): Promise<PersonaRelationshipRecord> {
@@ -102,57 +87,67 @@ export class PersonaRelationshipService {
   ): Promise<PersonaRelationshipRecord> {
     const relationship = await this.ensureForContact(personaId, input.contactId);
     const data: Prisma.PersonaRelationshipUpdateInput = {};
-    const deltas: Record<string, number> = {};
+    const changes: Prisma.PersonaChangeLogCreateManyInput[] = [];
+    const source = audit?.kind ?? 'ADMIN_EDIT';
+    const reason = audit?.reason ?? '操作员手动调整关系';
+
+    const logField = (field: string, before: unknown, after: unknown, delta?: number) => {
+      if (before === after) {
+        return;
+      }
+      changes.push({
+        personaId,
+        scope: 'RELATION',
+        targetId: input.contactId,
+        field,
+        beforeValue: jsonValue(before),
+        afterValue: jsonValue(after),
+        delta: delta ?? null,
+        reason,
+        source,
+      });
+    };
 
     for (const dimension of DIMENSIONS) {
       const next = input[dimension];
       if (next !== undefined && next !== relationship[dimension]) {
-        data[dimension] = clamp(next, -100, 100);
-        deltas[dimension] = (data[dimension] as number) - relationship[dimension];
+        const clamped = clamp(next, -100, 100);
+        data[dimension] = clamped;
+        logField(dimension, relationship[dimension], clamped, clamped - relationship[dimension]);
       }
     }
 
-    if (input.relationTags !== undefined) {
-      data.relationTags = jsonOrNull(input.relationTags);
-    }
-    if (input.addressHere !== undefined) {
-      data.addressHere = jsonOrNull(input.addressHere);
-    }
-    if (input.publicMask !== undefined) {
-      data.publicMask = jsonOrNull(input.publicMask);
-    }
-    if (input.boundaries !== undefined) {
-      data.boundaries = jsonOrNull(input.boundaries);
-    }
-    if (input.openPromises !== undefined) {
-      data.openPromises = jsonOrNull(input.openPromises);
-    }
-    if (input.sharedEvents !== undefined) {
-      data.sharedEvents = jsonOrNull(input.sharedEvents);
-    }
-    if (input.extras !== undefined) {
-      data.extras = jsonOrNull(input.extras);
+    const jsonFields = [
+      'relationTags',
+      'addressHere',
+      'publicMask',
+      'boundaries',
+      'openPromises',
+      'sharedEvents',
+      'extras',
+    ] as const;
+    for (const field of jsonFields) {
+      if (input[field] !== undefined) {
+        data[field] = jsonOrNull(input[field]);
+        logField(field, relationship[field], input[field]);
+      }
     }
     if (input.disclosureScope !== undefined) {
       data.disclosureScope = input.disclosureScope;
+      logField('disclosureScope', relationship.disclosureScope, input.disclosureScope);
     }
     if (input.blocked !== undefined) {
       data.blocked = input.blocked;
+      logField('blocked', relationship.blocked, input.blocked);
     }
     if (input.mutedUntil !== undefined) {
       data.mutedUntil = input.mutedUntil ? new Date(input.mutedUntil) : null;
+      logField('mutedUntil', relationship.mutedUntil, data.mutedUntil);
     }
 
     await this.prisma.personaRelationship.update({ where: { id: relationship.id }, data });
-    if (Object.keys(deltas).length > 0) {
-      await this.prisma.personaRelationshipEvent.create({
-        data: {
-          relationshipId: relationship.id,
-          kind: audit?.kind ?? 'ADMIN_EDIT',
-          delta: deltas as Prisma.InputJsonValue,
-          reason: audit?.reason ?? '操作员手动调整关系',
-        },
-      });
+    if (changes.length > 0) {
+      await this.prisma.personaChangeLog.createMany({ data: changes });
     }
     return this.get(personaId, input.contactId);
   }
@@ -161,11 +156,12 @@ export class PersonaRelationshipService {
     personaId: string,
     signals: readonly RelationshipSignal[],
     reason = '',
+    source = 'DRIFT',
   ): Promise<void> {
     for (const signal of signals.slice(0, 8)) {
       const relationship = await this.ensureForContact(personaId, signal.contactId);
       const data: Prisma.PersonaRelationshipUpdateInput = {};
-      const deltas: Record<string, number> = {};
+      const changes: Prisma.PersonaChangeLogCreateManyInput[] = [];
       for (const dimension of DIMENSIONS) {
         const raw = signal[dimension];
         if (raw === undefined) {
@@ -176,22 +172,28 @@ export class PersonaRelationshipService {
           continue;
         }
         const next = clamp(relationship[dimension] + delta, -100, 100);
+        if (next === relationship[dimension]) {
+          continue;
+        }
         data[dimension] = next;
-        deltas[dimension] = next - relationship[dimension];
+        changes.push({
+          personaId,
+          scope: 'RELATION',
+          targetId: signal.contactId,
+          field: dimension,
+          beforeValue: relationship[dimension],
+          afterValue: next,
+          delta: next - relationship[dimension],
+          reason: signal.reason || reason,
+          source,
+        });
       }
-      if (Object.keys(deltas).length === 0) {
+      if (changes.length === 0) {
         continue;
       }
       data.lastInteractionAt = new Date();
       await this.prisma.personaRelationship.update({ where: { id: relationship.id }, data });
-      await this.prisma.personaRelationshipEvent.create({
-        data: {
-          relationshipId: relationship.id,
-          kind: signal.kind || 'EVENT',
-          delta: deltas as Prisma.InputJsonValue,
-          reason: signal.reason || reason,
-        },
-      });
+      await this.prisma.personaChangeLog.createMany({ data: changes });
     }
   }
 
@@ -222,13 +224,6 @@ export class PersonaRelationshipService {
     }
     return contact;
   }
-}
-
-function jsonOrNull(value: unknown): Prisma.InputJsonValue {
-  if (value === null || value === undefined) {
-    return {};
-  }
-  return value as Prisma.InputJsonValue;
 }
 
 function toRecord(row: PersonaRelationship & { contact: ChatContact }): PersonaRelationshipRecord {

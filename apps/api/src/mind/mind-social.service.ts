@@ -5,8 +5,6 @@ import {
   clamp,
   isQuietHour,
   localHour,
-  personaValueText,
-  readNumber,
   readString,
   readStringArray,
   type MindScene,
@@ -310,22 +308,4 @@ function explainSilence(read: SocialRead, mentioned: boolean, sleeping: boolean)
   if (read.risk > 60) return '场合风险太高，选择不说';
   if (read.desire < 10) return '没有想介入的冲动';
   return '让话题自然过去';
-}
-
-export function readPersonaNumber(
-  values: Record<string, unknown> | null | undefined,
-  key: string,
-  fallback: number,
-): number {
-  return readNumber(values?.[key], fallback);
-}
-
-export function personaAddress(
-  values: Record<string, unknown> | null | undefined,
-  closeness: number,
-): string {
-  if (closeness > 55) {
-    return personaValueText(values, 'address_for_close') || '你';
-  }
-  return personaValueText(values, 'address_for_stranger') || '您';
 }

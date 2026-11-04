@@ -11,7 +11,6 @@ import {
   Settings2,
   UsersRound,
   Waypoints,
-  Workflow,
 } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { BrandMark } from '@/components/brand-mark';
@@ -29,7 +28,7 @@ interface AppShellProps {
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  to?: '/' | '/personas' | '/connections' | '/pipeline' | '/mind';
+  to?: '/' | '/personas' | '/connections' | '/mind';
   soon?: boolean;
 }
 
@@ -37,7 +36,6 @@ const navItems: NavItem[] = [
   { label: '概览', icon: Compass, to: '/' },
   { label: '人格中心', icon: UsersRound, to: '/personas' },
   { label: '互联中心', icon: Waypoints, to: '/connections' },
-  { label: '消息管线', icon: Workflow, to: '/pipeline' },
   { label: '人格心智', icon: Brain, to: '/mind' },
   { label: '数据洞察', icon: BarChart3, soon: true },
 ];
@@ -47,21 +45,20 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const section = routeSection(pathname);
   const mainRef = useRef<HTMLElement>(null);
-  const sectionLabel = pathname === '/pipeline'
-    ? '消息管线'
-    : pathname === '/mind'
+  const sectionLabel =
+    pathname === '/mind'
       ? '人格心智'
       : pathname.startsWith('/connections')
-      ? pathname === '/connections/private'
-        ? '互联中心 · 私聊'
-        : pathname === '/connections/groups'
-          ? '互联中心 · 群聊'
-          : '互联中心'
-      : pathname === '/personas'
-        ? '人格中心'
-        : pathname === '/settings'
-          ? '系统设置'
-          : '概览';
+        ? pathname === '/connections/private'
+          ? '互联中心 · 私聊'
+          : pathname === '/connections/groups'
+            ? '互联中心 · 群聊'
+            : '互联中心'
+        : pathname === '/personas'
+          ? '人格中心'
+          : pathname === '/settings'
+            ? '系统设置'
+            : '概览';
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });

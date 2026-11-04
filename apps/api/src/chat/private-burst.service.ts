@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { PipelineMessage } from './pipeline/pipeline-types.js';
+import type { ChatMessageSnapshot } from './chat-message.types.js';
 
 /** Hard ceiling so a person who keeps typing without pause still gets a reply. */
 const MAX_BURST_MS = 12_000;
 
-type BurstRunner = (messages: PipelineMessage[], quietSeconds: number) => Promise<void>;
+type BurstRunner = (messages: ChatMessageSnapshot[], quietSeconds: number) => Promise<void>;
 
 interface BurstState {
-  messages: PipelineMessage[];
+  messages: ChatMessageSnapshot[];
   firstAt: number;
   timer: NodeJS.Timeout;
   quietSeconds: number;
@@ -25,7 +25,7 @@ export class PrivateBurstService {
   private readonly bursts = new Map<string, BurstState>();
   private readonly queues = new Map<string, Promise<void>>();
 
-  schedule(message: PipelineMessage, quietSeconds: number, runner: BurstRunner): void {
+  schedule(message: ChatMessageSnapshot, quietSeconds: number, runner: BurstRunner): void {
     const quietMs = Math.max(0, Math.round(quietSeconds * 1000));
     if (quietMs === 0) {
       void this.enqueue(message.conversationId, () => this.runBurst([message], 0, runner));
@@ -67,7 +67,7 @@ export class PrivateBurstService {
   }
 
   private async runBurst(
-    messages: PipelineMessage[],
+    messages: ChatMessageSnapshot[],
     quietSeconds: number,
     runner: BurstRunner,
   ): Promise<void> {

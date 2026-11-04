@@ -1,4 +1,5 @@
 import {
+  Brain,
   ChevronRight,
   Compass,
   FileCode2,
@@ -26,6 +27,8 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import type { ChatChannelPersonaStateSnapshot, ChatPersonaValue } from '@inkseek/shared';
 import { ChannelAvatar, PlatformChip } from '@/components/connection-bits';
+import { MindChangesTab } from '@/components/mind/mind-changes';
+import { MindSettingsPanel } from '@/components/mind/mind-settings-panel';
 import { TimeZonePicker } from '@/components/persona-form-controls';
 import { PersonaRevisionList } from '@/components/persona-revision-list';
 import { ApiError, api } from '@/lib/api';
@@ -55,6 +58,7 @@ import {
 } from '@/lib/persona-metadata';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+const MIND_TAB_ID = 'mind';
 
 const EDITOR_INPUT =
   'w-full rounded-lg border border-brass-400/25 bg-ink-950/40 px-2.5 py-1.5 text-[0.8rem] leading-6 text-mist-100 outline-none transition placeholder:text-mist-600 focus:border-brass-400/50';
@@ -703,6 +707,7 @@ export function ChannelPersonaPanel({
   } | null>(null);
   const queryClient = useQueryClient();
   const persona = channel ? personaForChannel(channel) : null;
+  const mindActive = activeGroupId === MIND_TAB_ID;
   const activeGroup =
     PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PERSONA_GROUPS[0];
   const activeCount = activeGroup ? (GROUP_FIELD_COUNTS[activeGroup.id] ?? 0) : 0;
@@ -801,7 +806,7 @@ export function ChannelPersonaPanel({
               : item,
           ),
         );
-        void queryClient.invalidateQueries({ queryKey: ['mind', 'overview', channelId] });
+        void queryClient.invalidateQueries({ queryKey: ['mind'] });
         setSyncState('saved');
       } catch (error) {
         setSyncState('error');
@@ -1038,7 +1043,7 @@ export function ChannelPersonaPanel({
               >
                 {PERSONA_GROUPS.map((group) => {
                   const Icon = GROUP_ICONS[group.id] ?? Layers;
-                  const active = group.id === activeGroup.id;
+                  const active = !mindActive && group.id === activeGroup.id;
 
                   return (
                     <button
@@ -1081,47 +1086,91 @@ export function ChannelPersonaPanel({
                     </button>
                   );
                 })}
+
+                <span aria-hidden="true" className="my-1 hidden h-px bg-mist-100/[0.06] md:block" />
+                <button
+                  type="button"
+                  data-active={mindActive ? 'true' : 'false'}
+                  onClick={() => setActiveGroupId(MIND_TAB_ID)}
+                  className={cn(
+                    'group flex shrink-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition md:w-full',
+                    mindActive
+                      ? 'bg-brass-400/[0.09] text-brass-200'
+                      : 'text-mist-500 hover:bg-mist-100/[0.04] hover:text-mist-300',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-lg border transition',
+                      mindActive
+                        ? 'border-brass-400/30 bg-brass-400/10 text-brass-300'
+                        : 'border-mist-100/[0.07] bg-ink-950/30 text-mist-600 group-hover:text-mist-400',
+                    )}
+                  >
+                    <Brain className="size-3.5" strokeWidth={1.7} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block whitespace-nowrap text-[0.78rem] md:truncate">心智</span>
+                    <span className="mt-0.5 hidden font-mono text-[0.54rem] tracking-[0.12em] text-mist-600 md:block">
+                      运行模式 · 变动历史
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className={cn(
+                      'hidden size-3 shrink-0 md:block',
+                      mindActive ? 'text-brass-300' : 'text-mist-600/60',
+                    )}
+                    strokeWidth={2}
+                  />
+                </button>
               </nav>
 
               <div
                 ref={contentRef}
                 className="min-h-0 flex-1 overflow-y-auto px-4 py-5 [scrollbar-width:thin] sm:px-7 sm:py-6"
               >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={activeGroup.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.2, ease: EASE }}
-                  >
-                    <div className="flex flex-wrap items-end justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
-                          {activeGroup.title}
-                        </h3>
-                        <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
-                          {activeGroup.description}
-                        </p>
+                {mindActive ? (
+                  <div className="space-y-4">
+                    <MindSettingsPanel channelId={channel.id} personaName={persona.name} />
+                    <MindChangesTab personaId={persona.id} />
+                  </div>
+                ) : (
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={activeGroup.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2, ease: EASE }}
+                    >
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="font-display text-[1.2rem] font-semibold tracking-tight text-mist-100">
+                            {activeGroup.title}
+                          </h3>
+                          <p className="mt-1 max-w-2xl text-[0.8rem] leading-7 text-mist-500">
+                            {activeGroup.description}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
+                          {activeCount} 项
+                        </span>
                       </div>
-                      <span className="shrink-0 rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-mist-500">
-                        {activeCount} 项
-                      </span>
-                    </div>
 
-                    <div className="mt-4">
-                      <GroupSection
-                        group={activeGroup}
-                        values={displayValues}
-                        onChange={handleChange}
-                      />
-                    </div>
+                      <div className="mt-4">
+                        <GroupSection
+                          group={activeGroup}
+                          values={displayValues}
+                          onChange={handleChange}
+                        />
+                      </div>
 
-                    {activeGroup.id === 'meta' ? (
-                      <PersonaRevisionList channel={channel} scrollRootRef={contentRef} />
-                    ) : null}
-                  </motion.div>
-                </AnimatePresence>
+                      {activeGroup.id === 'meta' ? (
+                        <PersonaRevisionList channel={channel} scrollRootRef={contentRef} />
+                      ) : null}
+                    </motion.div>
+                  </AnimatePresence>
+                )}
               </div>
             </div>
 

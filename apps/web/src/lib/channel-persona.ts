@@ -941,7 +941,7 @@ export function personaForChannel(channel: Channel): ChannelPersona {
 
   if (snapshot) {
     return {
-      id: snapshot.cardId,
+      id: snapshot.id,
       name: snapshot.name,
       identity: snapshot.identity || snapshot.name,
       quote: snapshot.quote,

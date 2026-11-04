@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
 
-export interface PipelineSelectOption {
+export interface DropdownOption {
   value: string;
   label: string;
 }
 
-export interface PipelineSelectCreate {
+export interface DropdownCreate {
   /** Section label above the input, e.g. 新建变量. */
   label?: string;
   placeholder?: string;
@@ -20,12 +20,12 @@ export interface PipelineSelectCreate {
   onCreate: (value: string) => void;
 }
 
-interface PipelineSelectProps {
+interface DropdownSelectProps {
   value: string;
-  options: readonly PipelineSelectOption[];
+  options: readonly DropdownOption[];
   onChange: (value: string) => void;
   ariaLabel: string;
-  /** `card` is the compact trigger living on a canvas card; `field` fills a form row. */
+  /** `card` is a compact trigger; `field` fills a form row. */
   variant?: 'card' | 'field';
   menuTitle?: string;
   menuWidth?: number;
@@ -35,7 +35,7 @@ interface PipelineSelectProps {
   /** Show the raw value under each label. Disable for id/value pairs. */
   showValue?: boolean;
   /** Renders an inline create row at the bottom of the menu. */
-  create?: PipelineSelectCreate;
+  create?: DropdownCreate;
 }
 
 interface MenuPlacement {
@@ -52,7 +52,7 @@ interface MenuPlacement {
  * portal with fixed positioning so the canvas zoom transform cannot scale or
  * clip it.
  */
-export function PipelineSelect({
+export function DropdownSelect({
   value,
   options,
   onChange,
@@ -64,7 +64,7 @@ export function PipelineSelect({
   placeholder = '未设置',
   showValue = true,
   create,
-}: PipelineSelectProps) {
+}: DropdownSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -101,10 +101,7 @@ export function PipelineSelect({
     if (!rect) {
       return;
     }
-    const width = Math.min(
-      Math.max(Math.round(rect.width), menuWidth),
-      window.innerWidth - 16,
-    );
+    const width = Math.min(Math.max(Math.round(rect.width), menuWidth), window.innerWidth - 16);
     const left = Math.min(
       Math.max(8, Math.round(rect.left)),
       Math.max(8, window.innerWidth - width - 8),
@@ -119,7 +116,12 @@ export function PipelineSelect({
         : { left, top: rect.bottom + 8, width, maxHeight, dropUp },
     );
     setQuery('');
-    setActive(Math.max(0, items.findIndex((option) => option.value === value)));
+    setActive(
+      Math.max(
+        0,
+        items.findIndex((option) => option.value === value),
+      ),
+    );
     setOpen(true);
   };
 
@@ -131,7 +133,7 @@ export function PipelineSelect({
     }
   };
 
-  const commit = (option: PipelineSelectOption | undefined) => {
+  const commit = (option: DropdownOption | undefined) => {
     if (!option) {
       return;
     }
@@ -293,12 +295,7 @@ export function PipelineSelect({
           className,
         )}
       >
-        <span
-          className={cn(
-            'min-w-0 flex-1 truncate',
-            current === null && 'text-mist-600',
-          )}
-        >
+        <span className={cn('min-w-0 flex-1 truncate', current === null && 'text-mist-600')}>
           {current?.label ?? (value === '' ? placeholder : value)}
         </span>
         <ChevronDown
@@ -364,9 +361,7 @@ export function PipelineSelect({
               </p>
             )}
             {searchable && filtered.length === 0 && (
-              <p className="px-2 py-3 text-center text-[0.66rem] text-mist-600">
-                没有匹配的选项
-              </p>
+              <p className="px-2 py-3 text-center text-[0.66rem] text-mist-600">没有匹配的选项</p>
             )}
             {filtered.map((option, index) => {
               const selected = option.value === value;
@@ -395,9 +390,7 @@ export function PipelineSelect({
                     )}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.84rem] leading-5">
-                      {option.label}
-                    </span>
+                    <span className="block truncate text-[0.84rem] leading-5">{option.label}</span>
                     {showValue && option.value !== '' && (
                       <span
                         className={cn(
@@ -439,7 +432,7 @@ function CreateRow({
   create,
   onCommit,
 }: {
-  create: PipelineSelectCreate;
+  create: DropdownCreate;
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState('');
@@ -492,9 +485,7 @@ function CreateRow({
           aria-label={create.label ?? '新建选项'}
           className={cn(
             'min-w-0 flex-1 rounded-md border bg-ink-950/70 px-2 py-1.5 font-mono text-[0.72rem] text-mist-200 outline-none transition placeholder:text-mist-600',
-            error
-              ? 'border-signal-400/50'
-              : 'border-mist-100/[0.12] focus:border-brass-400/45',
+            error ? 'border-signal-400/50' : 'border-mist-100/[0.12] focus:border-brass-400/45',
           )}
         />
         <button

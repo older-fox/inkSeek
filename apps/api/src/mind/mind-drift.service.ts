@@ -95,7 +95,6 @@ export class MindDriftService {
 
   async applyTurn(scene: MindScene, plan: ActionPlan): Promise<DriftSummary> {
     const ledger = await this.loadLedger(scene.persona.id);
-    const pending: Prisma.PersonaDriftEventCreateManyInput[] = [];
     const summary: DriftSummary = {
       activity: null,
       grooming: null,
@@ -104,24 +103,20 @@ export class MindDriftService {
       relations: [],
     };
 
-    const activity = await this.applyActivity(scene, plan, ledger, pending);
+    const activity = await this.applyActivity(scene, plan, ledger);
     if (activity.activity) {
       summary.activity = activity.activity;
     }
     summary.grooming = activity.grooming;
 
-    const selfTraits = await this.applySelfTraits(scene, plan, ledger, pending);
+    const selfTraits = await this.applySelfTraits(scene, plan, ledger);
     summary.selfTraits = selfTraits.values;
 
-    const group = await this.applyGroupStance(scene, plan, ledger, pending);
+    const group = await this.applyGroupStance(scene, plan, ledger);
     summary.group = group;
 
-    const relations = await this.applyRelationships(scene, plan, ledger, pending);
+    const relations = await this.applyRelationships(scene, plan, ledger);
     summary.relations = relations;
-
-    if (pending.length > 0) {
-      await this.prisma.personaDriftEvent.createMany({ data: pending });
-    }
     return summary;
   }
 
@@ -145,7 +140,6 @@ export class MindDriftService {
   }> {
     const current = await this.relationships.get(input.personaId, input.contactId);
     const ledger = await this.loadLedger(input.personaId);
-    const pending: Prisma.PersonaDriftEventCreateManyInput[] = [];
     const patch: PersonaRelationshipUpdateInput = {
       contactId: input.contactId,
       ...input.fields,
@@ -184,24 +178,13 @@ export class MindDriftService {
       }
       patch[field] = next;
       applied[field] = actual;
-      pending.push({
-        personaId: input.personaId,
-        scope: 'RELATION',
-        targetId: input.contactId,
-        key: field,
-        delta: actual,
-        reason: input.reason || '人格通过工具调整关系',
-      });
       this.remember(ledger, 'RELATION', input.contactId, field, actual);
     }
 
     const relationship = await this.relationships.update(input.personaId, patch, {
-      kind: 'MIND_TOOL',
+      kind: 'TOOL',
       reason: input.reason || '人格通过工具调整关系',
     });
-    if (pending.length > 0) {
-      await this.prisma.personaDriftEvent.createMany({ data: pending });
-    }
     return { contactId: input.contactId, applied, blocked, relationship };
   }
 
@@ -209,7 +192,6 @@ export class MindDriftService {
     scene: MindScene,
     plan: ActionPlan,
     ledger: Map<string, LedgerEntry>,
-    pending: Prisma.PersonaDriftEventCreateManyInput[],
   ): Promise<{ activity: string | null; grooming: number | null }> {
     const activity = readString(plan.self?.activity).trim().slice(0, 80);
     if (!activity) {
@@ -228,7 +210,7 @@ export class MindDriftService {
     if (proposed !== 0) {
       const delta = this.limitDelta({
         ledger,
-        scope: 'SELF',
+        scope: 'STATE',
         targetId: '',
         key: 'grooming',
         proposed,
@@ -241,15 +223,7 @@ export class MindDriftService {
         const actual = next - state.grooming;
         if (actual !== 0) {
           nextGrooming = next;
-          pending.push({
-            personaId: scene.persona.id,
-            scope: 'SELF',
-            targetId: '',
-            key: 'grooming',
-            delta: actual,
-            reason: `活动变化：${activity}`,
-          });
-          this.remember(ledger, 'SELF', '', 'grooming', actual);
+          this.remember(ledger, 'STATE', '', 'grooming', actual);
         }
       }
     }
@@ -269,7 +243,6 @@ export class MindDriftService {
     scene: MindScene,
     plan: ActionPlan,
     ledger: Map<string, LedgerEntry>,
-    pending: Prisma.PersonaDriftEventCreateManyInput[],
   ): Promise<{ values: Record<string, number> }> {
     const proposed = plan.self?.traits;
     if (!proposed) {
@@ -282,6 +255,7 @@ export class MindDriftService {
     const stored = persona?.values;
     const values = isObject(stored) ? { ...stored } : {};
     const changes: Record<string, number> = {};
+    const logRows: Prisma.PersonaChangeLogCreateManyInput[] = [];
     const reason = readString(plan.self?.reason) || plan.reason;
 
     const candidates = Object.entries(proposed)
@@ -317,13 +291,16 @@ export class MindDriftService {
       }
       values[key] = next;
       changes[key] = actual;
-      pending.push({
+      logRows.push({
         personaId: scene.persona.id,
         scope: 'SELF',
         targetId: '',
-        key,
+        field: key,
+        beforeValue: current,
+        afterValue: next,
         delta: actual,
         reason,
+        source: 'DRIFT',
       });
       this.remember(ledger, 'SELF', '', key, actual);
     }
@@ -333,6 +310,7 @@ export class MindDriftService {
         where: { id: scene.persona.id },
         data: { values: values as Prisma.InputJsonValue },
       });
+      await this.prisma.personaChangeLog.createMany({ data: logRows });
     }
     return { values: changes };
   }
@@ -341,7 +319,6 @@ export class MindDriftService {
     scene: MindScene,
     plan: ActionPlan,
     ledger: Map<string, LedgerEntry>,
-    pending: Prisma.PersonaDriftEventCreateManyInput[],
   ): Promise<Record<string, number>> {
     const signal = plan.groupStance;
     if (!signal || scene.conversation.kind !== 'GROUP') {
@@ -379,14 +356,6 @@ export class MindDriftService {
         continue;
       }
       changes[field] = actual;
-      pending.push({
-        personaId: scene.persona.id,
-        scope: 'GROUP',
-        targetId: scene.conversation.id,
-        key: field,
-        delta: actual,
-        reason,
-      });
       this.remember(ledger, 'GROUP', scene.conversation.id, field, actual);
     }
 
@@ -399,7 +368,7 @@ export class MindDriftService {
       patch.topic = topic;
     }
     if (Object.keys(patch).length > 1) {
-      await this.stances.update(scene.persona.id, patch);
+      await this.stances.update(scene.persona.id, patch, { source: 'DRIFT', reason });
     }
     return changes;
   }
@@ -408,7 +377,6 @@ export class MindDriftService {
     scene: MindScene,
     plan: ActionPlan,
     ledger: Map<string, LedgerEntry>,
-    pending: Prisma.PersonaDriftEventCreateManyInput[],
   ): Promise<{ contactId: string; deltas: Record<string, number> }[]> {
     if (plan.relationshipSignals.length === 0) {
       return [];
@@ -454,14 +422,6 @@ export class MindDriftService {
           continue;
         }
         deltas[field] = actual;
-        pending.push({
-          personaId: scene.persona.id,
-          scope: 'RELATION',
-          targetId: signal.contactId,
-          key: field,
-          delta: actual,
-          reason: signal.reason || plan.reason,
-        });
         this.remember(ledger, 'RELATION', signal.contactId, field, actual);
       }
 
@@ -477,28 +437,34 @@ export class MindDriftService {
     }
 
     if (accepted.length > 0) {
-      await this.relationships.applySignals(scene.persona.id, accepted, plan.reason);
+      await this.relationships.applySignals(scene.persona.id, accepted, plan.reason, 'DRIFT');
     }
     return summary;
   }
 
   private async loadLedger(personaId: string): Promise<Map<string, LedgerEntry>> {
-    const rows = await this.prisma.personaDriftEvent.findMany({
-      where: { personaId, createdAt: { gte: new Date(Date.now() - DAY_MS) } },
-      select: { scope: true, targetId: true, key: true, delta: true, createdAt: true },
+    const rows = await this.prisma.personaChangeLog.findMany({
+      where: {
+        personaId,
+        createdAt: { gte: new Date(Date.now() - DAY_MS) },
+        source: { in: ['DRIFT', 'TOOL'] },
+        delta: { not: null },
+      },
+      select: { scope: true, targetId: true, field: true, delta: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
     });
     const ledger = new Map<string, LedgerEntry>();
     for (const row of rows) {
-      const id = ledgerKey(row.scope, row.targetId, row.key);
+      const delta = row.delta ?? 0;
+      const id = ledgerKey(row.scope, row.targetId, row.field);
       const entry = ledger.get(id);
       if (entry) {
-        entry.sum += row.delta;
+        entry.sum += delta;
         if (row.createdAt > entry.lastAt) {
           entry.lastAt = row.createdAt;
         }
       } else {
-        ledger.set(id, { sum: row.delta, lastAt: row.createdAt });
+        ledger.set(id, { sum: delta, lastAt: row.createdAt });
       }
     }
     return ledger;

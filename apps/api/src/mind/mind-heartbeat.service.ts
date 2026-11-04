@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  type OnModuleDestroy,
-  type OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service.js';
 import { MindRuntimeService } from './mind-runtime.service.js';
@@ -38,20 +33,16 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
   }
 
   async trigger(personaId: string): Promise<boolean> {
-    const schedule = await this.prisma.personaSchedule.findUnique({ where: { personaId } });
-    if (!schedule) {
-      return false;
-    }
-    await this.prisma.personaSchedule.update({
+    const updated = await this.prisma.personaState.updateMany({
       where: { personaId },
       data: {
         nextWakeAt: new Date(),
-        reason: '手动唤醒',
+        wakeReason: '手动唤醒',
         leaseUntil: null,
         leaseOwner: null,
       },
     });
-    return true;
+    return updated.count > 0;
   }
 
   private async tick(): Promise<void> {
@@ -61,18 +52,23 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       const now = new Date();
-      const due = await this.prisma.personaSchedule.findMany({
+      const due = await this.prisma.personaState.findMany({
         where: {
           nextWakeAt: { lte: now },
           OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }],
+          persona: {
+            channel: {
+              mindSettings: { is: { heartbeatEnabled: true, mode: { not: 'OFF' } } },
+            },
+          },
         },
         orderBy: { nextWakeAt: 'asc' },
         take: 10,
       });
-      for (const schedule of due) {
-        const claimed = await this.prisma.personaSchedule.updateMany({
+      for (const state of due) {
+        const claimed = await this.prisma.personaState.updateMany({
           where: {
-            id: schedule.id,
+            personaId: state.personaId,
             OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }],
           },
           data: {
@@ -83,12 +79,10 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
         if (claimed.count === 0) {
           continue;
         }
-        await this.wake(schedule.personaId);
+        await this.wake(state.personaId);
       }
     } catch (error) {
-      this.logger.warn(
-        `心跳轮询失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+      this.logger.warn(`心跳轮询失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.running = false;
     }
@@ -99,14 +93,14 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
       const settings = await this.prisma.chatMindSettings.findFirst({
         where: { channel: { persona: { id: personaId } } },
       });
-      if (settings && !settings.heartbeatEnabled) {
-        await this.reschedule(personaId, settings.wakeIntervalMinutes);
+      if (!settings || settings.mode === 'OFF' || !settings.heartbeatEnabled) {
+        await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
         return;
       }
       const result = await this.runtime.heartbeat(personaId);
       if (!result) {
         // Runtime reschedules on its own paths; this is a safety net.
-        await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
+        await this.reschedule(personaId, settings.wakeIntervalMinutes);
       }
     } catch (error) {
       this.logger.warn(
@@ -117,7 +111,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
       });
       await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
     } finally {
-      await this.prisma.personaSchedule.updateMany({
+      await this.prisma.personaState.updateMany({
         where: { personaId },
         data: { leaseUntil: null, leaseOwner: null },
       });
@@ -125,13 +119,13 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async reschedule(personaId: string, minutes: number): Promise<void> {
-    await this.prisma.personaSchedule.updateMany({
+    await this.prisma.personaState.updateMany({
       where: { personaId },
       data: {
         nextWakeAt: new Date(Date.now() + minutes * 60_000),
         leaseUntil: null,
         leaseOwner: null,
-        reason: '心跳安全重排',
+        wakeReason: '心跳安全重排',
       },
     });
   }

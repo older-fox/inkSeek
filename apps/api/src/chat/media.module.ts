@@ -4,8 +4,8 @@ import { ChatMediaService } from './chat-media.service.js';
 import { ImageDescriptionService } from './image-description.service.js';
 
 /**
- * Media access is shared by the chat pipeline and the persona mind. Keeping it
- * in its own module avoids a ChatModule -> MindModule -> ChatModule cycle while
+ * Media access is shared by chat ingestion and the persona mind. Keeping it in
+ * its own module avoids a ChatModule -> MindModule -> ChatModule cycle while
  * still giving both paths the same content-addressed store and vision cache.
  */
 @Module({

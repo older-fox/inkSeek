@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
-import type { ChatConversationKind, PipelineScopeRef } from '@inkseek/shared';
-import { api, type PipelineRunFilter } from './api';
+import type { ChatConversationKind } from '@inkseek/shared';
+import { api } from './api';
 
 export const bootstrapStatusQuery = queryOptions({
   queryKey: ['bootstrap', 'status'],
@@ -69,56 +69,4 @@ export const mindGroupStancesQuery = (personaId: string) =>
     queryFn: () => api.mindGroupStances(personaId),
     enabled: Boolean(personaId),
     staleTime: 5_000,
-  });
-
-export const pipelineGraphQuery = (ref: PipelineScopeRef) =>
-  queryOptions({
-    queryKey: ['pipeline', 'graph', ref.scope, ref.scopeId ?? null],
-    queryFn: () => api.pipelineGraph(ref),
-    staleTime: 30_000,
-  });
-
-export const pipelineRunsQuery = (filter: PipelineRunFilter) =>
-  queryOptions({
-    queryKey: [
-      'pipeline',
-      'runs',
-      filter.graphId ?? null,
-      filter.scope ?? 'all',
-      filter.scopeId ?? null,
-    ],
-    queryFn: () => api.pipelineRuns(30, filter),
-    staleTime: 3_000,
-  });
-
-export const pipelineRunQuery = (id: string) =>
-  queryOptions({
-    queryKey: ['pipeline', 'run', id],
-    queryFn: () => api.pipelineRun(id),
-    enabled: Boolean(id),
-    staleTime: 10_000,
-  });
-
-export const mindOverviewQuery = (channelId: string) =>
-  queryOptions({
-    queryKey: ['mind', 'overview', channelId],
-    queryFn: () => api.mindOverview(channelId),
-    enabled: Boolean(channelId),
-    staleTime: 5_000,
-  });
-
-export const mindRunsQuery = (personaId: string, conversationId?: string) =>
-  queryOptions({
-    queryKey: ['mind', 'runs', personaId, conversationId ?? null],
-    queryFn: () => api.mindRuns(personaId, conversationId, 40),
-    enabled: Boolean(personaId),
-    staleTime: 3_000,
-  });
-
-export const mindRunQuery = (id: string) =>
-  queryOptions({
-    queryKey: ['mind', 'run', id],
-    queryFn: () => api.mindRun(id),
-    enabled: Boolean(id),
-    staleTime: 10_000,
   });

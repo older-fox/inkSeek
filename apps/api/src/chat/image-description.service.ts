@@ -3,10 +3,23 @@ import { createHash } from 'node:crypto';
 import { LlmService } from '../ai/llm.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { ChatMediaService } from './chat-media.service.js';
-import type {
-  PipelineImageDescriptionInput,
-  PipelineImageDescriptionResult,
-} from './pipeline/pipeline-types.js';
+export interface ImageDescriptionInput {
+  /** Stored media reference or data URL carried by an image port. */
+  reference: string;
+  prompt: string;
+  providerId?: string | null;
+  model?: string | null;
+  /** Regenerate even when the blob already has a description. */
+  force?: boolean;
+}
+
+export interface ImageDescriptionResult {
+  sha256: string;
+  /** Blob row to attach the description to; null when storage was unavailable. */
+  mediaId: string | null;
+  description: string;
+  cached: boolean;
+}
 
 const MAX_PROMPT_LENGTH = 4_000;
 const MAX_DESCRIPTION_LENGTH = 2_000;
@@ -28,8 +41,8 @@ export class ImageDescriptionService {
   ) {}
 
   async describe(
-    input: PipelineImageDescriptionInput & { source?: string },
-  ): Promise<PipelineImageDescriptionResult> {
+    input: ImageDescriptionInput & { source?: string },
+  ): Promise<ImageDescriptionResult> {
     const prompt = input.prompt.trim();
     if (prompt.length === 0) {
       throw new BadGatewayException('图片描述提示词为空');
@@ -80,11 +93,7 @@ export class ImageDescriptionService {
     return { sha256, mediaId, description, cached: false };
   }
 
-  /**
-   * Describes an image for the persona mind and persists the result so later
-   * turns and pipeline runs reuse the same hash cache. The mind bypasses the
-   * pipeline in LIVE/APPROVAL mode, so it cannot rely on a media.describe node.
-   */
+  /** Describes an image for the persona mind and persists the result. */
   async describeForScene(
     reference: string,
     prompt?: string,

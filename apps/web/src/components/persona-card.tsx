@@ -1,7 +1,5 @@
-import { Link } from '@tanstack/react-router';
 import {
   AtSign,
-  FlaskConical,
   MessageSquareQuote,
   Plus,
   Quote,
@@ -73,13 +71,13 @@ function TraitMeter({ trait, tone }: { trait: PersonaTrait; tone: 'brass' | 'jad
 
 function CardFooter({
   hint,
-  personaId,
+
   personaName,
   active,
   onEdit,
 }: {
   hint: string;
-  personaId: string;
+
   personaName: string;
   active: boolean;
   onEdit?: () => void;
@@ -91,20 +89,6 @@ function CardFooter({
         <span className="truncate">{hint}</span>
       </p>
       <div className="flex shrink-0 items-center gap-2.5">
-        <Link
-          to="/pipeline"
-          search={{ scope: 'persona', scopeId: personaId }}
-          tabIndex={active ? 0 : -1}
-          onClick={(event) => event.stopPropagation()}
-          aria-label={`调试 ${personaName} 的默认消息管线`}
-          className={cn(
-            'flex items-center gap-1 rounded-sm text-[0.62rem] tracking-[0.02em] text-jade-300/90 transition hover:text-jade-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-jade-400/40',
-            active ? 'pointer-events-auto' : 'pointer-events-none',
-          )}
-        >
-          <FlaskConical className="size-3" strokeWidth={1.8} />
-          高级调试
-        </Link>
         {onEdit && (
           <button
             type="button"
@@ -272,7 +256,6 @@ function PersonaFront({
 
       <CardFooter
         hint={`点击翻面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
-        personaId={persona.id}
         personaName={persona.name}
         active={active}
         onEdit={onEdit}
@@ -330,10 +313,7 @@ function PersonaBack({
             />
           )}
         </div>
-        <p
-          ref={story.ref}
-          className="mt-1.5 line-clamp-4 text-[0.76rem] leading-6 text-mist-300"
-        >
+        <p ref={story.ref} className="mt-1.5 line-clamp-4 text-[0.76rem] leading-6 text-mist-300">
           {persona.story || '尚未补全背景故事。'}
         </p>
       </div>
@@ -391,7 +371,6 @@ function PersonaBack({
 
       <CardFooter
         hint={`点击返回正面 · 更新于 ${formatPersonaTimestamp(persona.updatedAt, false)}`}
-        personaId={persona.id}
         personaName={persona.name}
         active={active}
         onEdit={onEdit}
