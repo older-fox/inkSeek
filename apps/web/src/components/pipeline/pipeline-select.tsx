@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown, Plus, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -61,8 +61,10 @@ export function PipelineSelect({
 }: PipelineSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [query, setQuery] = useState('');
   const [placement, setPlacement] = useState<MenuPlacement | null>(null);
 
   const items = useMemo(() => {
@@ -71,6 +73,20 @@ export function PipelineSelect({
     }
     return [...options, { value, label: `${value}（自定义）` }];
   }, [options, value]);
+
+  /** Long catalogs (e.g. persona parameters) get a filter box above the list. */
+  const searchable = items.length > 14;
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!searchable || keyword.length === 0) {
+      return items;
+    }
+    return items.filter(
+      (option) =>
+        option.label.toLowerCase().includes(keyword) ||
+        option.value.toLowerCase().includes(keyword),
+    );
+  }, [items, query, searchable]);
 
   const current = items.find((option) => option.value === value) ?? null;
 
@@ -96,12 +112,14 @@ export function PipelineSelect({
         ? { left, bottom: window.innerHeight - rect.top + 8, width, maxHeight, dropUp }
         : { left, top: rect.bottom + 8, width, maxHeight, dropUp },
     );
+    setQuery('');
     setActive(Math.max(0, items.findIndex((option) => option.value === value)));
     setOpen(true);
   };
 
   const close = (refocus: boolean) => {
     setOpen(false);
+    setQuery('');
     if (refocus) {
       triggerRef.current?.focus({ preventScroll: true });
     }
@@ -161,8 +179,12 @@ export function PipelineSelect({
     if (!open) {
       return;
     }
+    if (searchable) {
+      searchRef.current?.focus({ preventScroll: true });
+      return;
+    }
     menuRef.current?.focus({ preventScroll: true });
-  }, [open]);
+  }, [open, searchable]);
 
   useEffect(() => {
     if (!open) {
@@ -170,20 +192,20 @@ export function PipelineSelect({
     }
     const node = menuRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`);
     node?.scrollIntoView({ block: 'nearest' });
-  }, [active, open]);
+  }, [active, open, filtered]);
 
   const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (items.length === 0) {
+    if (filtered.length === 0) {
       return;
     }
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
-        setActive((index) => (index + 1) % items.length);
+        setActive((index) => (index + 1) % filtered.length);
         break;
       case 'ArrowUp':
         event.preventDefault();
-        setActive((index) => (index - 1 + items.length) % items.length);
+        setActive((index) => (index - 1 + filtered.length) % filtered.length);
         break;
       case 'Home':
         event.preventDefault();
@@ -191,18 +213,49 @@ export function PipelineSelect({
         break;
       case 'End':
         event.preventDefault();
-        setActive(items.length - 1);
+        setActive(filtered.length - 1);
         break;
       case 'Enter':
       case ' ':
         event.preventDefault();
-        commit(items[active]);
+        commit(filtered[active]);
         break;
       case 'Tab':
         close(false);
         break;
       default:
         break;
+    }
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // The search box owns the keyboard while focused; without this the menu's
+    // own handler would apply the same arrow/enter a second time.
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close(true);
+      return;
+    }
+    if (event.key === 'Tab') {
+      close(false);
+      return;
+    }
+    if (filtered.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActive((index) => (index + 1) % filtered.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActive((index) => (index - 1 + filtered.length) % filtered.length);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit(filtered[active]);
+      }
     }
   };
 
@@ -276,12 +329,40 @@ export function PipelineSelect({
               placement.dropUp ? 'origin-bottom' : 'origin-top',
             )}
           >
+            {searchable && (
+              <div className="sticky top-0 z-10 -mx-2 -mt-2 mb-1 border-b border-mist-100/[0.08] bg-ink-900/95 px-2 pb-2 pt-2 backdrop-blur-xl">
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-mist-600"
+                    strokeWidth={1.9}
+                  />
+                  <input
+                    ref={searchRef}
+                    value={query}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setActive(0);
+                    }}
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder="搜索选项"
+                    aria-label={`搜索${ariaLabel}`}
+                    spellCheck={false}
+                    className="w-full rounded-md border border-mist-100/[0.12] bg-ink-950/70 py-1.5 pl-7 pr-2 text-[0.74rem] text-mist-200 outline-none transition placeholder:text-mist-600 focus:border-brass-400/45"
+                  />
+                </div>
+              </div>
+            )}
             {menuTitle && (
               <p className="px-2 pb-1.5 pt-1 font-mono text-[0.58rem] uppercase tracking-[0.2em] text-mist-600">
                 {menuTitle}
               </p>
             )}
-            {items.map((option, index) => {
+            {searchable && filtered.length === 0 && (
+              <p className="px-2 py-3 text-center text-[0.66rem] text-mist-600">
+                没有匹配的选项
+              </p>
+            )}
+            {filtered.map((option, index) => {
               const selected = option.value === value;
               return (
                 <button

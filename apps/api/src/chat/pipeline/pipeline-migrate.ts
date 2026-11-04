@@ -148,6 +148,56 @@ export function migrateRemovedMessageFieldNodes(
 }
 
 /**
+ * `persona.get` was replaced by `persona.call`: one template fills every
+ * persona value instead of reading a single field. Legacy cards become
+ * `{field}` templates and their edges keep flowing through the text output.
+ */
+export function migratePersonaParameterCards(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  const legacy = graph.nodes.filter((node) => node.type === 'persona.get');
+  if (legacy.length === 0) {
+    return false;
+  }
+
+  const legacyIds = new Set(legacy.map((node) => node.id));
+  for (const node of legacy) {
+    const raw = node.config?.['field'];
+    const field = typeof raw === 'string' && raw.trim() ? raw.trim() : 'name';
+    node.type = 'persona.call';
+    node.config = { template: `{${field}}` };
+  }
+
+  const edges: PipelineEdge[] = [];
+  for (const edge of graph.edges) {
+    if (!legacyIds.has(edge.from)) {
+      edges.push(edge);
+      continue;
+    }
+    if (edge.fromPort === 'found') {
+      warn(
+        `管线图迁移：${edge.from} 的「是否存在」输出已移除，` +
+          `连线 ${edge.from}.found -> ${edge.to}.${edge.toPort} 已删除`,
+      );
+      continue;
+    }
+    const next: PipelineEdge = { ...edge, fromPort: 'text' };
+    if (edge.when) {
+      if (edge.when.field === 'found') {
+        delete next.when;
+        warn(`管线图迁移：${edge.from} 的连线条件依赖已移除的「是否存在」输出，已改为无条件`);
+      } else {
+        next.when = { ...edge.when, field: 'text' };
+      }
+    }
+    edges.push(next);
+  }
+  graph.edges = edges;
+  return true;
+}
+
+/**
  * The source whitelist card used one list for both kinds, so a group number
  * that happened to equal a QQ number could let the wrong conversation through.
  * Split it into a group-number column and a peer-QQ column, copying legacy
@@ -268,6 +318,58 @@ export function migrateSourceWhitelistScope(
     warn('管线图迁移：来源过滤已移除「来源类型」限制，只按名单判定');
   }
 
+  return changed;
+}
+
+/**
+ * The source card became a pure gate: it only emits the message object when
+ * the source passes, and a blocked card stops its whole branch. The boolean
+ * and source-id outputs are gone, so edges carrying them are dropped and
+ * conditions that tested them become unconditional.
+ */
+const REMOVED_WHITELIST_OUTPUTS = new Set(['matched', 'conversationKind', 'conversationExternalId']);
+
+export function migrateSourceWhitelistGate(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  const whitelistIds = new Set(
+    graph.nodes.filter((node) => node.type === 'logic.whitelist').map((node) => node.id),
+  );
+  if (whitelistIds.size === 0) {
+    return false;
+  }
+
+  let changed = false;
+  const edges: PipelineEdge[] = [];
+  for (const edge of graph.edges) {
+    if (!whitelistIds.has(edge.from)) {
+      edges.push(edge);
+      continue;
+    }
+
+    if (edge.fromPort !== 'value') {
+      warn(
+        `管线图迁移：来源过滤已改为纯闸门，移除了引用已删除输出 ${edge.fromPort} 的连线 ` +
+          `${edge.from}.${edge.fromPort} -> ${edge.to}.${edge.toPort}`,
+      );
+      changed = true;
+      continue;
+    }
+
+    if (edge.when && REMOVED_WHITELIST_OUTPUTS.has(edge.when.field)) {
+      const next = { ...edge };
+      delete next.when;
+      edges.push(next);
+      warn('管线图迁移：来源过滤的放行条件已内置为闸门，连线改为放行后直接生效');
+      changed = true;
+      continue;
+    }
+
+    edges.push(edge);
+  }
+
+  graph.edges = edges;
   return changed;
 }
 

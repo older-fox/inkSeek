@@ -148,19 +148,44 @@
 
 ## 节点目录
 
-每个节点的端口与配置定义在 `apps/api/src/chat/pipeline/pipeline-nodes.ts`，随目录接口一起下发给前端：卡片、检查器、右上角「节点文档」抽屉均读取同一份数据。
+每个节点的端口与配置定义在 `apps/api/src/chat/pipeline/pipeline-nodes.ts`，随目录接口一起下发给前端：卡片、检查器与每张卡右上角的「?」帮助弹窗均读取同一份数据。帮助内容来自节点目录的 `description`、端口、配置字段，以及可选的 `help` 字段（补充说明与 key 列表）；顶栏不再提供全局节点文档入口。
 
 ### 数据（data）
 
 | 类型 | 输入 | 输出 | 配置 |
 | --- | --- | --- | --- |
 | `object.get` 消息对象取值 | `value`（json） | `value`（any）、`text`（text）、`found`（boolean） | `path` 下拉选择（发送者昵称/ID、正文、类型、来源群号/QQ 号、引用作者/正文/图片、计数、时间、整个对象等），默认 `sender.name`；卡片与检查器都可直接切换 |
+| `persona.call` 人格调用 | 无 | `text` 填充后的文本（text） | `template` 人格文本，用 `{name}`、`{age}`、`{appearance}` 等占位符自动填入人格参数；卡面直接显示多行编辑框，检查器里也有同一字段 |
+| `persona.group` 群聊人格 | 无 | `value` 属性原始值（any）、`text` 文本形式（text）、`found` 是否存在（boolean） | `variable` 会话变量（保存群号）、`field` 读取属性（整个快照或单项） |
+| `persona.private` 私聊人格 | 无 | `value` 属性原始值（any）、`text` 文本形式（text）、`found` 是否存在（boolean） | `variable` 会话变量（保存 QQ 号）、`field` 读取属性（整个快照或单项） |
+
+「群聊人格」「私聊人格」只按管线变量里的会话标识读取：先用「写入变量」把消息对象的 `conversationExternalId`（群号或对方 QQ 号）写进变量，再在卡片上选择该变量。变量为空、未选择变量、找不到记录或所选属性为空时输出 `value = null`、`text = ''`、`found = false`，不会依据当前消息的 `conversationKind` 自动切换，也不会在群/私聊之间回退。整个快照按中文字段名逐行输出，只读本渠道内已保存的人格记录。
+
+「人格调用」读取的是**本次运行绑定的那张人格卡**：渠道运行与渠道作用域调试取渠道当前绑定的人格卡，人格作用域调试取该人格卡，全局作用域调试没有绑定人格。文本里的 `{参数名}` 会被替换成对应值，参数名与渠道人格快照完全一致（`buildChannelPersonaSnapshot` 产出的归一化 `values`，如 `name`、`age`、`appearance`、`language_style`），例如 `你将扮演{name}，年龄{age}。`。未绑定人格或参数为空时替换为空字符串，不认识的花括号保持原样。`{time_awareness}` 是例外：人格卡开启「时间感知」时替换成当前日期时间（按卡里的 `time_zone` 换算，`UTC+8`、`东八区`、IANA 名称均可识别，识别不了就用服务器本地时间，格式 `2026-11-04 14:36（周三）`），关闭时替换成「你无法感知时间」。该卡片没有输入端口；点击卡片右上角的「?」会打开该卡片的帮助弹窗，除简要说明外，按基础、外形、设定、内在、表达、称呼、破面、亲密、数值、卡片分组列出全部可用参数 key。每次运行都会执行；运行开始时读取一次最新人格卡，因此人格中心的修改会从下一条消息起生效，不需要重新接入渠道。旧版「获取人格参数」卡片会在启动迁移时转成 `persona.call`，模板为 `{原参数名}`，原来的 `text` / `value` 连线改接 `text`，`found` 输出的连线与条件会被移除并记录警告。
+
+### AI（ai）
+
+| 类型 | 输入 | 输出 | 配置 |
+| --- | --- | --- | --- |
+| `ai.chat` AI 对话 | `text` 提示词（text，必填）、`system` 系统提示词（text，可选） | `reply` 回复文本（text）、`text` 模型原文（text）、`action` 指令动作（text）、`args` 指令参数（json）、`json` 完整信封（json）、`parsed` 解析成功（boolean）、`model` 实际模型（text）、`latencyMs` 耗时（number） | `format`（text/json）、`temperature`、`maxTokens`、`providerId` / `model`（留空用默认提供商与首个模型）；提示词与系统提示词只来自输入端口，卡片上没有任何文本配置框 |
+| `ai.compress` 提示词压缩 | `text` 详细提示词（text，必填） | `text` 压缩提示词（text）、`cached` 命中缓存（boolean）、`model` 实际模型（text） | `providerId` / `model`（留空用默认提供商与首个模型）、`ttlSeconds` 缓存 TTL（60–2592000 秒，默认 86400） |
+
+AI 卡是「AI 出指令、卡片干活」的执行端：
+
+- 「提示词」端口必接：接进来的文本原样作为提示词发给模型；没接线或文本为空时该卡被跳过/失败。想拼接多段内容，先经过「拼接文本」「模板」等卡片生成一段文本再接进来。
+- 「系统提示词」端口可选：接进来时作为 system 角色内容，不接时只发送提示词。
+- `format = text`：原样输出模型文本，`reply` 与 `text` 相同，`parsed` 为 false。
+- `format = json`：系统提示里追加固定格式要求，模型应输出 `{"action":"...","args":{...},"reply":"..."}`。解析成功时 `action`、`args`、`reply` 分别取自对应字段；解析失败（包括带 Markdown 代码块、前后有解释文字等）时 `parsed = false`、`action` 为空、`args = null`，`reply` 回退为模型原文，保证下游始终有一份可读文本。
+- 用「包含判断」或「值比较」比对 `action`，把每条分支接到对应的能力卡（人格读取、图片描述、变量读取等），能力卡结果再接到下一张 AI 对话生成最终回复，最后由「消息输出」发送。循环必须封装在卡片内部，图本身仍是 DAG，不允许连线成环。
+- `providerId` / `model` 与图片描述卡一样从设置里的模型提供商取选项；调试运行同样会真实调用模型，但不会提交回复等副作用。
+- 提示词压缩只在缓存未命中时调用模型：缓存 key 由「详细提示词 + 提供商 + 模型 + 压缩指令版本」计算 SHA-256，写入设置中配置的 Redis，键名前缀 `inkseek:pipeline:prompt-compress:v1:`。TTL 到期或键不存在时重新生成；命中时 `cached = true`，不再调用模型。修改提示词或切换模型会落到新 key。Redis 未配置或连接失败时自动跳过缓存、每次重新生成，卡仍正常工作。
+- 压缩指令固定保留全部事实、约束、字段名、输出格式、语气与安全要求，只删除重复、客套与冗余表述，不新增原文没有的内容。
 
 ### 文本（text）
 
 | 类型 | 输入 | 输出 | 配置 |
 | --- | --- | --- | --- |
-| `text.constant` 固定文本 | 无 | `text` 固定文本（text） | `text`，支持 `{{vars.名称}}`、`{{message.text}}` 等模板引用；没有输入端口，无需上游激活，每次运行都会执行 |
+| `text.constant` 固定文本 | 无 | `text` 固定文本（text） | `text`，支持 `{{vars.名称}}`、`{{message.text}}` 等模板引用；没有输入端口，无需上游激活，每次运行都会执行；卡面直接显示多行编辑框，可就地修改，检查器里也有同一字段 |
 | `text.template` 模板文本 | `text`（text，可选）、`object`（json，可选） | `text` 拼出的文本（text） | `template`，默认 `收到：{{input.text}}`；接入 `object` 后可用 `{{input.object.sender.name}}` |
 | `text.transform` 文本整形 | `text`（text） | `text` 处理后的文本（text） | `mode`（trim/collapse/upper/lower/prefix/suffix）、`argument` |
 | `text.regex` 正则提取 | `text`（text） | `matched`（boolean）、`match`（text）、`groups`（json）、`text` 原文本（text） | `pattern`、`flags`（仅 `imsu`） |
@@ -172,13 +197,21 @@
 | --- | --- | --- | --- |
 | `logic.contains` 包含判断 | `text`（text） | `matched`（boolean）、`text` 原文本（text） | `value`、`caseSensitive` |
 | `logic.compare` 值比较 | `left`（any）、`right`（any，可选） | `matched`（boolean）、`left` / `right` 实际值（any） | `operator`（eq/neq/gt/gte/lt/lte/contains/notContains）、`left` / `right` 未连线时的引用 |
-| `logic.whitelist` 来源过滤 | `message`（json） | `matched`（boolean）、`value` 原消息对象（any）、`conversationKind`（text）、`conversationExternalId`（text） | `mode`（off/whitelist/blacklist）、`groupWhitelist` 群号名单、`privateWhitelist` QQ 号名单（各自换行、逗号或空格分隔） |
+| `logic.calc` 逻辑计算 | 动态输入端口（any，可选）：默认 `a` / `b` / `c`，卡面「＋ 添加输入」可继续追加，每行末尾的 `×` 可删除该输入 | `value` 计算结果（any）、`text` 文本形式（text） | `mode`（number/append/math）、`operator`（add/subtract/multiply/divide/modulo/power，仅数字计算）、`left` / `right` 未连线时的取值（仅数字计算）、`separatorMode`（newline/custom，仅文本追加）、`separator` 自定义分隔符、`expression` Math 表达式（仅 Math 计算） |
+| `logic.whitelist` 来源过滤 | `message`（json） | `value` 原消息对象（any，仅放行时输出） | `mode`（off/whitelist/blacklist）、`groupWhitelist` 群号名单、`privateWhitelist` QQ 号名单（各自换行、逗号或空格分隔） |
+
+「逻辑计算」一张卡三种用法：
+
+- 输入端口不是固定三个：端口名保存在节点配置的 `inputs` 数组里，卡面左下角的「＋ 添加输入」按钮会按 a → b → c → d… 的顺序追加一个连接点（超过 z 后是 v27、v28…），数量不设上限；每个输入行末尾的 `×` 删除该端口，连到它上面的线一并移除，剩下的端口名保持不变（不会重新编号），至少保留一个输入。图校验、运行器和画布都用同一份解析结果，所以增删的端口能立刻连线、参与计算。
+- `number` 数字计算：前两个输入做加、减、乘、除、取余或幂运算；端口没接线时分别读取配置里的「左值」「右值」，支持 `$vars.名称` 这类引用。切换成文本追加或 Math 计算后，运算符与左值/右值会从卡面和检查器里消失。除数为 0、取余为 0 或结果不是有限数字时节点失败。
+- `append` 文本追加：按输入端口顺序把值转成文本，用分隔符拼接。`separatorMode` 只有两种：`newline` 用换行符（默认），`custom` 用 `separator` 里的自定义文本（留空则直接相连）。未接线的端口、空值和空串都跳过，因此只接两段也能用，也不会出现多余的分隔符；没有有效段时输出空串。
+- `math` Math 计算：表达式可以直接在卡面上编辑（检查器里也有同一字段）。左侧输入的端口名就是变量名，默认 `a` / `b` / `c`，添加端口后 `d`、`e`… 也能直接用；另有常量 `PI` / `E`、`Math.PI` / `Math.E`，以及白名单函数 `abs`、`ceil`、`floor`、`round`、`trunc`、`sign`、`sqrt`、`cbrt`、`exp`、`log`、`log2`、`log10`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`min`、`max`、`hypot`（可写 `round(a)` 或 `Math.round(a)`）。运算支持 `+ - * / % **` 与括号；表达式在保存时校验语法并检查变量都有对应端口，运行时不使用 `eval`，引用了未接线的变量、除以 0 或结果不是有限数字都会让节点失败。
 
 「来源过滤」只接受消息对象输入：把「消息输入」的 `message` 端口接到它的 `message` 输入，卡片从这里读取 `conversationKind` 与 `conversationExternalId`，不再另读运行时的会话记录。群号和 QQ 号分两列：群聊只比对 `groupWhitelist`，私聊只比对 `privateWhitelist`（即 `conversationExternalId`，和聊天列表里看到的号码一致，不是数据库内部会话 ID），所以即使某个群号恰好和某个 QQ 号相同，也不会把另一类来源误放行。
 
-`mode` 是三态开关：`off` 全部放行；`whitelist` 只放行名单内的来源，名单为空时该类来源全部不放行；`blacklist` 拦截名单内的来源，名单为空时不拦截任何来源。卡片不再有独立的来源类型过滤，只按名单判定。把出线的条件设为 `matched = true`，下游就只会在放行的会话上执行。试跑面板可以指定来源类型（私聊 / 群聊）和来源群号 / QQ 号，用来验证名单是否命中；留空表示没有来源账号，白名单不会命中，黑名单不会拦截。
+`mode` 是三态开关：`off` 全部放行；`whitelist` 只放行名单内的来源，名单为空时该类来源全部不放行；`blacklist` 拦截名单内的来源，名单为空时不拦截任何来源。卡片是纯闸门：放行时把原消息对象从 `value` 输出，下游继续；拦截时卡片不产生任何输出，所有从它出发的连线失效，下游卡片按跳过处理。试跑面板可以指定来源类型（私聊 / 群聊）和来源群号 / QQ 号，用来验证名单是否命中；留空表示没有来源账号，白名单不会命中，黑名单不会拦截。
 
-旧版单一 `whitelist` 会在启动迁移时按原 `source` 拆进对应列（`any` 写入两列）并记录警告；旧配置没有 `mode` 时，两列都为空迁移为 `off`，否则迁移为 `whitelist`（非空旧图的空列会提示该类来源不再放行）；旧的 `source` 配置会被删除；旧的 `value` 输入端连线也会自动改接到 `message`。
+旧版单一 `whitelist` 会在启动迁移时按原 `source` 拆进对应列（`any` 写入两列）并记录警告；旧配置没有 `mode` 时，两列都为空迁移为 `off`，否则迁移为 `whitelist`（非空旧图的空列会提示该类来源不再放行）；旧的 `source` 配置会被删除；旧版 `matched` / `conversationKind` / `conversationExternalId` 输出的连线会被移除，基于它们设置的连线条件会被清掉；旧的 `value` 输入端连线也会自动改接到 `message`。
 
 ### 流程（flow）
 
@@ -219,6 +252,8 @@ input.text ──► contains ──(matched = true)──► template ──┐
 ## 画布与接口
 
 - 页面：`/pipeline`，画布可平移、缩放、适应；卡片可拖动，从右侧输出端口拖到目标输入端口或卡片即连线。
+- 卡片：卡面渲染该节点全部可见配置字段，并按字段类型就地编辑（文本、数字、开关、下拉、JSON）；提供商/模型下拉与检查器读取同一份运行时选项。
+- 尺寸：标记 `resizable` 的卡片可拖动右下角缩放，只限制最小宽高，没有最大尺寸；固定高度后内容超出时卡面内部滚动。未缩放的卡片按内容自然增高。尺寸与位置一样随图保存，刷新后保留。
 - 连线时按类型高亮兼容端口、淡化不兼容端口；成环、类型不匹配、重复连线、占用中的单线端口会被拒绝并提示。
 - 检查器：编辑节点配置与 `join`、连线条件（字段下拉 + 布尔/数字/文本/JSON 类型的期望值）；系统卡片显示锁定说明，不提供删除。
 - 自动保存：编辑后 900ms 防抖写入，右上角显示保存状态与版本；保存请求携带 `expectedRevision`，同一时刻只跑一轮保存循环。
@@ -258,4 +293,5 @@ input.text ──► contains ──(matched = true)──► template ──┐
 
 1. 在 `pipeline-nodes.ts` 定义 `type`、`label`、`category`、`description`、`defaultConfig`、`fields`、`inputs`、`outputs`、`run`；需要锁定卡片时加 `system: true`，只做画布注释时加 `layout: true`（运行器会跳过）。
 2. 输入端口声明 `kind`，按需加 `optional` / `multiple`；输出键需与 `run` 返回对象的键一致。
-3. 注册后目录接口自动带出新节点，画布「添加节点」、检查器与节点文档抽屉无需改动；保存时自动参与类型校验。
+3. 需要额外说明或 key 列表时加 `help: { notes, keyGroups }`；目录接口会把它一起下发给卡片的「?」帮助弹窗。
+4. 注册后目录接口自动带出新节点，画布「添加节点」、检查器与卡片帮助弹窗无需改动；保存时自动参与类型校验。

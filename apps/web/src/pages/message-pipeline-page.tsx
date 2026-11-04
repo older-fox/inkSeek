@@ -3,6 +3,8 @@ import type {
   ChatPipelineGraphEdge,
   ChatPipelineGraphNode,
   ChatPipelineGraphSnapshot,
+  ChatPipelineNodePosition,
+  ChatPipelineNodeSize,
   ChatPipelineNodeType,
   ChatPipelineRunDetail,
   ChatPipelineScope,
@@ -10,12 +12,15 @@ import type {
   PipelineScopeRef,
   SaveChatPipelineGraphInput,
 } from '@inkseek/shared';
-import { canConnectPipelineKinds } from '@inkseek/shared';
+import {
+  canConnectPipelineKinds,
+  nextPipelineInputKey,
+  resolvePipelineNodeInputs,
+} from '@inkseek/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import {
   AlertTriangle,
-  BookOpen,
   Bug,
   CheckCircle2,
   ChevronDown,
@@ -34,14 +39,16 @@ import {
   type PipelineCanvasHandle,
 } from '@/components/pipeline/pipeline-canvas';
 import { PipelineDebugPanel } from '@/components/pipeline/pipeline-debug-panel';
-import { PipelineDocs } from '@/components/pipeline/pipeline-docs';
+import { useProviderOptions } from '@/components/pipeline/pipeline-config-options';
 import { PipelineInspector } from '@/components/pipeline/pipeline-inspector';
+import { PipelineNodeHelp } from '@/components/pipeline/pipeline-node-help';
 import { PipelineRunPanel } from '@/components/pipeline/pipeline-run-panel';
 import {
   CARD_WIDTH,
   CATEGORY_STYLE,
   IO_KIND_STYLE,
   MAX_PIPELINE_VARIABLES,
+  cardHeight,
   wouldCreateCycle,
   type PipelineSelection,
 } from '@/components/pipeline/pipeline-ui';
@@ -79,6 +86,33 @@ function readDegraded(snapshot: ChatPipelineGraphSnapshot): string | null {
     : null;
 }
 
+function nextNodeId(type: string, nodes: readonly ChatPipelineGraphNode[]): string {
+  const base = type.split('.').slice(1).join('-') || 'node';
+  let id = base;
+  let suffix = 2;
+  while (nodes.some((node) => node.id === id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return id;
+}
+
+/** Drop a new card at the visual center of the current viewport. */
+function centeredNodePosition(
+  center: ChatPipelineNodePosition,
+  definition: ChatPipelineNodeType,
+  config: Record<string, unknown> | null,
+  offset = 0,
+  size?: ChatPipelineNodeSize,
+): ChatPipelineNodePosition {
+  const width = size?.width ?? CARD_WIDTH;
+  const height = size?.height ?? cardHeight(definition, config);
+  return {
+    x: Math.round(center.x - width / 2 + offset),
+    y: Math.round(center.y - height / 2 + offset),
+  };
+}
+
 const SCOPE_LABEL: Record<ChatPipelineScope, string> = {
   global: '全局模板',
   channel: '渠道',
@@ -113,7 +147,7 @@ export function MessagePipelinePage() {
   const [inheritedFrom, setInheritedFrom] = useState<ChatPipelineScope | null>(null);
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [docsOpen, setDocsOpen] = useState(false);
+  const [helpType, setHelpType] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(() => {
@@ -144,6 +178,14 @@ export function MessagePipelinePage() {
   const autoRunKeyRef = useRef<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const canvasRef = useRef<PipelineCanvasHandle>(null);
+  const providers = useProviderOptions(true);
+  const clipboardRef = useRef<{
+    type: string;
+    config: Record<string, unknown> | null;
+    join: ChatPipelineGraphNode['join'];
+    size?: ChatPipelineNodeSize;
+  } | null>(null);
+  const pasteCountRef = useRef(0);
 
   const currentScopeLabel = useMemo(() => {
     if (scope === 'global') {
@@ -415,6 +457,57 @@ export function MessagePipelinePage() {
     [applyGraph],
   );
 
+  const addNodeInput = useCallback(
+    (id: string) => {
+      applyGraph((current) => ({
+        ...current,
+        nodes: current.nodes.map((node) => {
+          if (node.id !== id) {
+            return node;
+          }
+          const definition = catalog.find((entry) => entry.type === node.type);
+          if (!definition?.dynamicInputs) {
+            return node;
+          }
+          const config = { ...(node.config ?? {}) };
+          const keys = resolvePipelineNodeInputs(definition, config).map((port) => port.key);
+          return {
+            ...node,
+            config: { ...config, inputs: [...keys, nextPipelineInputKey(keys)] },
+          };
+        }),
+      }));
+    },
+    [applyGraph, catalog],
+  );
+
+  const removeNodeInput = useCallback(
+    (id: string, key: string) => {
+      const current = graphRef.current;
+      const node = current?.nodes.find((entry) => entry.id === id);
+      const definition = catalog.find((entry) => entry.type === node?.type);
+      if (!current || !node || !definition?.dynamicInputs) {
+        return;
+      }
+      const keys = resolvePipelineNodeInputs(definition, node.config).map((port) => port.key);
+      if (keys.length <= 1) {
+        flash('至少保留一个左侧输入');
+        return;
+      }
+      const remaining = keys.filter((entry) => entry !== key);
+      applyGraph((graph) => ({
+        ...graph,
+        nodes: graph.nodes.map((entry) =>
+          entry.id === id
+            ? { ...entry, config: { ...(entry.config ?? {}), inputs: remaining } }
+            : entry,
+        ),
+        edges: graph.edges.filter((edge) => !(edge.to === id && edge.toPort === key)),
+      }));
+    },
+    [applyGraph, catalog, flash],
+  );
+
   const updateEdge = useCallback(
     (index: number, patch: Partial<ChatPipelineGraphEdge>) => {
       applyGraph((current) => ({
@@ -515,6 +608,18 @@ export function MessagePipelinePage() {
     [applyGraph],
   );
 
+  const resizeNode = useCallback(
+    (id: string, size: ChatPipelineNodeSize) => {
+      applyGraph((current) => ({
+        ...current,
+        nodes: current.nodes.map((node) =>
+          node.id === id ? { ...node, size: { ...size } } : node,
+        ),
+      }));
+    },
+    [applyGraph],
+  );
+
   const connect = useCallback(
     (from: string, fromPort: string, to: string, toPort: string) => {
       const current = graphRef.current;
@@ -527,7 +632,11 @@ export function MessagePipelinePage() {
       const sourceDefinition = catalog.find((entry) => entry.type === source?.type);
       const targetDefinition = catalog.find((entry) => entry.type === target?.type);
       const output = sourceDefinition?.outputs.find((port) => port.key === fromPort);
-      const input = targetDefinition?.inputs.find((port) => port.key === toPort);
+      const input = targetDefinition
+        ? resolvePipelineNodeInputs(targetDefinition, target?.config).find(
+            (port) => port.key === toPort,
+          )
+        : undefined;
 
       if (!output || !input) {
         flash('端口不存在，连线已取消');
@@ -608,27 +717,96 @@ export function MessagePipelinePage() {
     setSelection(null);
   }, [applyGraph, catalog, flash, selection]);
 
+  const copySelection = useCallback(() => {
+    const current = graphRef.current;
+    if (!current || selection?.kind !== 'node') {
+      return;
+    }
+    const node = current.nodes.find((entry) => entry.id === selection.id);
+    if (!node) {
+      return;
+    }
+    clipboardRef.current = {
+      type: node.type,
+      config: node.config
+        ? (JSON.parse(JSON.stringify(node.config)) as Record<string, unknown>)
+        : null,
+      join: node.join,
+      size: node.size ? { ...node.size } : undefined,
+    };
+    pasteCountRef.current = 0;
+    flash('已复制卡片');
+  }, [flash, selection]);
+
+  const pasteNode = useCallback(() => {
+    const copied = clipboardRef.current;
+    const current = graphRef.current;
+    if (!copied || !current) {
+      return;
+    }
+    const definition = catalog.find((entry) => entry.type === copied.type);
+    if (!definition) {
+      flash('这张卡片的类型已不可用');
+      return;
+    }
+    const config = copied.config
+      ? (JSON.parse(JSON.stringify(copied.config)) as Record<string, unknown>)
+      : null;
+    const id = nextNodeId(copied.type, current.nodes);
+    const center = canvasRef.current?.center() ?? { x: 240, y: 240 };
+    pasteCountRef.current += 1;
+    const offset = pasteCountRef.current * 24;
+
+    applyGraph((graph) => ({
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        {
+          id,
+          type: copied.type,
+          config,
+          join: copied.join,
+          ...(copied.size ? { size: { ...copied.size } } : {}),
+          position: centeredNodePosition(center, definition, config, offset, copied.size),
+        },
+      ],
+    }));
+    setSelection({ kind: 'node', id });
+    flash('已粘贴卡片');
+  }, [applyGraph, catalog, flash]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Delete' && event.key !== 'Backspace') {
-        return;
-      }
       const target = event.target;
-      if (
+      const inField =
         target instanceof HTMLElement &&
-        target.closest('input, textarea, select, [contenteditable="true"]')
-      ) {
+        target.closest('input, textarea, select, [contenteditable="true"]') !== null;
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (inField || !selection) {
+          return;
+        }
+        event.preventDefault();
+        deleteSelection();
         return;
       }
-      if (!selection) {
+
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
         return;
       }
-      event.preventDefault();
-      deleteSelection();
+      if (event.key.toLowerCase() === 'c' && !inField && selection?.kind === 'node') {
+        event.preventDefault();
+        copySelection();
+        return;
+      }
+      if (event.key.toLowerCase() === 'v' && !inField && clipboardRef.current) {
+        event.preventDefault();
+        pasteNode();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deleteSelection, selection]);
+  }, [copySelection, deleteSelection, pasteNode, selection]);
 
   const addNode = (type: string) => {
     const definition = catalog.find((entry) => entry.type === type);
@@ -637,20 +815,13 @@ export function MessagePipelinePage() {
       return;
     }
 
-    const base = type.split('.').slice(1).join('-') || 'node';
-    let id = base;
-    let suffix = 2;
-    while (current.nodes.some((node) => node.id === id)) {
-      id = `${base}-${suffix}`;
-      suffix += 1;
-    }
-
+    const id = nextNodeId(type, current.nodes);
     const center = canvasRef.current?.center() ?? { x: 240, y: 240 };
-    const cascade = (current.nodes.length % 4) * 18;
     const config =
       Object.keys(definition.defaultConfig).length > 0
         ? (JSON.parse(JSON.stringify(definition.defaultConfig)) as Record<string, unknown>)
         : null;
+    const position = centeredNodePosition(center, definition, config);
 
     applyGraph((graph) => ({
       ...graph,
@@ -661,10 +832,7 @@ export function MessagePipelinePage() {
           type,
           config,
           join: definition.defaultJoin ?? 'all',
-          position: {
-            x: Math.max(16, Math.round(center.x - CARD_WIDTH / 2 + cascade)),
-            y: Math.max(16, Math.round(center.y - 60 + cascade)),
-          },
+          position,
         },
       ],
     }));
@@ -776,6 +944,10 @@ export function MessagePipelinePage() {
     return <PipelineSkeleton />;
   }
 
+  const helpEntry = helpType
+    ? (catalog.find((item) => item.type === helpType) ?? null)
+    : null;
+
   return (
     <div className="relative flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
       <header className="relative z-30 flex h-14 shrink-0 flex-wrap items-center gap-2.5 border-b border-mist-100/[0.07] bg-ink-950/50 px-3 backdrop-blur-xl sm:px-4">
@@ -824,14 +996,6 @@ export function MessagePipelinePage() {
           >
             <FlaskConical className="size-3" strokeWidth={1.8} />
             试跑
-          </button>
-          <button
-            type="button"
-            onClick={() => setDocsOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-mist-100/[0.1] px-2.5 py-1.5 text-[0.62rem] text-mist-400 transition hover:border-brass-400/30 hover:text-brass-200"
-          >
-            <BookOpen className="size-3" strokeWidth={1.8} />
-            节点文档
           </button>
           <AddNodeMenu catalog={catalog} onAdd={addNode} />
           <button
@@ -1005,12 +1169,17 @@ export function MessagePipelinePage() {
             graph={graph}
             catalog={catalog}
             selection={selection}
+            providers={providers}
             nodeRuns={nodeRuns}
             debugMode={debugMode}
             onSelect={setSelection}
             onMoveNode={moveNode}
+            onResizeNode={resizeNode}
             onUpdateNodeConfig={updateNodeConfig}
             onCreateVariable={createVariable}
+            onAddNodeInput={addNodeInput}
+            onRemoveNodeInput={removeNodeInput}
+            onOpenNodeHelp={setHelpType}
             onConnect={connect}
             onConnectError={flash}
           />
@@ -1021,6 +1190,7 @@ export function MessagePipelinePage() {
             graph={graph}
             catalog={catalog}
             selection={selection}
+            providers={providers}
             debugMode={debugMode}
             nodeRuns={nodeRuns}
             onRenameGraph={(name) =>
@@ -1048,7 +1218,7 @@ export function MessagePipelinePage() {
         </aside>
       </div>
 
-      {docsOpen && <PipelineDocs catalog={catalog} onClose={() => setDocsOpen(false)} />}
+      {helpEntry && <PipelineNodeHelp entry={helpEntry} onClose={() => setHelpType(null)} />}
 
       {debugOpen && (
         <PipelineDebugPanel
@@ -1217,7 +1387,7 @@ function AddNodeMenu({
   }, [open]);
 
   const categories = (
-    ['system', 'data', 'variable', 'media', 'text', 'logic', 'flow', 'note'] as const
+    ['system', 'ai', 'data', 'variable', 'media', 'text', 'logic', 'flow', 'note'] as const
   ).map((category) => ({
     category,
     style: CATEGORY_STYLE[category],

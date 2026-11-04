@@ -340,6 +340,7 @@ export interface ChatPipelineRunEvent {
 
 export type ChatPipelineNodeCategory =
   | 'system'
+  | 'ai'
   | 'text'
   | 'logic'
   | 'data'
@@ -416,6 +417,12 @@ export interface ChatPipelineNodePosition {
   y: number;
 }
 
+/** Optional per-card canvas size; cards opt in through the node catalog. */
+export interface ChatPipelineNodeSize {
+  width: number;
+  height: number;
+}
+
 export interface ChatPipelineGraphNode {
   id: string;
   type: string;
@@ -423,6 +430,8 @@ export interface ChatPipelineGraphNode {
   join: ChatPipelineJoin;
   /** Canvas coordinates; layout only, never affects execution. */
   position: ChatPipelineNodePosition;
+  /** User-adjusted card size; layout only, absent means the default card size. */
+  size?: ChatPipelineNodeSize;
 }
 
 export interface ChatPipelineEdgeCondition {
@@ -490,7 +499,12 @@ export interface ChatPipelineConfigField {
   optionsSource?: ChatPipelineConfigOptionsSource;
   /** Config key whose value scopes the dynamic options (provider id for models). */
   dependsOn?: string;
+  /** Shown only when every condition matches the node config. */
+  visibleWhen?: Array<{ key: string; equals: string }>;
 }
+
+/** Input-port strategy for node types whose ports are stored in the node config. */
+export type ChatPipelineDynamicInputs = 'values';
 
 /**
  * `image` values are image references (stored media URLs) or data URLs; the
@@ -511,12 +525,27 @@ export interface ChatPipelineIoField {
   multiple?: boolean;
 }
 
+/** Named key list shown in a node's help panel, e.g. persona template parameters. */
+export interface ChatPipelineHelpKeyGroup {
+  title: string;
+  keys: string[];
+}
+
+export interface ChatPipelineNodeHelp {
+  /** Extra paragraphs after the node description. */
+  notes?: string[];
+  /** Key names the card accepts, grouped by category. */
+  keyGroups?: ChatPipelineHelpKeyGroup[];
+}
+
 export interface ChatPipelineNodeType {
   type: string;
   label: string;
   category: ChatPipelineNodeCategory;
   description: string;
   version: number;
+  /** Optional card-specific help content shown from the card's ? button. */
+  help?: ChatPipelineNodeHelp;
   /** Locked system cards: always present, never deletable or addable. */
   system?: boolean;
   /**
@@ -524,8 +553,16 @@ export interface ChatPipelineNodeType {
    * run, so it has no status and produces no node row.
    */
   layout?: boolean;
+  /** Card can be resized from its bottom-right corner; size is stored per node. */
+  resizable?: boolean;
   /** Join mode a freshly added node starts with. */
   defaultJoin?: ChatPipelineJoin;
+  /**
+   * Runtime ports: `values` reads the keys from `config.inputs`, so a card can
+   * grow input ports without a catalog change. `inputs` then lists the fallback
+   * ports used when the config has none.
+   */
+  dynamicInputs?: ChatPipelineDynamicInputs;
   defaultConfig: Record<string, unknown>;
   fields: ChatPipelineConfigField[];
   inputs: ChatPipelineIoField[];
@@ -542,6 +579,58 @@ export function canConnectPipelineKinds(
   to: ChatPipelineIoKind,
 ): boolean {
   return from === 'any' || to === 'any' || from === to;
+}
+
+/** Whether a config field applies to the current node config. */
+export function isPipelineConfigFieldVisible(
+  field: ChatPipelineConfigField,
+  config: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!field.visibleWhen || field.visibleWhen.length === 0) {
+    return true;
+  }
+  return field.visibleWhen.every((condition) => config?.[condition.key] === condition.equals);
+}
+
+const PIPELINE_INPUT_KEY = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/**
+ * Ports an edge can connect to. Dynamic node types keep the keys in
+ * `config.inputs`; everything else uses the catalog list unchanged.
+ */
+export function resolvePipelineNodeInputs(
+  definition: Pick<ChatPipelineNodeType, 'inputs' | 'dynamicInputs'>,
+  config: Record<string, unknown> | null | undefined,
+): ChatPipelineIoField[] {
+  if (definition.dynamicInputs !== 'values') {
+    return definition.inputs;
+  }
+  const raw = config?.['inputs'];
+  const keys = Array.isArray(raw)
+    ? raw.filter(
+        (key): key is string => typeof key === 'string' && PIPELINE_INPUT_KEY.test(key),
+      )
+    : [];
+  const resolved = keys.length > 0 ? keys : definition.inputs.map((port) => port.key);
+
+  return resolved.map((key) => ({
+    key,
+    label: `值 ${key.length === 1 ? key.toUpperCase() : key}`,
+    kind: 'any',
+    optional: true,
+    description: '数字计算的左值 / 右值、文本追加的一段，或 Math 表达式里的变量。',
+  }));
+}
+
+/** Next unused port key: a–z, then v27, v28… */
+export function nextPipelineInputKey(keys: readonly string[]): string {
+  const used = new Set(keys);
+  for (let index = 0; ; index += 1) {
+    const key = index < 26 ? String.fromCharCode(97 + index) : `v${index + 1}`;
+    if (!used.has(key)) {
+      return key;
+    }
+  }
 }
 
 export interface ChatPipelineGraphSnapshot {

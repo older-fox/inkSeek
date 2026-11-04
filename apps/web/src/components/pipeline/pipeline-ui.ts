@@ -9,10 +9,14 @@ import type {
   ChatPipelineVariable,
 } from '@inkseek/shared';
 import type { LucideIcon } from 'lucide-react';
-import { Braces, Cpu, GitBranch, Images, StickyNote, Timer, Type, Variable } from 'lucide-react';
+import { Braces, Cpu, GitBranch, Images, Sparkles, StickyNote, Timer, Type, Variable } from 'lucide-react';
+import { resolvePipelineNodeInputs } from '@inkseek/shared';
 import type { PipelineSelectCreate } from './pipeline-select';
 
 export const CARD_WIDTH = 248;
+/** Drag bounds for cards that opt into resizing; there is no upper bound. */
+export const MIN_CARD_WIDTH = 220;
+export const MIN_CARD_HEIGHT = 180;
 /** Fixed header band; port rows start right below it. */
 export const CARD_HEADER_HEIGHT = 56;
 export const PORTS_PADDING_TOP = 6;
@@ -38,6 +42,14 @@ export const CATEGORY_STYLE: Record<
     border: 'border-brass-400/30',
     background: 'bg-brass-400/[0.09]',
     dot: 'bg-brass-400',
+  },
+  ai: {
+    label: 'AI',
+    icon: Sparkles,
+    text: 'text-[#f0c088]',
+    border: 'border-[#e0a869]/30',
+    background: 'bg-[#e0a869]/[0.08]',
+    dot: 'bg-[#e0a869]',
   },
   data: {
     label: '数据',
@@ -163,8 +175,14 @@ export const IO_KIND_RING: Record<ChatPipelineIoKind, string> = {
   any: 'ring-mist-100/25',
 };
 
-export function cardRows(definition: ChatPipelineNodeType | null): number {
-  return Math.max(1, definition?.inputs.length ?? 0, definition?.outputs.length ?? 0);
+export function cardRows(
+  definition: ChatPipelineNodeType | null,
+  config?: Record<string, unknown> | null,
+): number {
+  const inputs = definition ? resolvePipelineNodeInputs(definition, config) : [];
+  // Dynamic cards reserve one more row for the "add input" control.
+  const inputRows = inputs.length + (definition?.dynamicInputs ? 1 : 0);
+  return Math.max(1, inputRows, definition?.outputs.length ?? 0);
 }
 
 const NOTE_LINE_HEIGHT = 20;
@@ -195,10 +213,23 @@ export function cardHeight(
   return (
     CARD_HEADER_HEIGHT +
     PORTS_PADDING_TOP +
-    cardRows(definition) * PORT_ROW_HEIGHT +
+    cardRows(definition, config) * PORT_ROW_HEIGHT +
     PORTS_PADDING_BOTTOM +
     CARD_BODY_ESTIMATE
   );
+}
+
+/** Rendered card width; user-resized cards override the default. */
+export function nodeWidth(node: ChatPipelineGraphNode): number {
+  return node.size?.width ?? CARD_WIDTH;
+}
+
+/** Rendered card height; falls back to the content estimate when not resized. */
+export function nodeHeight(
+  node: ChatPipelineGraphNode,
+  definition: ChatPipelineNodeType | null,
+): number {
+  return node.size?.height ?? cardHeight(definition, node.config);
 }
 
 function portRowY(node: ChatPipelineGraphNode, index: number): number {
@@ -222,7 +253,7 @@ export function outputPoint(
   key: string,
 ): ChatPipelineNodePosition {
   return {
-    x: node.position.x + CARD_WIDTH,
+    x: node.position.x + nodeWidth(node),
     y: portRowY(node, portIndex(definition?.outputs, key)),
   };
 }
@@ -232,9 +263,10 @@ export function inputPoint(
   definition: ChatPipelineNodeType | null,
   key: string,
 ): ChatPipelineNodePosition {
+  const inputs = definition ? resolvePipelineNodeInputs(definition, node.config) : [];
   return {
     x: node.position.x,
-    y: portRowY(node, portIndex(definition?.inputs, key)),
+    y: portRowY(node, portIndex(inputs, key)),
   };
 }
 

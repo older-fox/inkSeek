@@ -68,6 +68,48 @@ export class ChatPersonaService {
     return this.toRecord(conversation, contact.id, record);
   }
 
+  /**
+   * Pipeline lookup: external ids are group numbers / peer QQ numbers, which
+   * are what message objects expose. Kind is explicit so a card can never
+   * silently fall back to the other persona table.
+   */
+  async valuesByExternalId(
+    kind: 'GROUP' | 'PRIVATE',
+    channelId: string,
+    externalId: string,
+  ): Promise<Record<string, ChatPersonaValue> | null> {
+    if (!channelId || !externalId) {
+      return null;
+    }
+
+    if (kind === 'GROUP') {
+      const conversation = await this.prisma.chatConversation.findUnique({
+        where: { channelId_kind_externalId: { channelId, kind, externalId } },
+        select: { groupPersona: { select: { values: true } } },
+      });
+
+      return conversation?.groupPersona
+        ? readValues(conversation.groupPersona.values)
+        : null;
+    }
+
+    const contact = await this.prisma.chatContact.findUnique({
+      where: { channelId_externalId: { channelId, externalId } },
+      select: { id: true },
+    });
+
+    if (!contact) {
+      return null;
+    }
+
+    const row = await this.prisma.chatPrivatePersona.findUnique({
+      where: { channelId_contactId: { channelId, contactId: contact.id } },
+      select: { values: true },
+    });
+
+    return row ? readValues(row.values) : null;
+  }
+
   async save(
     conversationId: string,
     input: SaveConversationPersonaInput,

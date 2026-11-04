@@ -1,10 +1,13 @@
 import type {
   ChatConversationKind,
   ChatMessageKind,
+  ChatPersonaValue,
   ChatPipelineConfigField,
+  ChatPipelineDynamicInputs,
   ChatPipelineIoField,
   ChatPipelineJoin,
   ChatPipelineNodeCategory,
+  ChatPipelineNodeHelp,
   ChatPipelineVoiceValue,
 } from '@inkseek/shared';
 import type { PipelineGraph, PipelineNode } from './pipeline-graph.js';
@@ -78,9 +81,51 @@ export interface PipelineImageDescriptionResult {
   cached: boolean;
 }
 
+export interface PipelineChatInput {
+  prompt: string;
+  system?: string | null;
+  /** Empty values fall back to the first configured provider / its first model. */
+  providerId?: string | null;
+  model?: string | null;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface PipelineChatResult {
+  /** Raw model text, already trimmed. */
+  text: string;
+  providerId: string;
+  providerName: string;
+  model: string;
+  latencyMs: number;
+}
+
+export const PROMPT_COMPRESSION_DEFAULT_TTL_SECONDS = 86_400;
+export const PROMPT_COMPRESSION_MIN_TTL_SECONDS = 60;
+export const PROMPT_COMPRESSION_MAX_TTL_SECONDS = 2_592_000;
+
+export interface PipelinePromptCompressionInput {
+  /** Detailed prompt to condense; the cache key derives from it. */
+  prompt: string;
+  providerId?: string | null;
+  model?: string | null;
+  /** Seconds the compressed prompt stays cached; omitted uses the card default. */
+  ttlSeconds?: number;
+}
+
+export interface PipelinePromptCompressionResult {
+  text: string;
+  /** True when the text came from Redis instead of a model call. */
+  cached: boolean;
+  /** Model that produced the cached/generated text; null on older cache rows. */
+  model: string | null;
+}
+
 export interface PipelineNodeResult {
   outputs: Record<string, unknown>;
   effects?: PipelineEffect[];
+  /** Gate stopped the branch: outgoing edges never activate, so downstream cards skip. */
+  blocked?: boolean;
 }
 
 export class PipelineAbortError extends Error {
@@ -100,16 +145,36 @@ export interface PipelineNodeContext {
   resolve(value: unknown): unknown;
   /** Interpolates a template string using the same references. */
   template(template: string): string;
+  /**
+   * Persona card bound to this run, normalized with the same values the channel
+   * snapshot exposes; null when the run has no persona (e.g. global debug).
+   */
+  personaValues: Readonly<Record<string, ChatPersonaValue>> | null;
   /** Live pipeline variable value; undefined when the key was never declared. */
   getVariable(key: string): unknown;
   /** Writes a pipeline variable for later cards in the same run. */
   setVariable(key: string, value: unknown): void;
+  /**
+   * Reads a conversation-level persona snapshot by external id (group number
+   * or peer QQ). Strict about the kind: a group card never resolves a private
+   * conversation and vice versa. Null when out of channel scope or unset.
+   */
+  readConversationPersona(
+    kind: 'group' | 'private',
+    externalId: string,
+  ): Promise<Record<string, ChatPersonaValue> | null>;
   /** Waits `ms`; the runner owns the timer and cancels it on shutdown. */
   wait(ms: number): Promise<void>;
   /** Hashes the image, returns a cached description or asks a vision model. */
   describeImage(
     input: PipelineImageDescriptionInput,
   ): Promise<PipelineImageDescriptionResult>;
+  /** Text completion against the configured model providers. */
+  chat(input: PipelineChatInput): Promise<PipelineChatResult>;
+  /** Compresses a detailed prompt, reusing the Redis-cached result while its TTL holds. */
+  compressPrompt(
+    input: PipelinePromptCompressionInput,
+  ): Promise<PipelinePromptCompressionResult>;
 }
 
 export interface PipelineNodeDefinition {
@@ -118,6 +183,8 @@ export interface PipelineNodeDefinition {
   label: string;
   category: ChatPipelineNodeCategory;
   description: string;
+  /** Optional card-specific help content, surfaced from the card's ? button. */
+  help?: ChatPipelineNodeHelp;
   /** Locked card: exactly one instance must exist and it cannot be removed. */
   system?: boolean;
   /**
@@ -125,6 +192,8 @@ export interface PipelineNodeDefinition {
    * so it never opens a node row and has no ports to connect.
    */
   layout?: boolean;
+  /** Card can be resized on the canvas; size is layout-only and stored per node. */
+  resizable?: boolean;
   /** Join mode used when the node is added from the palette. */
   defaultJoin?: ChatPipelineJoin;
   /** Runs even without incoming edges; for cards whose inputs only order execution. */
@@ -133,6 +202,8 @@ export interface PipelineNodeDefinition {
   fields: ChatPipelineConfigField[];
   /** Typed input ports; edges connect to these keys. */
   inputs: ChatPipelineIoField[];
+  /** Ports stored in the node config; `inputs` is then only the fallback list. */
+  dynamicInputs?: ChatPipelineDynamicInputs;
   /** Fields the node writes into its output namespace. */
   outputs: ChatPipelineIoField[];
   /**

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   canConnectPipelineKinds,
+  resolvePipelineNodeInputs,
   type ChatPipelineGraph,
   type ChatPipelineGraphEdge,
   type ChatPipelineGraphNode,
@@ -30,9 +31,11 @@ import {
 } from './pipeline-graph.js';
 import {
   migrateLegacyMessagePorts,
+  migratePersonaParameterCards,
   migrateRemovedMessageFieldNodes,
   migrateSourceWhitelistColumns,
   migrateSourceWhitelistInput,
+  migrateSourceWhitelistGate,
   migrateSourceWhitelistMode,
   migrateSourceWhitelistScope,
 } from './pipeline-migrate.js';
@@ -157,6 +160,7 @@ export class PipelineGraphService implements OnModuleInit {
       ...(node.config ? { config: node.config } : {}),
       join: node.join,
       position: { ...node.position },
+      ...(node.size ? { size: { ...node.size } } : {}),
     }));
     const edges: PipelineEdge[] = input.edges.map((edge) => ({
       from: edge.from,
@@ -297,16 +301,20 @@ export class PipelineGraphService implements OnModuleInit {
         const warn = (message: string) => this.logger.warn(message);
         const portsMigrated = migrateLegacyMessagePorts(graph, warn);
         const cardsMigrated = migrateRemovedMessageFieldNodes(graph, warn);
+        const personaMigrated = migratePersonaParameterCards(graph, warn);
         const whitelistMigrated = migrateSourceWhitelistColumns(graph, warn);
         const whitelistModeMigrated = migrateSourceWhitelistMode(graph, warn);
         const whitelistScopeMigrated = migrateSourceWhitelistScope(graph, warn);
+        const whitelistGated = migrateSourceWhitelistGate(graph, warn);
         const whitelistWired = migrateSourceWhitelistInput(graph, warn);
         const migrated =
           portsMigrated ||
           cardsMigrated ||
+          personaMigrated ||
           whitelistMigrated ||
           whitelistModeMigrated ||
           whitelistScopeMigrated ||
+          whitelistGated ||
           whitelistWired;
         stampNodeVersions(graph);
         this.assertValid(graph);
@@ -524,9 +532,20 @@ export function pipelineCatalog(): ChatPipelineNodeType[] {
     category: definition.category,
     description: definition.description,
     version: definition.version,
+    help: definition.help
+      ? {
+          notes: definition.help.notes ? [...definition.help.notes] : undefined,
+          keyGroups: definition.help.keyGroups?.map((group) => ({
+            title: group.title,
+            keys: [...group.keys],
+          })),
+        }
+      : undefined,
     system: definition.system ?? false,
     layout: definition.layout ?? false,
+    resizable: definition.resizable ?? false,
     defaultJoin: definition.defaultJoin ?? 'all',
+    dynamicInputs: definition.dynamicInputs,
     defaultConfig: JSON.parse(JSON.stringify(definition.defaultConfig)) as Record<string, unknown>,
     fields: definition.fields.map((field) => ({ ...field })),
     inputs: definition.inputs.map((field) => ({ ...field })),
@@ -594,7 +613,9 @@ function assertTypedGraph(graph: PipelineGraph): void {
       throw new Error(`节点 ${edge.from} 没有输出端口 ${edge.fromPort}`);
     }
 
-    const input = targetDefinition.inputs.find((port) => port.key === edge.toPort);
+    const input = resolvePipelineNodeInputs(targetDefinition, target.config).find(
+      (port) => port.key === edge.toPort,
+    );
     if (!input) {
       throw new Error(`节点 ${edge.to} 没有输入端口 ${edge.toPort}`);
     }
@@ -667,6 +688,7 @@ function toContractGraph(graph: PipelineGraph, updatedAt: Date): ChatPipelineGra
         config: node.config ?? null,
         join: node.join ?? 'all',
         position: { ...node.position },
+        ...(node.size ? { size: { ...node.size } } : {}),
       }),
     ),
     edges: graph.edges.map(
@@ -832,6 +854,19 @@ function nodesFromJson(value: Prisma.JsonValue): PipelineNode[] {
     ) {
       throw new Error(`节点 ${id} 的版本号无效`);
     }
+    const size = entry['size'];
+    if (
+      size !== undefined &&
+      (!isRecord(size) ||
+        typeof size['width'] !== 'number' ||
+        !Number.isFinite(size['width']) ||
+        size['width'] <= 0 ||
+        typeof size['height'] !== 'number' ||
+        !Number.isFinite(size['height']) ||
+        size['height'] <= 0)
+    ) {
+      throw new Error(`节点 ${id} 的尺寸无效`);
+    }
 
     return {
       id,
@@ -840,6 +875,9 @@ function nodesFromJson(value: Prisma.JsonValue): PipelineNode[] {
       ...(join ? { join } : {}),
       ...(typeof nodeVersion === 'number' ? { nodeVersion } : {}),
       position: { x: position['x'], y: position['y'] },
+      ...(isRecord(size)
+        ? { size: { width: size['width'] as number, height: size['height'] as number } }
+        : {}),
     };
   });
 }

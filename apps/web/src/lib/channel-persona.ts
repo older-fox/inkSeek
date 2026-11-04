@@ -768,6 +768,14 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
   },
 ];
 
+export const PERSONA_FIELD_LABELS: ReadonlyMap<string, string> = new Map(
+  PERSONA_GROUPS.flatMap((group) =>
+    group.sections.flatMap((section) =>
+      section.fields.map((field) => [field.key, field.label] as const),
+    ),
+  ),
+);
+
 export const PERSONA_ATTRIBUTE_COUNT = PERSONA_GROUPS.reduce(
   (total, group) =>
     total +

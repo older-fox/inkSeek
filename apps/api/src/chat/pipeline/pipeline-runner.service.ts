@@ -6,7 +6,13 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import {
+  buildChannelPersonaSnapshot,
+  resolvePipelineNodeInputs,
+} from '@inkseek/shared';
 import type {
+  ChatPersonaValue,
+  ChatPipelineIoField,
   ChatPipelineNodeRunSummary,
   ChatPipelineNodeStatus,
   ChatPipelineRunDetail,
@@ -18,7 +24,11 @@ import type {
 } from '@inkseek/shared';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
+import { LlmService } from '../../ai/llm.service.js';
+import { PersonasService } from '../../personas/personas.service.js';
+import { ChatPersonaService } from '../chat-persona.service.js';
 import { ImageDescriptionService } from '../image-description.service.js';
+import { PromptCompressionService } from '../prompt-compression.service.js';
 import { PipelineEffectsService } from './pipeline-effects.service.js';
 import { PipelineEventsService } from './pipeline-events.service.js';
 import {
@@ -88,6 +98,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     private readonly effects: PipelineEffectsService,
     private readonly imageDescriptions: ImageDescriptionService,
     private readonly events: PipelineEventsService,
+    private readonly personas: PersonasService,
+    private readonly conversationPersonas: ChatPersonaService,
+    private readonly llm: LlmService,
+    private readonly promptCompression: PromptCompressionService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -326,9 +340,11 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       graph.variables.map((variable) => [variable.key, variable.value]),
     );
     const statuses = new Map<string, ChatPipelineNodeStatus>();
+    const blocked = new Set<string>();
     const failures: string[] = [];
     const requestedEffects: PipelineEffect[] = [];
     let aborted = false;
+    const personaValues = await this.loadPersonaValues(plan);
 
     try {
       for (const node of order) {
@@ -338,8 +354,9 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           continue;
         }
         const nodeEdges = incoming.get(node.id) ?? [];
-        const activeEdges = this.activeEdges(nodeEdges, statuses, outputs);
-        const inputs = collectInputs(definition, activeEdges, outputs);
+        const activeEdges = this.activeEdges(nodeEdges, statuses, outputs, blocked);
+        const ports = resolvePipelineNodeInputs(definition, node.config);
+        const inputs = collectInputs(ports, activeEdges, outputs);
         const traceInput = {
           config: node.config ?? null,
           join: node.join ?? 'all',
@@ -355,7 +372,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        if (!shouldRunNode(definition, node, nodeEdges, activeEdges, inputs)) {
+        if (!shouldRunNode(definition, ports, node, nodeEdges, activeEdges, inputs)) {
           statuses.set(node.id, 'SKIPPED');
           await this.settleNode(runId, null, node, nodeStartedAt, 'SKIPPED', traceInput, null, null);
           continue;
@@ -371,14 +388,33 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
             node,
             outputs,
             inputs,
+            personaValues,
             resolve: helpers.resolve,
             template: helpers.template,
             getVariable: (key) => variables.get(key),
             setVariable: (key, value) => {
               variables.set(key, value);
             },
+            readConversationPersona: (kind, externalId) =>
+              plan.channelId
+                ? this.conversationPersonas.valuesByExternalId(
+                    kind === 'group' ? 'GROUP' : 'PRIVATE',
+                    plan.channelId,
+                    externalId,
+                  )
+                : Promise.resolve(null),
             wait: (ms) => this.wait(ms, controller.signal),
             describeImage: (input) => this.imageDescriptions.describe(input),
+            chat: (input) =>
+              this.llm.complete({
+                prompt: input.prompt,
+                system: input.system ?? undefined,
+                providerId: input.providerId ?? null,
+                model: input.model ?? null,
+                temperature: input.temperature,
+                maxTokens: input.maxTokens,
+              }),
+            compressPrompt: (input) => this.promptCompression.compress(input),
           });
           const output = sanitizeRecord(result.outputs);
           if (result.effects && result.effects.length > 0) {
@@ -388,6 +424,9 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
             }
           }
           outputs.set(node.id, output);
+          if (result.blocked === true) {
+            blocked.add(node.id);
+          }
           statuses.set(node.id, 'SUCCEEDED');
           await this.settleNode(runId, rowId, node, nodeStartedAt, 'SUCCEEDED', traceInput, output, null);
         } catch (error) {
@@ -579,6 +618,37 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Resolves the persona bound to this run: the scope card for persona debug
+   * runs, otherwise the channel's bound card. Values use the same normalized
+   * keys the channel snapshot exposes.
+   */
+  private async loadPersonaValues(
+    plan: RunPlan,
+  ): Promise<Record<string, ChatPersonaValue> | null> {
+    let cardId = plan.personaCardId;
+
+    try {
+      if (!cardId && plan.channelId) {
+        const binding = await this.prisma.chatChannelPersona.findUnique({
+          where: { channelId: plan.channelId },
+          select: { cardId: true },
+        });
+        cardId = binding?.cardId ?? null;
+      }
+      if (!cardId) {
+        return null;
+      }
+      const card = await this.personas.latestForSnapshot(cardId);
+      return buildChannelPersonaSnapshot(card).values;
+    } catch (error) {
+      this.logger.warn(
+        `人格参数读取失败，本次运行按无人格处理：${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   /** Runner-owned timer: shutdown aborts the wait instead of holding the process. */
   private wait(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -603,9 +673,10 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     edges: PipelineEdge[],
     statuses: Map<string, ChatPipelineNodeStatus>,
     outputs: PipelineOutputs,
+    blocked: ReadonlySet<string>,
   ): PipelineEdge[] {
     return edges.filter((edge) => {
-      if (statuses.get(edge.from) !== 'SUCCEEDED') {
+      if (statuses.get(edge.from) !== 'SUCCEEDED' || blocked.has(edge.from)) {
         return false;
       }
       if (!edge.when) {
@@ -706,13 +777,13 @@ function indexIncoming(graph: PipelineGraph): Map<string, PipelineEdge[]> {
 
 /** Only active edges contribute; a `multiple` port aggregates them in order. */
 function collectInputs(
-  definition: PipelineNodeDefinition,
+  ports: ChatPipelineIoField[],
   edges: PipelineEdge[],
   outputs: PipelineOutputs,
 ): PipelineInputs {
   const inputs: Record<string, unknown> = {};
 
-  for (const port of definition.inputs) {
+  for (const port of ports) {
     const values = edges
       .filter((edge) => edge.toPort === port.key)
       .map((edge) => outputs.get(edge.from)?.[edge.fromPort]);
@@ -733,13 +804,14 @@ function collectInputs(
  */
 function shouldRunNode(
   definition: PipelineNodeDefinition,
+  ports: ChatPipelineIoField[],
   node: PipelineNode,
   edges: PipelineEdge[],
   activeEdges: PipelineEdge[],
   inputs: PipelineInputs,
 ): boolean {
   if (edges.length === 0) {
-    return definition.inputs.length === 0 || definition.alwaysRun === true;
+    return ports.length === 0 || definition.alwaysRun === true;
   }
 
   if (node.join === 'any') {
@@ -750,7 +822,5 @@ function shouldRunNode(
     return false;
   }
 
-  return definition.inputs.every(
-    (port) => port.optional === true || inputs[port.key] !== undefined,
-  );
+  return ports.every((port) => port.optional === true || inputs[port.key] !== undefined);
 }

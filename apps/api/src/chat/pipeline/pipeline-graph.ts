@@ -1,4 +1,4 @@
-import type { ChatPipelineVariable } from '@inkseek/shared';
+import type { ChatPipelineNodeSize, ChatPipelineVariable } from '@inkseek/shared';
 
 export interface PipelineEdgeCondition {
   /** Output field on the source node, e.g. `matched`. */
@@ -32,6 +32,8 @@ export interface PipelineNode {
   nodeVersion?: number;
   /** Canvas position; layout only. */
   position: { x: number; y: number };
+  /** User-adjusted card size; layout only. */
+  size?: ChatPipelineNodeSize;
 }
 
 export interface PipelineGraph {
@@ -94,6 +96,17 @@ export function validateGraph(graph: PipelineGraph): void {
       throw new Error(`管线图节点 id 重复：${node.id}`);
     }
     ids.add(node.id);
+
+    const size = node.size;
+    if (
+      size !== undefined &&
+      (!Number.isFinite(size.width) ||
+        size.width <= 0 ||
+        !Number.isFinite(size.height) ||
+        size.height <= 0)
+    ) {
+      throw new Error(`管线图节点尺寸无效：${node.id}`);
+    }
   }
 
   for (const edge of graph.edges) {

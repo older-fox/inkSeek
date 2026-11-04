@@ -4,9 +4,10 @@ import type {
   ChatPipelineIoKind,
   ChatPipelineNodePosition,
   ChatPipelineNodeRunSummary,
+  ChatPipelineNodeSize,
   ChatPipelineNodeType,
 } from '@inkseek/shared';
-import { canConnectPipelineKinds } from '@inkseek/shared';
+import { canConnectPipelineKinds, resolvePipelineNodeInputs } from '@inkseek/shared';
 import { ChevronDown, Maximize2, Minus, Plus } from 'lucide-react';
 import {
   forwardRef,
@@ -18,9 +19,10 @@ import {
 } from 'react';
 import { cn } from '@/lib/cn';
 import { PipelineNodeCard } from './pipeline-node-card';
+import type { ProviderOption } from './pipeline-config-options';
 import {
-  CARD_WIDTH,
-  cardHeight,
+  MIN_CARD_HEIGHT,
+  MIN_CARD_WIDTH,
   edgeCurvePoint,
   edgeMidpoint,
   edgePath,
@@ -28,6 +30,8 @@ import {
   formatRuntimeDetail,
   formatRuntimePreview,
   inputPoint,
+  nodeHeight,
+  nodeWidth,
   outputPoint,
   WORLD_HEIGHT,
   WORLD_WIDTH,
@@ -43,13 +47,19 @@ interface PipelineCanvasProps {
   graph: ChatPipelineGraph;
   catalog: ChatPipelineNodeType[];
   selection: PipelineSelection;
+  /** Model providers for provider/model selects rendered on card faces. */
+  providers: ProviderOption[];
   nodeRuns: Map<string, ChatPipelineNodeRunSummary>;
   /** Shows the runtime values each edge carried for the overlaid run. */
   debugMode: boolean;
   onSelect: (selection: PipelineSelection) => void;
   onMoveNode: (id: string, position: ChatPipelineNodePosition) => void;
+  onResizeNode: (id: string, size: ChatPipelineNodeSize) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
   onCreateVariable: (key: string) => void;
+  onAddNodeInput: (id: string) => void;
+  onRemoveNodeInput: (id: string, key: string) => void;
+  onOpenNodeHelp: (type: string) => void;
   onConnect: (from: string, fromPort: string, to: string, toPort: string) => void;
   onConnectError: (message: string) => void;
 }
@@ -117,12 +127,17 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
       graph,
       catalog,
       selection,
+      providers,
       nodeRuns,
       debugMode,
       onSelect,
       onMoveNode,
+      onResizeNode,
       onUpdateNodeConfig,
       onCreateVariable,
+      onAddNodeInput,
+      onRemoveNodeInput,
+      onOpenNodeHelp,
       onConnect,
       onConnectError,
     },
@@ -156,13 +171,11 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
       const minX = Math.min(...graph.nodes.map((node) => node.position.x)) - 72;
       const minY = Math.min(...graph.nodes.map((node) => node.position.y)) - 72;
       const maxX =
-        Math.max(...graph.nodes.map((node) => node.position.x + CARD_WIDTH)) + 72;
+        Math.max(...graph.nodes.map((node) => node.position.x + nodeWidth(node))) + 72;
       const maxY =
         Math.max(
           ...graph.nodes.map(
-            (node) =>
-              node.position.y +
-              cardHeight(catalogByType.get(node.type) ?? null, node.config),
+            (node) => node.position.y + nodeHeight(node, catalogByType.get(node.type) ?? null),
           ),
         ) + 72;
       const width = maxX - minX;
@@ -320,6 +333,49 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
       window.addEventListener('pointerup', handleUp);
     };
 
+    const beginResize = (
+      event: React.PointerEvent<HTMLButtonElement>,
+      node: ChatPipelineGraphNode,
+    ) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const definition = definitions.get(node.type);
+      if (!definition?.resizable) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onSelect({ kind: 'node', id: node.id });
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const scale = viewportRef.current.scale;
+      const cardElement = event.currentTarget.closest('[data-node-id]');
+      const rendered = cardElement?.getBoundingClientRect();
+      const startWidth = node.size?.width ?? (rendered ? rendered.width / scale : nodeWidth(node));
+      const startHeight =
+        node.size?.height ?? (rendered ? rendered.height / scale : nodeHeight(node, definition));
+
+      const handleMove = (moveEvent: PointerEvent) => {
+        onResizeNode(node.id, {
+          width: Math.max(
+            MIN_CARD_WIDTH,
+            Math.round(startWidth + (moveEvent.clientX - startX) / scale),
+          ),
+          height: Math.max(
+            MIN_CARD_HEIGHT,
+            Math.round(startHeight + (moveEvent.clientY - startY) / scale),
+          ),
+        });
+      };
+      const handleUp = () => {
+        window.removeEventListener('pointermove', handleMove);
+        window.removeEventListener('pointerup', handleUp);
+      };
+      window.addEventListener('pointermove', handleMove);
+      window.addEventListener('pointerup', handleUp);
+    };
+
     const beginConnect = (
       event: React.PointerEvent<HTMLButtonElement>,
       node: ChatPipelineGraphNode,
@@ -363,7 +419,7 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
 
         const targetNode = nodesById.get(targetId);
         const targetDefinition = targetNode ? definitions.get(targetNode.type) : undefined;
-        if (!targetDefinition) {
+        if (!targetNode || !targetDefinition) {
           return;
         }
 
@@ -372,7 +428,7 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
         // the page can explain the rejection.
         let toPort = portElement?.getAttribute('data-port-in') ?? null;
         if (!toPort) {
-          const candidate = targetDefinition.inputs.find(
+          const candidate = resolvePipelineNodeInputs(targetDefinition, targetNode.config).find(
             (input) =>
               canConnectPipelineKinds(port.kind, input.kind) &&
               (input.multiple === true ||
@@ -554,9 +610,12 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
               );
               const point = edgeCurvePoint(start, end, 0.34);
               const outputValue = recordOf(sourceRun?.output)?.[edge.fromPort];
-              const targetPort = definitions
-                .get(target.type)
-                ?.inputs.find((port) => port.key === edge.toPort);
+              const targetDefinition = definitions.get(target.type) ?? null;
+              const targetPort = targetDefinition
+                ? resolvePipelineNodeInputs(targetDefinition, target.config).find(
+                    (port) => port.key === edge.toPort,
+                  )
+                : undefined;
               // A multi-line input aggregates every incoming edge, so only the
               // source output belongs on this pill.
               const inputValue =
@@ -657,10 +716,15 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
               run={nodeRuns.get(node.id)}
               dragKind={connecting?.kind ?? null}
               variables={graph.variables}
+              providers={providers}
               onPointerDown={(event) => beginNodeDrag(event, node)}
               onStartConnect={(event, portKey) => beginConnect(event, node, portKey)}
               onUpdateNodeConfig={onUpdateNodeConfig}
               onCreateVariable={onCreateVariable}
+              onAddInput={onAddNodeInput}
+              onRemoveInput={onRemoveNodeInput}
+              onOpenHelp={onOpenNodeHelp}
+              onStartResize={(event) => beginResize(event, node)}
             />
           ))}
         </div>
@@ -697,7 +761,7 @@ export const PipelineCanvas = forwardRef<PipelineCanvasHandle, PipelineCanvasPro
         </div>
 
         <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border border-mist-100/[0.07] bg-ink-950/70 px-3 py-1 font-mono text-[0.5rem] tracking-[0.04em] text-mist-600 backdrop-blur">
-          拖动卡片移动 · 从输出端口拖到匹配的输入端口 · Delete 删除选中
+          拖动卡片移动 · 从输出端口拖到匹配的输入端口 · Ctrl+C / Ctrl+V 复制粘贴 · Delete 删除选中
         </p>
 
         {graph.nodes.length === 0 && (

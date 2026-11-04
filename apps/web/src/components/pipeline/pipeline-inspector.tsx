@@ -10,9 +10,9 @@ import type {
   ChatPipelineNodeType,
   ChatPipelineVariable,
 } from '@inkseek/shared';
+import { isPipelineConfigFieldVisible, resolvePipelineNodeInputs } from '@inkseek/shared';
 import { Info, Link2, Lock, Plus, Trash2, Unlink, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
   CATEGORY_STYLE,
@@ -35,79 +35,11 @@ import {
   type PipelineSelectCreate,
   type PipelineSelectOption,
 } from './pipeline-select';
-
-interface ProviderOption {
-  id: string;
-  name: string;
-  models: string[];
-}
-
-function useProviderOptions(active: boolean): ProviderOption[] {
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-
-    let cancelled = false;
-
-    api
-      .personaAiProviders()
-      .then((list) => {
-        if (cancelled) {
-          return;
-        }
-        setProviders(list.map(({ id, name, models }) => ({ id, name, models })));
-      })
-      .catch(() => {
-        // 读取失败时下拉只剩「自动」项，已保存的值仍会作为自定义项显示。
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
-
-  return providers;
-}
-
-function dynamicFieldOptions(
-  field: ChatPipelineConfigField,
-  config: Record<string, unknown>,
-  providers: ProviderOption[],
-  variables: ChatPipelineVariable[],
-): PipelineSelectOption[] | null {
-  if (field.optionsSource === 'pipeline-variables') {
-    return [
-      { value: '', label: '未设置' },
-      ...variables.map((variable) => ({ value: variable.key, label: variable.key })),
-    ];
-  }
-
-  if (field.optionsSource === 'model-providers') {
-    return [
-      { value: '', label: '自动（首个提供商）' },
-      ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
-    ];
-  }
-
-  if (field.optionsSource === 'provider-models') {
-    const scope = config[field.dependsOn ?? 'providerId'];
-    const scoped =
-      typeof scope === 'string' && scope !== ''
-        ? providers.filter((provider) => provider.id === scope)
-        : providers;
-    const models = [...new Set(scoped.flatMap((provider) => provider.models))];
-
-    return [
-      { value: '', label: '自动（该提供商的首个模型）' },
-      ...models.map((model) => ({ value: model, label: model })),
-    ];
-  }
-
-  return null;
-}
+import {
+  dependentConfigResets,
+  dynamicFieldOptions,
+  type ProviderOption,
+} from './pipeline-config-options';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -119,6 +51,8 @@ interface PipelineInspectorProps {
   graph: ChatPipelineGraph;
   catalog: ChatPipelineNodeType[];
   selection: PipelineSelection;
+  /** Model providers resolved once by the page for every provider/model select. */
+  providers: ProviderOption[];
   /** Runtime overlays for the selected run; only surfaced in debug mode. */
   debugMode: boolean;
   nodeRuns: Map<string, ChatPipelineNodeRunSummary>;
@@ -138,6 +72,7 @@ export function PipelineInspector({
   graph,
   catalog,
   selection,
+  providers,
   debugMode,
   nodeRuns,
   onRenameGraph,
@@ -157,15 +92,6 @@ export function PipelineInspector({
       : null;
   const selectedEdge =
     selection?.kind === 'edge' ? (graph.edges[selection.index] ?? null) : null;
-  const providers = useProviderOptions(
-    catalog.some((definition) =>
-      definition.fields.some(
-        (field) =>
-          field.optionsSource === 'model-providers' ||
-          field.optionsSource === 'provider-models',
-      ),
-    ),
-  );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
@@ -506,31 +432,27 @@ function NodeInspector({
   const Icon = category.icon;
   const config = node.config ?? {};
   const isSystem = definition?.system === true;
+  const inputs = definition ? resolvePipelineNodeInputs(definition, node.config) : [];
+  const fields = (definition?.fields ?? []).filter((field) =>
+    isPipelineConfigFieldVisible(field, config),
+  );
   const showJoin =
     !isSystem &&
     definition !== null &&
-    (definition.inputs.length > 1 || definition.inputs.some((port) => port.multiple));
+    (inputs.length > 1 || inputs.some((port) => port.multiple));
 
   const commitField = (field: ChatPipelineConfigField, value: unknown) => {
     onUpdateNodeConfig(node.id, field.key, value);
 
-    for (const dependent of definition?.fields ?? []) {
-      if (dependent.dependsOn !== field.key) {
-        continue;
-      }
-      const current = config[dependent.key];
-      if (typeof current !== 'string' || current === '') {
-        continue;
-      }
-      const options = dynamicFieldOptions(
-        dependent,
-        { ...config, [field.key]: value },
-        providers,
-        variables,
-      );
-      if (options && !options.some((option) => option.value === current)) {
-        onUpdateNodeConfig(node.id, dependent.key, '');
-      }
+    for (const reset of dependentConfigResets(
+      definition,
+      field,
+      value,
+      config,
+      providers,
+      variables,
+    )) {
+      onUpdateNodeConfig(node.id, reset.key, reset.value);
     }
   };
 
@@ -577,7 +499,7 @@ function NodeInspector({
 
       {definition && (
         <div className="mt-4 grid gap-2.5 rounded-xl border border-mist-100/[0.07] bg-ink-950/25 p-2.5">
-          <IoList title="输入端口" hint="类型匹配的上游输出" fields={definition.inputs} />
+          <IoList title="输入端口" hint="类型匹配的上游输出" fields={inputs} />
           <IoList title="输出端口" hint="可被下游引用或连接" fields={definition.outputs} />
         </div>
       )}
@@ -596,12 +518,12 @@ function NodeInspector({
       )}
 
       <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3.5">
-        {(definition?.fields ?? []).length === 0 ? (
+        {fields.length === 0 ? (
           <p className="col-span-2 rounded-lg border border-dashed border-mist-100/[0.1] px-3 py-3 text-[0.62rem] text-mist-600">
             这个节点没有可配置字段。
           </p>
         ) : (
-          definition?.fields.map((field) => (
+          fields.map((field) => (
             <div key={field.key} className={cn('min-w-0', field.width !== 'half' && 'col-span-2')}>
               <FieldControl
                 field={field}
@@ -641,7 +563,7 @@ function NodeInspector({
           </div>
           <p className="mt-1.5 text-[0.58rem] leading-4.5 text-mist-600">
             {node.join === 'all'
-              ? definition.inputs.every((port) => port.optional === true)
+              ? inputs.every((port) => port.optional === true)
                 ? '所有入边都激活时节点才执行；可选端口没有入边也可以执行。'
                 : '所有入边都激活时节点才执行，缺少必填端口时节点跳过。'
               : '任一入边激活就执行（分支汇合常用），空输入端口留空。'}
@@ -702,7 +624,12 @@ function EdgeInspector({
   const sourceDefinition = source ? definitionOf(source, catalog) : null;
   const targetDefinition = target ? definitionOf(target, catalog) : null;
   const fromPort = sourceDefinition?.outputs.find((port) => port.key === edge.fromPort) ?? null;
-  const toPort = targetDefinition?.inputs.find((port) => port.key === edge.toPort) ?? null;
+  const toPort =
+    targetDefinition && target
+      ? (resolvePipelineNodeInputs(targetDefinition, target.config).find(
+          (port) => port.key === edge.toPort,
+        ) ?? null)
+      : null;
   const conditionField = edge.when
     ? (sourceDefinition?.outputs.find((port) => port.key === edge.when?.field) ?? null)
     : null;

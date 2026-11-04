@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { PersonasModule } from '../personas/personas.module.js';
+import { RedisModule } from '../redis/redis.module.js';
 import { ChatController } from './chat.controller.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatForwardService } from './chat-forward.service.js';
@@ -12,6 +13,7 @@ import { ChatMessagesService } from './chat-messages.service.js';
 import { ChatPersonaService } from './chat-persona.service.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
 import { ChatService } from './chat.service.js';
+import { PromptCompressionService } from './prompt-compression.service.js';
 import { VoiceTranscriptionService } from './voice-transcription.service.js';
 import { PipelineController } from './pipeline/pipeline.controller.js';
 import { PipelineEffectsService } from './pipeline/pipeline-effects.service.js';
@@ -20,7 +22,7 @@ import { PipelineGraphService } from './pipeline/pipeline-graph.service.js';
 import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
 
 @Module({
-  imports: [AuthModule, PersonasModule, AiModule],
+  imports: [AuthModule, PersonasModule, AiModule, RedisModule],
   controllers: [ChatController, PipelineController],
   providers: [
     ChatService,
@@ -28,6 +30,7 @@ import { ChatPipelineRunner } from './pipeline/pipeline-runner.service.js';
     ChatMessagesService,
     ChatForwardService,
     ImageDescriptionService,
+    PromptCompressionService,
     ChatPersonaService,
     ChatMediaService,
     ChatMessageProcessor,

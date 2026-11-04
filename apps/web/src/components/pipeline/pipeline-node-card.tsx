@@ -1,4 +1,5 @@
 import type {
+  ChatPipelineConfigField,
   ChatPipelineGraphNode,
   ChatPipelineIoField,
   ChatPipelineIoKind,
@@ -6,25 +7,30 @@ import type {
   ChatPipelineNodeType,
   ChatPipelineVariable,
 } from '@inkseek/shared';
-import { canConnectPipelineKinds } from '@inkseek/shared';
+import { canConnectPipelineKinds, isPipelineConfigFieldVisible, resolvePipelineNodeInputs } from '@inkseek/shared';
+import { MoveDiagonal2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import {
   CARD_HEADER_HEIGHT,
-  CARD_WIDTH,
   CATEGORY_STYLE,
   IO_KIND_DOT,
   IO_KIND_STYLE,
   NODE_STATUS_STYLE,
   PORT_ROW_HEIGHT,
   categoryOf,
-  formatConfigValue,
   formatDuration,
+  nodeWidth,
   noteLineCount,
   noteTextOf,
   variableSelectCreate,
 } from './pipeline-ui';
 import { PipelineSelect } from './pipeline-select';
+import {
+  dependentConfigResets,
+  dynamicFieldOptions,
+  type ProviderOption,
+} from './pipeline-config-options';
 
 interface PipelineNodeCardProps {
   node: ChatPipelineGraphNode;
@@ -35,10 +41,16 @@ interface PipelineNodeCardProps {
   dragKind: ChatPipelineIoKind | null;
   /** Variables declared on the graph, used by `pipeline-variables` selects. */
   variables: ChatPipelineVariable[];
+  /** Model providers, used by `model-providers` / `provider-models` selects. */
+  providers: ProviderOption[];
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
   onStartConnect: (event: React.PointerEvent<HTMLButtonElement>, portKey: string) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
   onCreateVariable: (key: string) => void;
+  onAddInput: (id: string) => void;
+  onRemoveInput: (id: string, key: string) => void;
+  onOpenHelp: (type: string) => void;
+  onStartResize: (event: React.PointerEvent<HTMLButtonElement>) => void;
 }
 
 export function PipelineNodeCard({
@@ -48,25 +60,33 @@ export function PipelineNodeCard({
   run,
   dragKind,
   variables,
+  providers,
   onPointerDown,
   onStartConnect,
   onUpdateNodeConfig,
   onCreateVariable,
+  onAddInput,
+  onRemoveInput,
+  onOpenHelp,
+  onStartResize,
 }: PipelineNodeCardProps) {
   const category = CATEGORY_STYLE[categoryOf(node, definition ? [definition] : [])];
   const Icon = category.icon;
   const isNote = definition?.layout === true;
+  const resizable = definition?.resizable === true;
+  const width = nodeWidth(node);
+  const fixedHeight = node.size?.height;
   const noteText = noteTextOf(node.config);
   const [editingNote, setEditingNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState(noteText);
   const status = run ? NODE_STATUS_STYLE[run.status] : null;
-  const inputs = definition?.inputs ?? [];
+  const inputs = definition ? resolvePipelineNodeInputs(definition, node.config) : [];
+  const addable = definition?.dynamicInputs !== undefined;
   const outputs = definition?.outputs ?? [];
-  const rows = Math.max(1, inputs.length, outputs.length);
+  const rows = Math.max(1, inputs.length + (addable ? 1 : 0), outputs.length);
   const configEntries = (definition?.fields ?? [])
-    .map((field) => ({ field, value: node.config?.[field.key] }))
-    .filter((entry) => entry.value !== undefined)
-    .slice(0, 3);
+    .filter((field) => isPipelineConfigFieldVisible(field, node.config))
+    .map((field) => ({ field, value: node.config?.[field.key] }));
 
   useEffect(() => {
     if (!editingNote) {
@@ -91,7 +111,7 @@ export function PipelineNodeCard({
       data-node-id={node.id}
       onPointerDown={onPointerDown}
       className={cn(
-        'group pointer-events-auto absolute cursor-grab touch-none select-none rounded-2xl border bg-ink-900/90 backdrop-blur-md transition-[border-color,box-shadow] active:cursor-grabbing',
+        'group pointer-events-auto absolute flex cursor-grab touch-none select-none flex-col rounded-2xl border bg-ink-900/90 backdrop-blur-md transition-[border-color,box-shadow] active:cursor-grabbing',
         selected
           ? 'z-20 border-brass-400/60 shadow-[0_0_0_1px_rgba(230,189,122,0.25),0_18px_40px_-24px_rgba(0,0,0,0.9)]'
           : status
@@ -100,10 +120,15 @@ export function PipelineNodeCard({
               ? 'z-[1] border-[#bfa878]/25 hover:border-[#bfa878]/45'
               : 'z-[1] border-mist-100/[0.09] hover:border-mist-100/[0.2]',
       )}
-      style={{ left: node.position.x, top: node.position.y, width: CARD_WIDTH }}
+      style={{
+        left: node.position.x,
+        top: node.position.y,
+        width,
+        ...(fixedHeight !== undefined ? { height: fixedHeight } : {}),
+      }}
     >
       <header
-        className="flex items-start gap-2.5 overflow-hidden px-3.5 pt-3"
+        className="flex shrink-0 items-start gap-2.5 overflow-hidden px-3.5 pt-3"
         style={{ height: CARD_HEADER_HEIGHT }}
       >
         <span
@@ -144,6 +169,21 @@ export function PipelineNodeCard({
             {status.label}
             <span className="font-mono text-mist-600">{formatDuration(run.durationMs)}</span>
           </span>
+        )}
+        {definition && (
+          <button
+            type="button"
+            title={`${definition.label} 帮助`}
+            aria-label={`打开${definition.label}帮助`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenHelp(node.type);
+            }}
+            className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border border-mist-100/[0.12] font-mono text-[0.58rem] leading-none text-mist-500 transition hover:border-brass-400/50 hover:bg-brass-400/[0.08] hover:text-brass-200"
+          >
+            ?
+          </button>
         )}
       </header>
 
@@ -200,7 +240,7 @@ export function PipelineNodeCard({
         )
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-x-3 px-3.5" style={{ paddingTop: 6 }}>
+          <div className="grid shrink-0 grid-cols-2 gap-x-3 px-3.5" style={{ paddingTop: 6 }}>
             <div className="relative" style={{ height: rows * PORT_ROW_HEIGHT }}>
               {inputs.map((port, index) => (
                 <InputPortRow
@@ -208,8 +248,30 @@ export function PipelineNodeCard({
                   port={port}
                   index={index}
                   dragKind={dragKind}
+                  onRemove={
+                    addable ? () => onRemoveInput(node.id, port.key) : undefined
+                  }
                 />
               ))}
+              {addable && (
+                <button
+                  type="button"
+                  title="添加一个左侧输入连接点"
+                  aria-label="添加输入"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddInput(node.id);
+                  }}
+                  className="absolute -left-1 flex items-center gap-1 text-[0.55rem] text-mist-600 transition hover:text-brass-300"
+                  style={{ top: inputs.length * PORT_ROW_HEIGHT, height: PORT_ROW_HEIGHT }}
+                >
+                  <span className="grid size-3 place-items-center rounded-full border border-dashed border-mist-100/30 text-[0.62rem] leading-none">
+                    +
+                  </span>
+                  添加输入
+                </button>
+              )}
             </div>
             <div className="relative" style={{ height: rows * PORT_ROW_HEIGHT }}>
               {outputs.map((port, index) => (
@@ -223,68 +285,264 @@ export function PipelineNodeCard({
             </div>
           </div>
 
-          <div className="px-3.5 pb-3 pt-2">
+          <div
+            className={cn(
+              'px-3.5 pb-3 pt-2',
+              fixedHeight !== undefined && 'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+            )}
+            onWheelCapture={
+              fixedHeight !== undefined ? (event) => event.stopPropagation() : undefined
+            }
+          >
             <p className="line-clamp-2 text-[0.6rem] leading-[1.15rem] text-mist-600">
               {definition?.description ?? '未注册的节点类型，运行时会被记为失败。'}
             </p>
 
             {configEntries.length > 0 && (
-              <div className="mt-2.5 space-y-1.5 rounded-lg border border-mist-100/[0.06] bg-ink-950/50 px-2 py-2">
-                {configEntries.map(({ field, value }) => {
-                  const options =
-                    field.optionsSource === 'pipeline-variables'
-                      ? variables.map((variable) => ({
-                          value: variable.key,
-                          label: variable.key,
-                        }))
-                      : field.options;
-                  if (field.kind === 'select' && (options?.length || field.optionsSource)) {
-                    const current = typeof value === 'string' ? value : '';
-                    return (
-                      <div key={field.key} className="flex min-w-0 items-center gap-2">
-                        <span className="shrink-0 text-[0.64rem] text-mist-500">
-                          {field.label}
-                        </span>
-                        <PipelineSelect
-                          value={current}
-                          options={options ?? []}
-                          onChange={(next) => onUpdateNodeConfig(node.id, field.key, next)}
-                          ariaLabel={field.label}
-                          variant="card"
-                          menuTitle={field.label}
-                          create={
-                            field.optionsSource === 'pipeline-variables'
-                              ? variableSelectCreate(variables, onCreateVariable)
-                              : undefined
-                          }
-                          className="flex-1"
-                        />
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <p
-                      key={field.key}
-                      className="flex min-w-0 gap-1.5 font-mono text-[0.56rem] leading-5"
-                    >
-                      <span className="shrink-0 text-mist-600">{field.label}</span>
-                      <span className="truncate text-mist-400">{formatConfigValue(value)}</span>
-                    </p>
-                  );
-                })}
+              <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-lg border border-mist-100/[0.06] bg-ink-950/50 px-2 py-2">
+                {configEntries.map(({ field, value }) => (
+                  <CardConfigField
+                    key={field.key}
+                    nodeId={node.id}
+                    definition={definition}
+                    field={field}
+                    value={value}
+                    config={node.config ?? {}}
+                    variables={variables}
+                    providers={providers}
+                    onCreateVariable={onCreateVariable}
+                    onUpdateNodeConfig={onUpdateNodeConfig}
+                    className={field.width === 'half' ? undefined : 'col-span-2'}
+                  />
+                ))}
               </div>
             )}
 
             {run?.error && (
-              <p className="mt-1.5 line-clamp-2 text-[0.56rem] leading-4 text-signal-400">
+              <p className="mt-1.5 line-clamp-2 shrink-0 text-[0.56rem] leading-4 text-signal-400">
                 {run.error}
               </p>
             )}
           </div>
         </>
       )}
+
+      {resizable && (
+        <button
+          type="button"
+          title="拖动调整卡片大小"
+          aria-label="调整卡片大小"
+          onPointerDown={onStartResize}
+          className="absolute bottom-1 right-1 z-10 grid size-4 cursor-nwse-resize place-items-center rounded text-mist-600/70 transition hover:text-brass-300"
+        >
+          <MoveDiagonal2 className="size-3" strokeWidth={1.6} />
+        </button>
+      )}
     </article>
+  );
+}
+
+function CardConfigField({
+  nodeId,
+  definition,
+  field,
+  value,
+  config,
+  variables,
+  providers,
+  onCreateVariable,
+  onUpdateNodeConfig,
+  className,
+}: {
+  nodeId: string;
+  definition: ChatPipelineNodeType | null;
+  field: ChatPipelineConfigField;
+  value: unknown;
+  config: Record<string, unknown>;
+  variables: ChatPipelineVariable[];
+  providers: ProviderOption[];
+  onCreateVariable: (key: string) => void;
+  onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
+  className?: string;
+}) {
+  const commit = (next: unknown) => {
+    onUpdateNodeConfig(nodeId, field.key, next);
+
+    for (const reset of dependentConfigResets(
+      definition,
+      field,
+      next,
+      config,
+      providers,
+      variables,
+    )) {
+      onUpdateNodeConfig(nodeId, reset.key, reset.value);
+    }
+  };
+
+  const label = (
+    <span className="block min-w-0 truncate text-[0.56rem] text-mist-600" title={field.label}>
+      {field.label}
+    </span>
+  );
+
+  if (field.kind === 'boolean') {
+    const checked = value === true;
+    return (
+      <div className={cn('flex min-w-0 items-center justify-between gap-2', className)}>
+        {label}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          aria-label={field.label}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            commit(!checked);
+          }}
+          className={cn(
+            'relative h-4 w-7 shrink-0 rounded-full transition',
+            checked ? 'bg-jade-400/60' : 'bg-mist-100/[0.12]',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 size-3 rounded-full bg-ink-950 transition',
+              checked ? 'left-3.5' : 'left-0.5',
+            )}
+          />
+        </button>
+      </div>
+    );
+  }
+
+  if (field.kind === 'select') {
+    const options =
+      dynamicFieldOptions(field, config, providers, variables) ?? field.options ?? [];
+    return (
+      <div className={cn('min-w-0', className)}>
+        {label}
+        <PipelineSelect
+          value={typeof value === 'string' ? value : ''}
+          options={options}
+          onChange={commit}
+          ariaLabel={field.label}
+          menuTitle={field.label}
+          variant="card"
+          create={
+            field.optionsSource === 'pipeline-variables'
+              ? variableSelectCreate(variables, onCreateVariable)
+              : undefined
+          }
+          className="mt-0.5"
+        />
+      </div>
+    );
+  }
+
+  if (field.kind === 'json') {
+    return (
+      <div className={cn('min-w-0', className)}>
+        <CardJsonField label={field.label} value={value} onCommit={commit} />
+      </div>
+    );
+  }
+
+  if (field.kind === 'text') {
+    const current = typeof value === 'string' ? value : '';
+    return (
+      <div className={cn('min-w-0', className)}>
+        {label}
+        <textarea
+          value={current}
+          rows={Math.max(2, current.split('\n').length)}
+          placeholder={field.placeholder}
+          spellCheck={false}
+          aria-label={field.label}
+          onChange={(event) => commit(event.target.value)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheelCapture={(event) => event.stopPropagation()}
+          className="mt-0.5 min-h-[2.5rem] w-full resize-none rounded-md border border-mist-100/[0.1] bg-ink-900/60 px-1.5 py-1 text-[0.7rem] leading-5 text-mist-200 outline-none transition [field-sizing:content] focus:border-brass-400/40"
+        />
+      </div>
+    );
+  }
+
+  const numeric = field.kind === 'number';
+  return (
+    <div className={cn('min-w-0', className)}>
+      {label}
+      <input
+        type={numeric ? 'number' : undefined}
+        value={numeric ? (typeof value === 'number' ? value : '') : typeof value === 'string' ? value : ''}
+        placeholder={field.placeholder}
+        spellCheck={false}
+        aria-label={field.label}
+        onChange={(event) =>
+          commit(
+            numeric
+              ? event.target.value === ''
+                ? undefined
+                : Number(event.target.value)
+              : event.target.value,
+          )
+        }
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheelCapture={(event) => event.stopPropagation()}
+        className="mt-0.5 w-full rounded-md border border-mist-100/[0.1] bg-ink-900/60 px-1.5 py-1 font-mono text-[0.64rem] text-mist-200 outline-none transition focus:border-brass-400/40"
+      />
+    </div>
+  );
+}
+
+function CardJsonField({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: unknown;
+  onCommit: (value: unknown) => void;
+}) {
+  const [draft, setDraft] = useState(() => JSON.stringify(value ?? null, null, 2));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(JSON.stringify(value ?? null, null, 2));
+    setError(null);
+  }, [value]);
+
+  const commit = () => {
+    try {
+      onCommit(JSON.parse(draft) as unknown);
+      setError(null);
+    } catch {
+      setError('JSON 格式不正确');
+    }
+  };
+
+  return (
+    <>
+      <span className="block truncate text-[0.56rem] text-mist-600" title={label}>
+        {label}
+      </span>
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        rows={3}
+        spellCheck={false}
+        aria-label={label}
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheelCapture={(event) => event.stopPropagation()}
+        className={cn(
+          'mt-0.5 w-full resize-y rounded-md border bg-ink-900/60 px-1.5 py-1 font-mono text-[0.64rem] leading-5 text-mist-200 outline-none transition',
+          error ? 'border-signal-400/50' : 'border-mist-100/[0.1] focus:border-brass-400/40',
+        )}
+      />
+      {error && <span className="mt-0.5 block text-[0.52rem] text-signal-400">{error}</span>}
+    </>
   );
 }
 
@@ -292,10 +550,12 @@ function InputPortRow({
   port,
   index,
   dragKind,
+  onRemove,
 }: {
   port: ChatPipelineIoField;
   index: number;
   dragKind: ChatPipelineIoKind | null;
+  onRemove?: () => void;
 }) {
   const compatible = dragKind !== null && canConnectPipelineKinds(dragKind, port.kind);
   const dimmed = dragKind !== null && !compatible;
@@ -328,6 +588,21 @@ function InputPortRow({
         {port.optional ? '?' : ''}
         {port.multiple ? '⋯' : ''}
       </span>
+      {onRemove && (
+        <button
+          type="button"
+          title={`删除输入 ${port.key}`}
+          aria-label={`删除输入 ${port.key}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="ml-auto grid size-3.5 shrink-0 place-items-center rounded-full text-[0.62rem] leading-none text-mist-600 transition hover:bg-signal-400/10 hover:text-signal-400"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }

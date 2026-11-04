@@ -228,6 +228,11 @@ const pipelinePositionSchema = z.object({
   y: z.number(),
 });
 
+const pipelineNodeSizeSchema = z.object({
+  width: z.number().positive('卡片宽度必须为正数'),
+  height: z.number().positive('卡片高度必须为正数'),
+});
+
 export const saveChatPipelineGraphSchema = z.object({
   scope: chatPipelineScopeSchema.default('global'),
   scopeId: pipelineScopeIdSchema,
@@ -242,6 +247,7 @@ export const saveChatPipelineGraphSchema = z.object({
         config: z.record(z.string(), z.unknown()).nullable().default(null),
         join: z.enum(['all', 'any']).default('all'),
         position: pipelinePositionSchema,
+        size: pipelineNodeSizeSchema.optional(),
       }),
     )
     .min(1, '至少保留一个节点')
