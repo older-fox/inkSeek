@@ -1,10 +1,12 @@
 import type { ChatPipelineMessageValue } from '@inkseek/shared';
 import type { PipelineGraph } from './pipeline-graph.js';
 import {
+  PROMPT_COMPRESSION_DEFAULT_INSTRUCTION,
   PROMPT_COMPRESSION_DEFAULT_TTL_SECONDS,
   PROMPT_COMPRESSION_MAX_TTL_SECONDS,
   PROMPT_COMPRESSION_MIN_TTL_SECONDS,
   type PipelineEffect,
+  type PipelineHistoryMessage,
   type PipelineInputs,
   type PipelineMessage,
   type PipelineNodeContext,
@@ -24,6 +26,8 @@ const MAX_CARD_TEXT = 4000;
 const MAX_WHITELIST_TEXT = 4000;
 const MAX_CHAT_TOKENS = 8192;
 const MAX_CHAT_TEMPERATURE = 2;
+const DEFAULT_HISTORY_LIMIT = 20;
+const MAX_HISTORY_LIMIT = 200;
 /** Appended to the system prompt in JSON mode so the model returns an envelope. */
 const JSON_ENVELOPE_HINT =
   '只输出一个 JSON 对象，不要使用 Markdown 代码块或额外解释。格式：{"action":"要执行的动作，没有动作时为空字符串","args":{"参数":"值"},"reply":"给用户的最终回复"}。args 必须是对象，没有参数时用空对象。';
@@ -60,8 +64,7 @@ function readReference(
     return readPath(key ? variables.get(key) : undefined, fieldPath.join('.'));
   }
 
-  const base =
-    root === 'message' ? message : root === 'input' ? inputs : outputs.get(root);
+  const base = root === 'message' ? message : root === 'input' ? inputs : outputs.get(root);
   return readPath(base, rest.join('.'));
 }
 
@@ -130,7 +133,10 @@ function readString(config: Record<string, unknown> | undefined, key: string): s
   return value;
 }
 
-function readOptionalString(config: Record<string, unknown> | undefined, key: string): string | null {
+function readOptionalString(
+  config: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
   const value = config?.[key];
   if (value === undefined || value === null) {
     return null;
@@ -141,7 +147,11 @@ function readOptionalString(config: Record<string, unknown> | undefined, key: st
   return value;
 }
 
-function readBoolean(config: Record<string, unknown> | undefined, key: string, fallback: boolean): boolean {
+function readBoolean(
+  config: Record<string, unknown> | undefined,
+  key: string,
+  fallback: boolean,
+): boolean {
   const value = config?.[key];
   if (value === undefined) {
     return fallback;
@@ -194,12 +204,7 @@ function readDescriptionMode(config: Record<string, unknown> | undefined): Descr
 
 function readDelayMs(config: Record<string, unknown> | undefined): number {
   const value = config?.['delayMs'];
-  if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    value < 0 ||
-    value > MAX_DELAY_MS
-  ) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_DELAY_MS) {
     throw new Error(`等待时长必须是 0–${MAX_DELAY_MS} 之间的毫秒数`);
   }
   return Math.round(value);
@@ -274,6 +279,19 @@ function readCompressionTtl(config: Record<string, unknown> | undefined): number
   return value;
 }
 
+/** Empty instruction falls back to the built-in default so the card always runs. */
+function readCompressionInstruction(config: Record<string, unknown> | undefined): string {
+  const value = config?.['instruction'];
+  if (value === undefined || value === null) {
+    return PROMPT_COMPRESSION_DEFAULT_INSTRUCTION;
+  }
+  if (typeof value !== 'string') {
+    throw new Error('压缩指令必须是字符串');
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : PROMPT_COMPRESSION_DEFAULT_INSTRUCTION;
+}
+
 /** Accepts fenced or bare JSON and returns the first object it can parse. */
 function parseChatEnvelope(text: string): Record<string, unknown> | null {
   const stripped = text
@@ -332,6 +350,111 @@ function readVariableKey(
     throw new Error(`管线变量 ${key} 未声明，请先在图的变量列表里添加`);
   }
   return key;
+}
+
+function readHistoryLimit(config: Record<string, unknown> | undefined): number {
+  const value = config?.['limit'];
+  if (value === undefined || value === null) {
+    return DEFAULT_HISTORY_LIMIT;
+  }
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_HISTORY_LIMIT
+  ) {
+    throw new Error(`拉取条数必须是 1–${MAX_HISTORY_LIMIT} 之间的整数`);
+  }
+  return value;
+}
+
+interface HistoryAnchor {
+  conversationId: string;
+  messageId: string | null;
+  sentAt: string | null;
+}
+
+/** Locates the conversation and position from the message object staged in a variable. */
+function historyAnchorOf(value: unknown): HistoryAnchor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const object = value as Record<string, unknown>;
+  const conversationId =
+    typeof object['conversationId'] === 'string' ? object['conversationId'].trim() : '';
+  if (conversationId.length === 0) {
+    return null;
+  }
+  return {
+    conversationId,
+    messageId: typeof object['id'] === 'string' && object['id'].length > 0 ? object['id'] : null,
+    sentAt:
+      typeof object['sentAt'] === 'string' && object['sentAt'].length > 0 ? object['sentAt'] : null,
+  };
+}
+
+function historyStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function historyBody(entry: PipelineHistoryMessage): string {
+  const pieces: string[] = [];
+  if (entry.kind === 'FORWARD') {
+    pieces.push('[合并转发]');
+  }
+  const text = entry.text.trim();
+  if (text.length > 0) {
+    pieces.push(text);
+  }
+  // Undescribed images are dropped on purpose: without a description they add
+  // no context, and the model cannot look at the stored file anyway.
+  for (const image of entry.images) {
+    const description = image.description?.trim();
+    if (description) {
+      pieces.push(`[图片] ${description}`);
+    }
+  }
+  for (const voice of entry.voices) {
+    const transcript = voice.transcript?.trim();
+    pieces.push(transcript ? `[语音] ${transcript}` : '[语音]');
+  }
+  if (pieces.length === 0) {
+    pieces.push(entry.kind === 'FACE' ? '[表情]' : '[消息]');
+  }
+  return pieces.join(' ');
+}
+
+function formatHistory(entries: PipelineHistoryMessage[]): string {
+  return entries
+    .map((entry) => `[${historyStamp(entry.sentAt)}] ${entry.sender}：${historyBody(entry)}`)
+    .join('\n');
+}
+
+function asMessageObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** sender.id of a staged message; a plain string/number variable is the id itself. */
+function senderIdOf(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  const sender = asMessageObject(asMessageObject(value)?.['sender']);
+  const id = sender?.['id'];
+  if (typeof id === 'string') {
+    return id.trim();
+  }
+  return typeof id === 'number' && Number.isFinite(id) ? String(id) : '';
 }
 
 type ConstantKind = 'text' | 'number' | 'boolean';
@@ -425,9 +548,7 @@ function readSourceWhitelist(
   if (raw.length > MAX_WHITELIST_TEXT) {
     throw new Error(`${SOURCE_WHITELIST_LABELS[key]}不能超过 ${MAX_WHITELIST_TEXT} 个字符`);
   }
-  return raw
-    .split(/[\s,，、;；]+/u)
-    .filter((entry) => entry.length > 0);
+  return raw.split(/[\s,，、;；]+/u).filter((entry) => entry.length > 0);
 }
 
 function readImages(value: unknown): string[] {
@@ -487,8 +608,7 @@ const messageInput: PipelineNodeDefinition = {
   version: 2,
   label: '消息输入',
   category: 'system',
-  description:
-    '每条入站消息的入口：完整消息对象从 message 流出，正文与图片另有快捷端口。',
+  description: '每条入站消息的入口：完整消息对象从 message 流出，正文与图片另有快捷端口。',
   system: true,
   defaultConfig: {},
   fields: [],
@@ -577,7 +697,12 @@ const getObjectField: PipelineNodeDefinition = {
     },
   ],
   outputs: [
-    { key: 'value', label: '取值结果', kind: 'any', description: '对象或数组可直接接入 any 端口。' },
+    {
+      key: 'value',
+      label: '取值结果',
+      kind: 'any',
+      description: '对象或数组可直接接入 any 端口。',
+    },
     {
       key: 'text',
       label: '文本形式',
@@ -612,8 +737,19 @@ const PERSONA_PARAMETER_GROUPS: { title: string; keys: string[] }[] = [
   {
     title: '基础',
     keys: [
-      'name', 'aliases', 'keywords', 'age', 'gender', 'identity', 'occupation', 'race',
-      'height_cm', 'weight_kg', 'location', 'time_zone', 'time_awareness',
+      'name',
+      'aliases',
+      'keywords',
+      'age',
+      'gender',
+      'identity',
+      'occupation',
+      'race',
+      'height_cm',
+      'weight_kg',
+      'location',
+      'time_zone',
+      'time_awareness',
     ],
   },
   {
@@ -627,52 +763,98 @@ const PERSONA_PARAMETER_GROUPS: { title: string; keys: string[] }[] = [
   {
     title: '内在',
     keys: [
-      'core_values', 'taboos', 'fears', 'soft_spots', 'non_negotiable',
-      'long_term_motivation', 'current_goal', 'doing_now', 'obstacle',
+      'core_values',
+      'taboos',
+      'fears',
+      'soft_spots',
+      'non_negotiable',
+      'long_term_motivation',
+      'current_goal',
+      'doing_now',
+      'obstacle',
     ],
   },
   {
     title: '表达',
     keys: [
-      'language_style', 'conflict_style', 'humor_style', 'memory_bias', 'sentence_length',
-      'punctuation', 'typo_level', 'split_level', 'particles', 'openers', 'banned_words',
-      'emoji_level', 'typing_level', 'online_policy', 'sleep_depth', 'anchor_few_shot',
+      'language_style',
+      'conflict_style',
+      'humor_style',
+      'memory_bias',
+      'sentence_length',
+      'punctuation',
+      'typo_level',
+      'split_level',
+      'particles',
+      'openers',
+      'banned_words',
+      'emoji_level',
+      'typing_level',
+      'online_policy',
+      'sleep_depth',
+      'anchor_few_shot',
     ],
   },
   {
     title: '称呼',
     keys: [
-      'address_for_stranger', 'address_for_close', 'forbidden_addresses',
-      'allowed_addresses', 'anchor_quote',
+      'address_for_stranger',
+      'address_for_close',
+      'forbidden_addresses',
+      'allowed_addresses',
+      'anchor_quote',
     ],
   },
   {
     title: '破面',
     keys: [
-      'in_character_principle', 'in_character_triggers', 'in_character_never',
-      'in_character_recovery', 'in_character_allowed_meta',
+      'in_character_principle',
+      'in_character_triggers',
+      'in_character_never',
+      'in_character_recovery',
+      'in_character_allowed_meta',
     ],
   },
   {
     title: '亲密',
     keys: [
-      'sensitivity_map', 'touch_preference', 'explicit_level_char', 'aftercare_need_base',
+      'sensitivity_map',
+      'touch_preference',
+      'explicit_level_char',
+      'aftercare_need_base',
       'decline_response_style',
     ],
   },
   {
     title: '数值',
     keys: [
-      'confidence', 'self_control', 'shame', 'trust_bias', 'attachment_style',
-      'possessiveness_base', 'agreeableness', 'proactivity', 'curiosity', 'stamina_max',
-      'strength', 'agility', 'pain_tolerance', 'recovery_rate', 'sensitivity',
+      'confidence',
+      'self_control',
+      'shame',
+      'trust_bias',
+      'attachment_style',
+      'possessiveness_base',
+      'agreeableness',
+      'proactivity',
+      'curiosity',
+      'stamina_max',
+      'strength',
+      'agility',
+      'pain_tolerance',
+      'recovery_rate',
+      'sensitivity',
     ],
   },
   {
     title: '卡片',
     keys: [
-      'experience_level', 'card_serial', 'card_experience', 'card_traits',
-      'card_physical', 'created_at', 'updated_at',
+      'experience_level',
+      'card_serial',
+      'card_experience',
+      'card_traits',
+      'card_physical',
+      'created_at',
+      'updated_at',
     ],
   },
 ];
@@ -683,7 +865,18 @@ const PERSONA_PARAMETER_KEYS = new Set(PERSONA_PARAMETER_GROUPS.flatMap((group) 
 const PERSONA_PLACEHOLDER = /\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}/g;
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 const CHINESE_ZONE_HOURS: Record<string, number> = {
-  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12,
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+  十一: 11,
+  十二: 12,
 };
 
 /** Minutes east of UTC from the card's free-text time zone; null when unrecognized. */
@@ -823,7 +1016,7 @@ type ConversationPersonaFieldGroup = {
 };
 
 /** Mirrors the group-persona panel fields and their Chinese labels. */
-const GROUP_PERSONA_FIELD_GROUPS: readonly ConversationPersonaFieldGroup[] = [
+export const GROUP_PERSONA_FIELD_GROUPS: readonly ConversationPersonaFieldGroup[] = [
   {
     title: '对群态度',
     fields: [
@@ -948,6 +1141,20 @@ function conversationPersonaSheet(
     .join('\n');
 }
 
+/** Fills `{key}` placeholders from a conversation snapshot; unknown names stay as-is. */
+function renderConversationPersonaTemplate(
+  template: string,
+  values: Readonly<Record<string, unknown>>,
+  keys: ReadonlySet<string>,
+): string {
+  return template.replace(PERSONA_PLACEHOLDER, (match, key: string) => {
+    if (!keys.has(key)) {
+      return match;
+    }
+    return conversationPersonaText(values[key]);
+  });
+}
+
 function conversationPersonaNode(options: {
   type: string;
   label: string;
@@ -955,6 +1162,8 @@ function conversationPersonaNode(options: {
   notes: string[];
   kind: 'group' | 'private';
   groups: readonly ConversationPersonaFieldGroup[];
+  /** Render `{key}` placeholders instead of selecting one field. */
+  templateOutput?: boolean;
 }): PipelineNodeDefinition {
   const fieldOptions = [
     { value: '', label: '整个快照' },
@@ -963,6 +1172,9 @@ function conversationPersonaNode(options: {
     ),
   ];
   const fieldKeys = new Set(fieldOptions.map((option) => option.value));
+  const personaKeys = new Set(
+    options.groups.flatMap((group) => group.fields.map((field) => field.key)),
+  );
 
   return {
     type: options.type,
@@ -977,7 +1189,9 @@ function conversationPersonaNode(options: {
         keys: group.fields.map((field) => field.key),
       })),
     },
-    defaultConfig: { variable: '', field: '' },
+    defaultConfig: options.templateOutput
+      ? { variable: '', template: '' }
+      : { variable: '', field: '' },
     fields: [
       {
         key: 'variable',
@@ -986,37 +1200,75 @@ function conversationPersonaNode(options: {
         optionsSource: 'pipeline-variables',
         hint: '选择保存「来源群号 / QQ 号」的管线变量；变量为空或未选择时输出空文本。',
       },
-      {
-        key: 'field',
-        label: '读取属性',
-        kind: 'select',
-        options: fieldOptions,
-        hint: '选「整个快照」输出按中文名逐行的全部已填属性；也可只取单项。',
-      },
+      ...(options.templateOutput
+        ? [
+            {
+              key: 'template',
+              label: '人格文本',
+              kind: 'text' as const,
+              placeholder: '你在群里是{group_persona}；当前话题：{topic}。',
+              hint: '用 {参数名} 占位符填入群人格属性，例如 {group_persona}、{topic}、{scene_rules}；完整参数名见右上角 ? 帮助。',
+            },
+          ]
+        : [
+            {
+              key: 'field',
+              label: '读取属性',
+              kind: 'select' as const,
+              options: fieldOptions,
+              hint: '选「整个快照」输出按中文名逐行的全部已填属性；也可只取单项。',
+            },
+          ]),
     ],
     inputs: [],
-    outputs: [
-      {
-        key: 'value',
-        label: '属性值',
-        kind: 'any',
-        description: '选中属性的原始值；整个快照时是对象。变量为空或没有记录时为 null。',
-      },
-      {
-        key: 'text',
-        label: '文本形式',
-        kind: 'text',
-        description: '选中属性的文本；整个快照按中文名逐行输出。为空时输出空字符串。',
-      },
-      {
-        key: 'found',
-        label: '是否存在',
-        kind: 'boolean',
-        description: '有值时为 true；变量为空、没有记录或属性为空时为 false。',
-      },
-    ],
+    outputs: options.templateOutput
+      ? [
+          {
+            key: 'text',
+            label: '填充后的文本',
+            kind: 'text',
+            description:
+              '模板里的 {参数名} 已替换为该群人格快照的值；没有记录或参数为空时替换为空字符串。',
+          },
+          {
+            key: 'found',
+            label: '是否存在',
+            kind: 'boolean',
+            description: '变量指向的群有已保存的人格记录时为 true。',
+          },
+        ]
+      : [
+          {
+            key: 'value',
+            label: '属性值',
+            kind: 'any',
+            description: '选中属性的原始值；整个快照时是对象。变量为空或没有记录时为 null。',
+          },
+          {
+            key: 'text',
+            label: '文本形式',
+            kind: 'text',
+            description: '选中属性的文本；整个快照按中文名逐行输出。为空时输出空字符串。',
+          },
+          {
+            key: 'found',
+            label: '是否存在',
+            kind: 'boolean',
+            description: '有值时为 true；变量为空、没有记录或属性为空时为 false。',
+          },
+        ],
     validateConfig: (config, graph) => {
       readVariableKey(config, graph);
+      if (options.templateOutput) {
+        const template = config?.['template'];
+        if (template !== undefined && typeof template !== 'string') {
+          throw new Error('人格文本必须是字符串');
+        }
+        if (typeof template === 'string' && template.length > MAX_CARD_TEXT) {
+          throw new Error(`人格文本不能超过 ${MAX_CARD_TEXT} 个字符`);
+        }
+        return;
+      }
       const field = readOptionalString(config, 'field')?.trim() ?? '';
       if (!fieldKeys.has(field)) {
         throw new Error(`「${options.label}」的读取属性不在可选范围内：${field}`);
@@ -1024,21 +1276,32 @@ function conversationPersonaNode(options: {
     },
     run: async (context) => {
       const variable = readVariableKey(context.node.config, context.graph);
-      const externalId = variable
-        ? stringify(context.getVariable(variable)).trim()
-        : '';
-      const field = readOptionalString(context.node.config, 'field')?.trim() ?? '';
-      const empty = { outputs: { value: null, text: '', found: false } };
+      const externalId = variable ? stringify(context.getVariable(variable)).trim() : '';
 
       if (!externalId) {
-        return empty;
+        return options.templateOutput
+          ? { outputs: { text: '', found: false } }
+          : { outputs: { value: null, text: '', found: false } };
       }
 
       const values = await context.readConversationPersona(options.kind, externalId);
       if (!values) {
-        return empty;
+        return options.templateOutput
+          ? { outputs: { text: '', found: false } }
+          : { outputs: { value: null, text: '', found: false } };
       }
 
+      if (options.templateOutput) {
+        const template = readOptionalString(context.node.config, 'template') ?? '';
+        return {
+          outputs: {
+            text: renderConversationPersonaTemplate(template, values, personaKeys),
+            found: true,
+          },
+        };
+      }
+
+      const field = readOptionalString(context.node.config, 'field')?.trim() ?? '';
       if (!field) {
         const text = conversationPersonaSheet(values, options.groups);
         return { outputs: { value: values, text, found: text.length > 0 } };
@@ -1055,15 +1318,17 @@ const groupPersona: PipelineNodeDefinition = conversationPersonaNode({
   type: 'persona.group',
   label: '群聊人格',
   description:
-    '按管线变量里的群号读取该群的人格快照；变量为空或没有记录时输出空文本，不会根据消息类型自动切换。',
+    '按管线变量里的群号读取该群的人格快照，用 {参数名} 占位符填入文本；变量为空或没有记录时输出空文本，不会根据消息类型自动切换。',
   notes: [
     '会话标识必须来自管线变量：用「写入变量」把消息对象的「来源群号/QQ 号」（conversationExternalId）写进去，再在这里选择该变量；没有选择变量或值为空时输出空文本。',
     '只读本渠道内的群会话，不会隐式读取当前消息的 conversationKind，也不会在找不到时回退到私聊人格。',
     '读取的是群聊人格面板已保存的属性；该群从未保存过人格记录时同样输出空文本。',
-    '选「整个快照」时 text 按中文名逐行输出全部已填属性；也可选单项属性直接输出。',
+    '文本里的 {参数名} 会替换成对应属性，例如 {group_persona}、{topic}、{scene_rules}；未列出的名称保持原样，属性为空时替换为空字符串。',
+    'found 只表示该群是否有已保存的人格记录，与模板内容是否为空无关。',
   ],
   kind: 'group',
   groups: GROUP_PERSONA_FIELD_GROUPS,
+  templateOutput: true,
 });
 
 const privatePersona: PipelineNodeDefinition = conversationPersonaNode({
@@ -1080,6 +1345,163 @@ const privatePersona: PipelineNodeDefinition = conversationPersonaNode({
   kind: 'private',
   groups: PRIVATE_PERSONA_FIELD_GROUPS,
 });
+
+const chatHistory: PipelineNodeDefinition = {
+  type: 'chat.history',
+  version: 1,
+  label: '聊天记录',
+  category: 'data',
+  description:
+    '从管线变量里读取暂存的消息对象，按它所属的会话拉取当前消息之前指定条数的历史记录；图片只带已生成的描述，语音带转写。',
+  help: {
+    notes: [
+      '卡片没有输入端口：先用「写入变量」把「消息输入」的 message 端口写进一个管线变量，再在这里选择该变量。',
+      '只读取当前消息之前、同一会话的消息，当前消息本身不会重复出现；条数超过可用记录时取全部。',
+      '图片只有在已生成描述时才写进文本，没有描述的图片直接忽略；语音优先使用转写，没有转写时用 [语音] 占位。',
+      '变量为空、值不是消息对象或定位不到会话时输出空文本、空数组和 0；调试运行没有真实会话，同样为空。',
+      '作为数据源卡，只有下游被激活并需要它时才读取，不会每条消息都查询数据库。',
+    ],
+  },
+  defaultConfig: { variable: '', limit: DEFAULT_HISTORY_LIMIT },
+  fields: [
+    {
+      key: 'variable',
+      label: '管线变量',
+      kind: 'select',
+      optionsSource: 'pipeline-variables',
+      hint: '选择暂存消息对象的变量；用「写入变量」把「消息输入」的 message 写进去。',
+    },
+    {
+      key: 'limit',
+      label: '拉取条数',
+      kind: 'number',
+      hint: `1–${MAX_HISTORY_LIMIT}，默认 ${DEFAULT_HISTORY_LIMIT}；只取当前消息之前的历史。`,
+    },
+  ],
+  inputs: [],
+  outputs: [
+    {
+      key: 'text',
+      label: '聊天记录',
+      kind: 'text',
+      description: '按时间从早到晚排列，每行「[时间] 发送者：内容」。',
+    },
+    {
+      key: 'messages',
+      label: '消息数组',
+      kind: 'json',
+      description: '结构化的历史消息，含发送者、正文、图片描述与语音转写。',
+    },
+    {
+      key: 'count',
+      label: '条数',
+      kind: 'number',
+      description: '实际拉取到的历史消息条数。',
+    },
+  ],
+  validateConfig: (config, graph) => {
+    readVariableKey(config, graph);
+    readHistoryLimit(config);
+  },
+  run: async (context) => {
+    const limit = readHistoryLimit(context.node.config);
+    const variable = readVariableKey(context.node.config, context.graph);
+    const anchor = variable ? historyAnchorOf(context.getVariable(variable)) : null;
+    if (!anchor) {
+      return { outputs: { text: '', messages: [], count: 0 } };
+    }
+
+    const messages = await context.readHistory({ ...anchor, limit });
+    return {
+      outputs: { text: formatHistory(messages), messages, count: messages.length },
+    };
+  },
+};
+
+const receivedMessage: PipelineNodeDefinition = {
+  type: 'message.received',
+  version: 1,
+  label: '接收消息',
+  category: 'data',
+  description:
+    '从管线变量里读取暂存的入站消息对象，输出完整消息对象；变量为空或值不是对象时输出 null。',
+  help: {
+    notes: [
+      '卡片没有输入端口：先用「写入变量」把「消息输入」的 message 端口写进一个管线变量，再在这里选择该变量。',
+      '输出与「消息输入」的 message 端口结构相同，可接「消息对象取值」、AI 卡片模板或其它 json 输入。',
+      '变量为空或不是对象时输出 null；作为数据源卡，只有下游被激活并需要它时才执行。',
+    ],
+  },
+  defaultConfig: { variable: '' },
+  fields: [
+    {
+      key: 'variable',
+      label: '管线变量',
+      kind: 'select',
+      optionsSource: 'pipeline-variables',
+      hint: '选择暂存消息对象的变量；用「写入变量」把「消息输入」的 message 写进去。',
+    },
+  ],
+  inputs: [],
+  outputs: [
+    {
+      key: 'message',
+      label: '消息对象',
+      kind: 'json',
+      description: '与「消息输入」message 端口相同的结构；变量为空时是 null。',
+    },
+  ],
+  validateConfig: (config, graph) => {
+    readVariableKey(config, graph);
+  },
+  run: (context) => {
+    const key = readVariableKey(context.node.config, context.graph);
+    return {
+      outputs: { message: key === null ? null : asMessageObject(context.getVariable(key)) },
+    };
+  },
+};
+
+const receivedSenderId: PipelineNodeDefinition = {
+  type: 'message.sender-id',
+  version: 1,
+  label: '发送人ID',
+  category: 'data',
+  description: '从管线变量里读取暂存的消息对象，取出发送人 ID；变量里直接是 ID 文本时原样输出。',
+  help: {
+    notes: [
+      '卡片没有输入端口：先用「写入变量」把「消息输入」的 message 端口写进一个管线变量，再在这里选择该变量。',
+      '读取消息对象的 sender.id；变量里存的是 ID 文本或数字时直接输出该值。',
+      '取不到时输出空字符串；作为数据源卡，只有下游被激活并需要它时才执行。',
+    ],
+  },
+  defaultConfig: { variable: '' },
+  fields: [
+    {
+      key: 'variable',
+      label: '管线变量',
+      kind: 'select',
+      optionsSource: 'pipeline-variables',
+      hint: '选择暂存消息对象的变量；用「写入变量」把「消息输入」的 message 写进去。',
+    },
+  ],
+  inputs: [],
+  outputs: [
+    {
+      key: 'senderId',
+      label: '发送人 ID',
+      kind: 'text',
+      description: '消息对象的 sender.id；取不到时为空字符串。',
+    },
+  ],
+  validateConfig: (config, graph) => {
+    readVariableKey(config, graph);
+  },
+  run: (context) => {
+    const key = readVariableKey(context.node.config, context.graph);
+    return { outputs: { senderId: key === null ? '' : senderIdOf(context.getVariable(key)) } };
+  },
+};
 
 const chatCompletion: PipelineNodeDefinition = {
   type: 'ai.chat',
@@ -1168,8 +1590,7 @@ const chatCompletion: PipelineNodeDefinition = {
       key: 'reply',
       label: '回复文本',
       kind: 'text',
-      description:
-        'JSON 模式下取 reply 字段；解析失败时回退为模型原文。可直接接入消息输出。',
+      description: 'JSON 模式下取 reply 字段；解析失败时回退为模型原文。可直接接入消息输出。',
     },
     {
       key: 'text',
@@ -1227,7 +1648,10 @@ const chatCompletion: PipelineNodeDefinition = {
     }
 
     const format = readChatFormat(config);
-    const system = [readChatInput(context.inputs, 'system'), format === 'json' ? JSON_ENVELOPE_HINT : '']
+    const system = [
+      readChatInput(context.inputs, 'system'),
+      format === 'json' ? JSON_ENVELOPE_HINT : '',
+    ]
       .filter((part) => part.length > 0)
       .join('\n\n');
 
@@ -1270,14 +1694,15 @@ const chatCompletion: PipelineNodeDefinition = {
     }
 
     const envelope = parseChatEnvelope(text);
-    const action =
-      envelope && typeof envelope.action === 'string' ? envelope.action.trim() : '';
+    const action = envelope && typeof envelope.action === 'string' ? envelope.action.trim() : '';
     const args =
-      envelope && envelope.args !== null && typeof envelope.args === 'object' && !Array.isArray(envelope.args)
+      envelope &&
+      envelope.args !== null &&
+      typeof envelope.args === 'object' &&
+      !Array.isArray(envelope.args)
         ? envelope.args
         : null;
-    const reply =
-      envelope && typeof envelope.reply === 'string' ? envelope.reply.trim() : '';
+    const reply = envelope && typeof envelope.reply === 'string' ? envelope.reply.trim() : '';
 
     return {
       outputs: {
@@ -1304,18 +1729,25 @@ const promptCompression: PipelineNodeDefinition = {
   help: {
     notes: [
       '「详细提示词」端口必须接线：接进来的整段文本（例如人格提示词、规则集合）会作为压缩对象；没接线或为空时这张卡会被记为失败。',
-      '压缩由固定指令驱动：保留全部事实、约束、字段名、输出格式、语气与安全要求，只删除重复、客套和冗余表述，不新增原文没有的内容。',
-      '缓存 key 由「详细提示词 + 提供商 + 模型 + 压缩指令版本」计算 SHA-256 得到，写入设置里配置的 Redis，键名前缀为 inkseek:pipeline:prompt-compress:v1:。命中时 cached 为 true，且不会调用模型。',
-      'TTL 到期、缓存键不存在或 Redis 不可用时都会重新调用模型生成；修改提示词或切换模型会落到新 key，不会读到旧结果。Redis 未配置或连接失败时自动跳过缓存，管线继续运行。',
+      '压缩方式由卡上的「压缩指令」决定，可随卡修改；留空时使用内置默认指令（保留全部事实、约束、字段名、输出格式、语气与安全要求，只删除重复、客套和冗余表述，不新增原文没有的内容）。',
+      '缓存 key 由「详细提示词 + 压缩指令 + 提供商 + 模型」计算 SHA-256 得到，写入设置里配置的 Redis，键名前缀为 inkseek:pipeline:prompt-compress:v1:。命中时 cached 为 true，且不会调用模型。',
+      'TTL 到期、缓存键不存在或 Redis 不可用时都会重新调用模型生成；修改提示词、压缩指令或切换模型会落到新 key，不会读到旧结果。Redis 未配置或连接失败时自动跳过缓存，管线继续运行。',
       'TTL 单位为秒，默认 86400（24 小时），范围 60–2592000（30 天）。',
     ],
   },
   defaultConfig: {
+    instruction: PROMPT_COMPRESSION_DEFAULT_INSTRUCTION,
     providerId: '',
     model: '',
     ttlSeconds: PROMPT_COMPRESSION_DEFAULT_TTL_SECONDS,
   },
   fields: [
+    {
+      key: 'instruction',
+      label: '压缩指令',
+      kind: 'text',
+      hint: '作为系统提示词驱动压缩；留空使用内置默认指令。修改后会生成新的缓存 key。',
+    },
     {
       key: 'providerId',
       label: '提供商',
@@ -1369,6 +1801,7 @@ const promptCompression: PipelineNodeDefinition = {
   ],
   validateConfig: (config) => {
     readCompressionTtl(config);
+    readCompressionInstruction(config);
   },
   run: async (context) => {
     const prompt = readChatInput(context.inputs, 'text');
@@ -1380,6 +1813,7 @@ const promptCompression: PipelineNodeDefinition = {
     try {
       result = await context.compressPrompt({
         prompt,
+        instruction: readCompressionInstruction(context.node.config),
         providerId: readOptionalString(context.node.config, 'providerId'),
         model: readOptionalString(context.node.config, 'model'),
         ttlSeconds: readCompressionTtl(context.node.config),
@@ -1404,7 +1838,7 @@ const constantValue: PipelineNodeDefinition = {
   label: '固定内容',
   category: 'data',
   description:
-    '无需上级激活，直接输出一段固定的文本、数字或布尔值，用来做阈值、固定回复或与上游取值比较。',
+    '没有输入端口，输出一段固定的文本、数字或布尔值，用来做阈值、固定回复或与上游取值比较；只有下游被激活并需要它时才执行。',
   defaultConfig: { kind: 'text', value: '' },
   fields: [
     {
@@ -1460,14 +1894,18 @@ const getVariable: PipelineNodeDefinition = {
       label: '顺序（可选）',
       kind: 'any',
       optional: true,
-      description:
-        '只用于约束执行顺序：把「写入变量」的 value 接进来，读取就会发生在写入之后。',
+      description: '只用于约束执行顺序：把「写入变量」的 value 接进来，读取就会发生在写入之后。',
     },
   ],
   outputs: [
     { key: 'value', label: '变量值', kind: 'any' },
     { key: 'text', label: '文本形式', kind: 'text' },
-    { key: 'exists', label: '是否存在', kind: 'boolean', description: '未选择或未声明时为 false。' },
+    {
+      key: 'exists',
+      label: '是否存在',
+      kind: 'boolean',
+      description: '未选择或未声明时为 false。',
+    },
   ],
   validateConfig: (config, graph) => {
     readVariableKey(config, graph);
@@ -1534,8 +1972,7 @@ const messageOutput: PipelineNodeDefinition = {
   version: 1,
   label: '消息输出',
   category: 'system',
-  description:
-    '把汇总后的文本与图片作为回复发回当前会话；关闭「启用发送」时只演练不发送。',
+  description: '把汇总后的文本与图片作为回复发回当前会话；关闭「启用发送」时只演练不发送。',
   system: true,
   defaultConfig: { enabled: false },
   fields: [
@@ -1601,7 +2038,7 @@ const constantText: PipelineNodeDefinition = {
   label: '固定文本',
   category: 'text',
   description:
-    '无需上游激活，直接输出一段固定文本；可以用 {{vars.名称}}、{{message.text}} 等模板引用，再接进任意文本输入。',
+    '没有输入端口，下游被激活并需要它时才输出这段固定文本；可以用 {{vars.名称}}、{{message.text}} 等模板引用，再接进任意文本输入。',
   defaultConfig: { text: '' },
   fields: [
     {
@@ -1609,13 +2046,11 @@ const constantText: PipelineNodeDefinition = {
       label: '固定文本',
       kind: 'text',
       placeholder: '例如：抱歉，我现在不在，稍后回复你。',
-      hint: '没有输入端口，每次运行都会执行；模板里可以引用变量或当前消息。',
+      hint: '没有输入端口，只有下游被激活并需要它时才执行；模板里可以引用变量或当前消息。',
     },
   ],
   inputs: [],
-  outputs: [
-    { key: 'text', label: '文本', kind: 'text', description: '按模板渲染后的固定文本。' },
-  ],
+  outputs: [{ key: 'text', label: '文本', kind: 'text', description: '按模板渲染后的固定文本。' }],
   validateConfig: (config) => {
     const text = config?.['text'];
     if (text !== undefined && typeof text !== 'string') {
@@ -2269,9 +2704,7 @@ class CalcParser {
       this.requireSymbol(')');
       return expression;
     }
-    throw new Error(
-      `Math 计算表达式在第 ${token.index + 1} 个字符处需要数字、变量或函数`,
-    );
+    throw new Error(`Math 计算表达式在第 ${token.index + 1} 个字符处需要数字、变量或函数`);
   }
 
   private parseName(name: string): CalcExpression {
@@ -2498,10 +2931,7 @@ function computeNumberCalc(context: PipelineNodeContext): number {
     ? context.inputs[rightKey as string]
     : context.resolve(readOptionalString(config, 'right') ?? '');
   const left = toCalcNumber(leftSource, '数字计算的左值');
-  const right = toCalcNumber(
-    rightSource,
-    '数字计算的右值（接到值 B，或在「右值」里填数字）',
-  );
+  const right = toCalcNumber(rightSource, '数字计算的右值（接到值 B，或在「右值」里填数字）');
 
   let value: number;
   switch (operator) {
@@ -3101,8 +3531,7 @@ const noteText: PipelineNodeDefinition = {
   version: 1,
   label: '文字描述',
   category: 'note',
-  description:
-    '画布上的说明文字，用来标注分支用途或留备忘；不参与运行，也没有可连接的端口。',
+  description: '画布上的说明文字，用来标注分支用途或留备忘；不参与运行，也没有可连接的端口。',
   layout: true,
   defaultConfig: { text: '' },
   fields: [
@@ -3136,6 +3565,9 @@ const DEFINITIONS: readonly PipelineNodeDefinition[] = [
   callPersona,
   groupPersona,
   privatePersona,
+  chatHistory,
+  receivedMessage,
+  receivedSenderId,
   chatCompletion,
   promptCompression,
   constantValue,

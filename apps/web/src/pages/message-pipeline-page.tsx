@@ -49,6 +49,7 @@ import {
   IO_KIND_STYLE,
   MAX_PIPELINE_VARIABLES,
   cardHeight,
+  runtimeVariablesOf,
   wouldCreateCycle,
   type PipelineSelection,
 } from '@/components/pipeline/pipeline-ui';
@@ -166,7 +167,7 @@ export function MessagePipelinePage() {
   const runsQuery = useQuery({
     ...pipelineRunsQuery(runFilter),
     // SSE pushes lifecycle events; polling is the fallback when it drops.
-    refetchInterval: debugMode ? 4000 : false,
+    refetchInterval: 4000,
   });
 
   const graphRef = useRef<ChatPipelineGraph | null>(null);
@@ -270,7 +271,7 @@ export function MessagePipelinePage() {
     );
   }, [debugMode, runsQuery.data]);
 
-  usePipelineRunEvents(debugMode && Boolean(watchGraphId), (event) => {
+  usePipelineRunEvents(Boolean(watchGraphId), (event) => {
     if (event.graphId !== watchGraphId) {
       return;
     }
@@ -292,12 +293,22 @@ export function MessagePipelinePage() {
 
   const detailQuery = useQuery({
     ...pipelineRunQuery(selectedRunId ?? ''),
-    refetchInterval: (query) =>
-      debugMode && query.state.data?.status === 'RUNNING' ? 1200 : false,
+    refetchInterval: (query) => (query.state.data?.status === 'RUNNING' ? 1200 : false),
   });
   const nodeRuns = useMemo(
     () => new Map((detailQuery.data?.nodes ?? []).map((node) => [node.nodeId, node])),
     [detailQuery.data],
+  );
+  const runVariables = useMemo(
+    () =>
+      detailQuery.data && graph && detailQuery.data.graphId === graph.id
+        ? runtimeVariablesOf(
+            graph.variables,
+            detailQuery.data.nodes,
+            detailQuery.data.variableValues,
+          )
+        : null,
+    [detailQuery.data, graph],
   );
 
   const flash = useCallback((message: string) => {
@@ -1193,6 +1204,7 @@ export function MessagePipelinePage() {
             providers={providers}
             debugMode={debugMode}
             nodeRuns={nodeRuns}
+            runVariables={runVariables}
             onRenameGraph={(name) =>
               applyGraph((current) => ({ ...current, name }))
             }

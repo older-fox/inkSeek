@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { LlmService } from '../ai/llm.service.js';
 import { RedisCacheService } from '../redis/redis-cache.service.js';
 import {
+  PROMPT_COMPRESSION_DEFAULT_INSTRUCTION,
   PROMPT_COMPRESSION_DEFAULT_TTL_SECONDS,
   PROMPT_COMPRESSION_MAX_TTL_SECONDS,
   PROMPT_COMPRESSION_MIN_TTL_SECONDS,
@@ -10,18 +11,11 @@ import {
   type PipelinePromptCompressionResult,
 } from './pipeline/pipeline-types.js';
 
-/** Bump when the instruction changes so old cache rows stop matching. */
+/** Bump when the built-in instruction changes so old cache rows stop matching. */
 const COMPRESSION_VERSION = 'v1';
 const CACHE_PREFIX = `inkseek:pipeline:prompt-compress:${COMPRESSION_VERSION}`;
 const COMPRESSION_TEMPERATURE = 0.2;
 const COMPRESSION_MAX_TOKENS = 4096;
-
-const COMPRESSION_SYSTEM = [
-  '你是提示词压缩器。把用户给出的详细提示词改写成更紧凑的一版：',
-  '删除重复、客套、可合并的表述和多余举例，但必须保留全部事实、设定、约束、字段名、输出格式、语气与安全要求。',
-  '不得新增原文没有的信息，不得改变语义，不得省略任何限制条件。',
-  '直接输出压缩后的提示词正文，不要解释，不要使用 Markdown 代码块。',
-].join('\n');
 
 /**
  * Compresses long prompts once and keeps the result in Redis. The cache key
@@ -45,8 +39,10 @@ export class PromptCompressionService {
 
     const providerId = emptyToNull(input.providerId);
     const model = emptyToNull(input.model);
+    const instruction =
+      input.instruction?.trim() || PROMPT_COMPRESSION_DEFAULT_INSTRUCTION;
     const ttlSeconds = normalizeTtl(input.ttlSeconds);
-    const key = cacheKey(prompt, providerId, model);
+    const key = cacheKey(prompt, instruction, providerId, model);
 
     const cached = parseCached(await this.cache.get(key));
     if (cached) {
@@ -55,7 +51,7 @@ export class PromptCompressionService {
 
     const completion = await this.llm.complete({
       prompt: compressionPrompt(prompt),
-      system: COMPRESSION_SYSTEM,
+      system: instruction,
       providerId,
       model,
       temperature: COMPRESSION_TEMPERATURE,
@@ -82,11 +78,12 @@ function compressionPrompt(prompt: string): string {
 
 function cacheKey(
   prompt: string,
+  instruction: string,
   providerId: string | null,
   model: string | null,
 ): string {
   const digest = createHash('sha256')
-    .update(COMPRESSION_SYSTEM)
+    .update(instruction)
     .update('\u0000')
     .update(prompt)
     .digest('hex');

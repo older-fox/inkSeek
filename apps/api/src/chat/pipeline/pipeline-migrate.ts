@@ -1,4 +1,5 @@
 import type { PipelineEdge, PipelineGraph, PipelineNode } from './pipeline-graph.js';
+import { GROUP_PERSONA_FIELD_GROUPS } from './pipeline-nodes.js';
 
 /**
  * `message.input` used to expose one port per field. Those ports were folded
@@ -191,6 +192,56 @@ export function migratePersonaParameterCards(
         next.when = { ...edge.when, field: 'text' };
       }
     }
+    edges.push(next);
+  }
+  graph.edges = edges;
+  return true;
+}
+
+/**
+ * Group personas used to read one field. They now render a `{key}` template, so
+ * legacy cards turn their selected field into a placeholder (whole-snapshot
+ * cards get one labeled line per known key) and `value` edges move to `text`.
+ */
+export function migrateGroupPersonaTemplates(
+  graph: PipelineGraph,
+  warn: (message: string) => void,
+): boolean {
+  const legacy = graph.nodes.filter(
+    (node) => node.type === 'persona.group' && node.config !== undefined && 'field' in node.config,
+  );
+  if (legacy.length === 0) {
+    return false;
+  }
+
+  for (const node of legacy) {
+    const raw = node.config?.['field'];
+    const field = typeof raw === 'string' ? raw.trim() : '';
+    const template = field
+      ? `{${field}}`
+      : GROUP_PERSONA_FIELD_GROUPS.flatMap((group) =>
+          group.fields.map((entry) => `${entry.label}：{${entry.key}}`),
+        ).join('\n');
+    node.config = { ...node.config, template };
+    delete node.config['field'];
+  }
+
+  const legacyIds = new Set(legacy.map((node) => node.id));
+  const edges: PipelineEdge[] = [];
+  for (const edge of graph.edges) {
+    if (!legacyIds.has(edge.from) || edge.fromPort !== 'value') {
+      edges.push(edge);
+      continue;
+    }
+
+    const next: PipelineEdge = { ...edge, fromPort: 'text' };
+    if (edge.when?.field === 'value') {
+      next.when = { ...edge.when, field: 'text' };
+    }
+    warn(
+      `管线图迁移：${edge.from} 的「属性值」输出已移除，` +
+        `连线 ${edge.from}.value -> ${edge.to}.${edge.toPort} 已改接 text`,
+    );
     edges.push(next);
   }
   graph.edges = edges;

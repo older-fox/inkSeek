@@ -28,6 +28,7 @@ import {
   formatRuntimeDetail,
   formatRuntimePreview,
   variableSelectCreate,
+  type PipelineRuntimeVariables,
   type PipelineSelection,
 } from './pipeline-ui';
 import {
@@ -53,9 +54,11 @@ interface PipelineInspectorProps {
   selection: PipelineSelection;
   /** Model providers resolved once by the page for every provider/model select. */
   providers: ProviderOption[];
-  /** Runtime overlays for the selected run; only surfaced in debug mode. */
+  /** Node/edge runtime overlays only surface in debug mode. */
   debugMode: boolean;
   nodeRuns: Map<string, ChatPipelineNodeRunSummary>;
+  /** Live variable values of the selected run, null until a run is selected. */
+  runVariables: PipelineRuntimeVariables | null;
   onRenameGraph: (name: string) => void;
   onUpdateNode: (id: string, patch: Partial<ChatPipelineGraphNode>) => void;
   onUpdateNodeConfig: (id: string, key: string, value: unknown) => void;
@@ -75,6 +78,7 @@ export function PipelineInspector({
   providers,
   debugMode,
   nodeRuns,
+  runVariables,
   onRenameGraph,
   onUpdateNode,
   onUpdateNodeConfig,
@@ -123,6 +127,7 @@ export function PipelineInspector({
       ) : (
         <GraphInspector
           graph={graph}
+          runVariables={runVariables}
           onRenameGraph={onRenameGraph}
           onAddVariable={onAddVariable}
           onRenameVariable={onRenameVariable}
@@ -136,6 +141,7 @@ export function PipelineInspector({
 
 function GraphInspector({
   graph,
+  runVariables,
   onRenameGraph,
   onAddVariable,
   onRenameVariable,
@@ -143,6 +149,7 @@ function GraphInspector({
   onDeleteVariable,
 }: {
   graph: ChatPipelineGraph;
+  runVariables: PipelineRuntimeVariables | null;
   onRenameGraph: (name: string) => void;
   onAddVariable: () => void;
   onRenameVariable: (from: string, to: string) => void;
@@ -195,6 +202,17 @@ function GraphInspector({
           <span className="font-mono text-mist-400">{'{{vars.名称}}'}</span>{' '}
           读取，也可以用「读取变量 / 写入变量」卡。
         </p>
+        <p className="mt-1.5 flex items-center gap-1.5 text-[0.55rem] leading-4 text-mist-600">
+          <span
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              runVariables ? 'bg-brass-400/80' : 'bg-mist-100/20',
+            )}
+          />
+          {runVariables
+            ? '下方「运行值」来自选中运行写入后的值；上面的输入仍编辑声明的初始值。'
+            : '选中一次运行后，这里会显示变量写入后的值。'}
+        </p>
 
         {graph.variables.length === 0 ? (
           <p className="mt-2 rounded-lg border border-dashed border-mist-100/[0.1] px-3 py-3 text-center text-[0.6rem] leading-4.5 text-mist-600">
@@ -207,6 +225,14 @@ function GraphInspector({
                 key={variable.key}
                 variable={variable}
                 siblings={graph.variables}
+                runtime={
+                  runVariables?.values.has(variable.key)
+                    ? {
+                        value: runVariables.values.get(variable.key),
+                        written: runVariables.written.has(variable.key),
+                      }
+                    : null
+                }
                 onRename={onRenameVariable}
                 onUpdateValue={onUpdateVariableValue}
                 onDelete={onDeleteVariable}
@@ -254,22 +280,27 @@ function variableKindOf(value: ChatPipelineVariable['value']): VariableKind {
 function VariableRow({
   variable,
   siblings,
+  runtime,
   onRename,
   onUpdateValue,
   onDelete,
 }: {
   variable: ChatPipelineVariable;
   siblings: ChatPipelineVariable[];
+  /** Value written by the selected run; null when no run is selected. */
+  runtime: { value: unknown; written: boolean } | null;
   onRename: (from: string, to: string) => void;
   onUpdateValue: (key: string, value: ChatPipelineVariable['value']) => void;
   onDelete: (key: string) => void;
 }) {
   const [draftKey, setDraftKey] = useState(variable.key);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     setDraftKey(variable.key);
     setError(null);
+    setExpanded(false);
   }, [variable.key]);
 
   const kind = variableKindOf(variable.value);
@@ -398,8 +429,48 @@ function VariableRow({
       </div>
 
       {error && <p className="mt-1 text-[0.55rem] text-signal-400">{error}</p>}
+
+      {runtime && (
+        <div className="mt-1.5 rounded-md border border-brass-400/20 bg-brass-400/[0.05] px-2 py-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.14em] text-brass-300/80">
+              运行值
+            </span>
+            <span
+              className={cn(
+                'rounded border px-1 py-px font-mono text-[0.46rem]',
+                runtime.written
+                  ? 'border-brass-400/30 bg-brass-400/[0.08] text-brass-200'
+                  : 'border-mist-100/[0.1] text-mist-500',
+              )}
+            >
+              {runtime.written ? '已写入' : '初始值'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setExpanded((current) => !current)}
+              className="ml-auto shrink-0 rounded px-1 py-px font-mono text-[0.46rem] text-mist-500 transition hover:bg-mist-100/[0.06] hover:text-mist-300"
+            >
+              {expanded ? '收起' : '展开'}
+            </button>
+          </div>
+          {expanded ? (
+            <pre className="mt-1 max-h-36 overflow-auto rounded border border-mist-100/[0.06] bg-ink-950/60 px-1.5 py-1 font-mono text-[0.54rem] leading-4 text-mist-300">
+              {formatRuntimeDetail(runtime.value)}
+            </pre>
+          ) : (
+            <p
+              className="mt-1 truncate font-mono text-[0.58rem] text-brass-100/80"
+              title={formatRuntimeDetail(runtime.value)}
+            >
+              {formatRuntimePreview(runtime.value, 44)}
+            </p>
+          )}
+        </div>
+      )}
+
       <p className="mt-1 truncate font-mono text-[0.52rem] text-mist-600">
-        $vars.{variable.key} · {variable.value === '' ? '∅' : String(variable.value)}
+        $vars.{variable.key} · 声明值 {variable.value === '' ? '∅' : String(variable.value)}
       </p>
     </div>
   );

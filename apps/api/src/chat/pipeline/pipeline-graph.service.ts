@@ -30,6 +30,7 @@ import {
   type PipelineNode,
 } from './pipeline-graph.js';
 import {
+  migrateGroupPersonaTemplates,
   migrateLegacyMessagePorts,
   migratePersonaParameterCards,
   migrateRemovedMessageFieldNodes,
@@ -302,6 +303,7 @@ export class PipelineGraphService implements OnModuleInit {
         const portsMigrated = migrateLegacyMessagePorts(graph, warn);
         const cardsMigrated = migrateRemovedMessageFieldNodes(graph, warn);
         const personaMigrated = migratePersonaParameterCards(graph, warn);
+        const groupPersonaMigrated = migrateGroupPersonaTemplates(graph, warn);
         const whitelistMigrated = migrateSourceWhitelistColumns(graph, warn);
         const whitelistModeMigrated = migrateSourceWhitelistMode(graph, warn);
         const whitelistScopeMigrated = migrateSourceWhitelistScope(graph, warn);
@@ -311,6 +313,7 @@ export class PipelineGraphService implements OnModuleInit {
           portsMigrated ||
           cardsMigrated ||
           personaMigrated ||
+          groupPersonaMigrated ||
           whitelistMigrated ||
           whitelistModeMigrated ||
           whitelistScopeMigrated ||

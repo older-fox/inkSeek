@@ -6,10 +6,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import {
-  buildChannelPersonaSnapshot,
-  resolvePipelineNodeInputs,
-} from '@inkseek/shared';
+import { buildChannelPersonaSnapshot, resolvePipelineNodeInputs } from '@inkseek/shared';
 import type {
   ChatPersonaValue,
   ChatPipelineIoField,
@@ -42,6 +39,8 @@ import { createPipelineHelpers, getPipelineNode } from './pipeline-nodes.js';
 import {
   PipelineAbortError,
   type PipelineEffect,
+  type PipelineHistoryInput,
+  type PipelineHistoryMessage,
   type PipelineInputs,
   type PipelineMessage,
   type PipelineNodeDefinition,
@@ -279,21 +278,19 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       variables: asRecord(record.variables),
       variableValues: asRecord(record.variableValues),
       effects: record.effects ?? null,
-      nodes: record.nodes.map(
-        (node): ChatPipelineNodeRunSummary => ({
-          id: node.id,
-          nodeId: node.nodeId,
-          nodeType: node.nodeType,
-          nodeVersion: node.nodeVersion,
-          status: node.status,
-          startedAt: node.startedAt.toISOString(),
-          finishedAt: node.finishedAt?.toISOString() ?? null,
-          durationMs: node.durationMs,
-          input: node.input,
-          output: node.output,
-          error: node.error,
-        }),
-      ),
+      nodes: record.nodes.map((node): ChatPipelineNodeRunSummary => ({
+        id: node.id,
+        nodeId: node.nodeId,
+        nodeType: node.nodeType,
+        nodeVersion: node.nodeVersion,
+        status: node.status,
+        startedAt: node.startedAt.toISOString(),
+        finishedAt: node.finishedAt?.toISOString() ?? null,
+        durationMs: node.durationMs,
+        input: node.input,
+        output: node.output,
+        error: node.error,
+      })),
     };
   }
 
@@ -345,121 +342,315 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     const requestedEffects: PipelineEffect[] = [];
     let aborted = false;
     const personaValues = await this.loadPersonaValues(plan);
+    const nodeInfo = new Map<
+      string,
+      {
+        definition: PipelineNodeDefinition;
+        ports: ChatPipelineIoField[];
+        passiveSource: boolean;
+      }
+    >();
+    for (const node of graph.nodes) {
+      const definition = getPipelineNode(node.type);
+      const ports = resolvePipelineNodeInputs(definition, node.config);
+      nodeInfo.set(node.id, {
+        definition,
+        ports,
+        passiveSource: isPassiveSource(definition, ports),
+      });
+    }
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    /** Sources wait here until an activated downstream node pulls them. */
+    const deferred = new Set<string>();
 
-    try {
-      for (const node of order) {
-        const definition = getPipelineNode(node.type);
-        // Annotation cards exist for the canvas only: no trace row, no status.
-        if (definition.layout === true) {
-          continue;
+    const traceInputOf = (node: PipelineNode, inputs: PipelineInputs): Record<string, unknown> => ({
+      config: node.config ?? null,
+      join: node.join ?? 'all',
+      ports: inputs,
+      vars: Object.fromEntries(variables),
+    });
+
+    const runNode = async (
+      node: PipelineNode,
+      definition: PipelineNodeDefinition,
+      ports: ChatPipelineIoField[],
+    ): Promise<void> => {
+      const nodeEdges = incoming.get(node.id) ?? [];
+      const activeEdges = this.activeEdges(nodeEdges, statuses, outputs, blocked);
+      const inputs = collectInputs(ports, activeEdges, outputs);
+      const traceInput = traceInputOf(node, inputs);
+      const nodeStartedAt = new Date();
+
+      if (aborted || controller.signal.aborted) {
+        aborted = true;
+        statuses.set(node.id, 'CANCELLED');
+        await this.settleNode(
+          runId,
+          null,
+          node,
+          nodeStartedAt,
+          'CANCELLED',
+          traceInput,
+          null,
+          CANCELLED_MESSAGE,
+        );
+        return;
+      }
+
+      if (!shouldRunNode(definition, ports, node, nodeEdges, activeEdges, inputs)) {
+        statuses.set(node.id, 'SKIPPED');
+        await this.settleNode(runId, null, node, nodeStartedAt, 'SKIPPED', traceInput, null, null);
+        return;
+      }
+
+      const rowId = await this.startNode(runId, node, nodeStartedAt, traceInput);
+
+      try {
+        const helpers = createPipelineHelpers(message, outputs, inputs, variables);
+        const result = await definition.run({
+          message,
+          graph,
+          node,
+          outputs,
+          inputs,
+          personaValues,
+          resolve: helpers.resolve,
+          template: helpers.template,
+          getVariable: (key) => variables.get(key),
+          setVariable: (key, value) => {
+            variables.set(key, value);
+          },
+          readHistory: (input) => this.loadHistory(input),
+          readConversationPersona: (kind, externalId) =>
+            plan.channelId
+              ? this.conversationPersonas.valuesByExternalId(
+                  kind === 'group' ? 'GROUP' : 'PRIVATE',
+                  plan.channelId,
+                  externalId,
+                )
+              : Promise.resolve(null),
+          wait: (ms) => this.wait(ms, controller.signal),
+          describeImage: (input) => this.imageDescriptions.describe(input),
+          chat: (input) =>
+            this.llm.complete({
+              prompt: input.prompt,
+              system: input.system ?? undefined,
+              providerId: input.providerId ?? null,
+              model: input.model ?? null,
+              temperature: input.temperature,
+              maxTokens: input.maxTokens,
+            }),
+          compressPrompt: (input) => this.promptCompression.compress(input),
+        });
+        const output = sanitizeRecord(result.outputs);
+        if (result.effects && result.effects.length > 0) {
+          requestedEffects.push(...result.effects);
+          if (plan.mode === 'live') {
+            await this.effects.commit(message, result.effects);
+          }
         }
-        const nodeEdges = incoming.get(node.id) ?? [];
-        const activeEdges = this.activeEdges(nodeEdges, statuses, outputs, blocked);
-        const ports = resolvePipelineNodeInputs(definition, node.config);
-        const inputs = collectInputs(ports, activeEdges, outputs);
-        const traceInput = {
-          config: node.config ?? null,
-          join: node.join ?? 'all',
-          ports: inputs,
-          vars: Object.fromEntries(variables),
-        };
-        const nodeStartedAt = new Date();
-
-        if (aborted || controller.signal.aborted) {
+        outputs.set(node.id, output);
+        if (result.blocked === true) {
+          blocked.add(node.id);
+        }
+        statuses.set(node.id, 'SUCCEEDED');
+        await this.settleNode(
+          runId,
+          rowId,
+          node,
+          nodeStartedAt,
+          'SUCCEEDED',
+          traceInput,
+          output,
+          null,
+        );
+      } catch (error) {
+        if (error instanceof PipelineAbortError || controller.signal.aborted) {
           aborted = true;
           statuses.set(node.id, 'CANCELLED');
-          await this.settleNode(runId, null, node, nodeStartedAt, 'CANCELLED', traceInput, null, CANCELLED_MESSAGE);
-          continue;
-        }
-
-        if (!shouldRunNode(definition, ports, node, nodeEdges, activeEdges, inputs)) {
-          statuses.set(node.id, 'SKIPPED');
-          await this.settleNode(runId, null, node, nodeStartedAt, 'SKIPPED', traceInput, null, null);
-          continue;
-        }
-
-        const rowId = await this.startNode(runId, node, nodeStartedAt, traceInput);
-
-        try {
-          const helpers = createPipelineHelpers(message, outputs, inputs, variables);
-          const result = await definition.run({
-            message,
-            graph,
-            node,
-            outputs,
-            inputs,
-            personaValues,
-            resolve: helpers.resolve,
-            template: helpers.template,
-            getVariable: (key) => variables.get(key),
-            setVariable: (key, value) => {
-              variables.set(key, value);
-            },
-            readConversationPersona: (kind, externalId) =>
-              plan.channelId
-                ? this.conversationPersonas.valuesByExternalId(
-                    kind === 'group' ? 'GROUP' : 'PRIVATE',
-                    plan.channelId,
-                    externalId,
-                  )
-                : Promise.resolve(null),
-            wait: (ms) => this.wait(ms, controller.signal),
-            describeImage: (input) => this.imageDescriptions.describe(input),
-            chat: (input) =>
-              this.llm.complete({
-                prompt: input.prompt,
-                system: input.system ?? undefined,
-                providerId: input.providerId ?? null,
-                model: input.model ?? null,
-                temperature: input.temperature,
-                maxTokens: input.maxTokens,
-              }),
-            compressPrompt: (input) => this.promptCompression.compress(input),
-          });
-          const output = sanitizeRecord(result.outputs);
-          if (result.effects && result.effects.length > 0) {
-            requestedEffects.push(...result.effects);
-            if (plan.mode === 'live') {
-              await this.effects.commit(message, result.effects);
-            }
-          }
-          outputs.set(node.id, output);
-          if (result.blocked === true) {
-            blocked.add(node.id);
-          }
-          statuses.set(node.id, 'SUCCEEDED');
-          await this.settleNode(runId, rowId, node, nodeStartedAt, 'SUCCEEDED', traceInput, output, null);
-        } catch (error) {
-          if (error instanceof PipelineAbortError || controller.signal.aborted) {
-            aborted = true;
-            statuses.set(node.id, 'CANCELLED');
-            await this.settleNode(
-              runId,
-              rowId,
-              node,
-              nodeStartedAt,
-              'CANCELLED',
-              traceInput,
-              null,
-              WAITING_CANCELLED_MESSAGE,
-            );
-            continue;
-          }
-
-          const failureMessage = error instanceof Error ? error.message : String(error);
-          statuses.set(node.id, 'FAILED');
-          failures.push(`节点 ${node.id}（${node.type}）失败：${failureMessage}`);
           await this.settleNode(
             runId,
             rowId,
             node,
             nodeStartedAt,
-            'FAILED',
+            'CANCELLED',
             traceInput,
             null,
-            failureMessage,
+            WAITING_CANCELLED_MESSAGE,
           );
+          return;
         }
+
+        const failureMessage = error instanceof Error ? error.message : String(error);
+        statuses.set(node.id, 'FAILED');
+        failures.push(`节点 ${node.id}（${node.type}）失败：${failureMessage}`);
+        await this.settleNode(
+          runId,
+          rowId,
+          node,
+          nodeStartedAt,
+          'FAILED',
+          traceInput,
+          null,
+          failureMessage,
+        );
+      }
+    };
+
+    /** Runs a deferred node and its deferred ancestors on demand. */
+    const materialize = async (nodeId: string): Promise<void> => {
+      if (!deferred.has(nodeId)) {
+        return;
+      }
+      deferred.delete(nodeId);
+      const node = nodeById.get(nodeId);
+      const info = nodeInfo.get(nodeId);
+      if (!node || !info) {
+        return;
+      }
+      for (const edge of incoming.get(nodeId) ?? []) {
+        await materialize(edge.from);
+      }
+      await runNode(node, info.definition, info.ports);
+    };
+
+    try {
+      for (const node of order) {
+        const info = nodeInfo.get(node.id);
+        if (!info) {
+          continue;
+        }
+        const definition = info.definition;
+        // Annotation cards exist for the canvas only: no trace row, no status.
+        if (definition.layout === true) {
+          continue;
+        }
+
+        if (aborted || controller.signal.aborted) {
+          aborted = true;
+          deferred.delete(node.id);
+          const activeEdges = this.activeEdges(
+            incoming.get(node.id) ?? [],
+            statuses,
+            outputs,
+            blocked,
+          );
+          const inputs = collectInputs(info.ports, activeEdges, outputs);
+          statuses.set(node.id, 'CANCELLED');
+          await this.settleNode(
+            runId,
+            null,
+            node,
+            new Date(),
+            'CANCELLED',
+            traceInputOf(node, inputs),
+            null,
+            CANCELLED_MESSAGE,
+          );
+          continue;
+        }
+
+        // No-input cards are data sources, not events: hold them until a
+        // running downstream node actually needs their output.
+        if (info.passiveSource) {
+          deferred.add(node.id);
+          continue;
+        }
+
+        const nodeEdges = incoming.get(node.id) ?? [];
+
+        if (nodeEdges.length === 0) {
+          if (info.ports.length === 0 || definition.alwaysRun === true) {
+            await runNode(node, definition, info.ports);
+          } else {
+            statuses.set(node.id, 'SKIPPED');
+            await this.settleNode(
+              runId,
+              null,
+              node,
+              new Date(),
+              'SKIPPED',
+              traceInputOf(node, {}),
+              null,
+              null,
+            );
+          }
+          continue;
+        }
+
+        const eventEdges = nodeEdges.filter((edge) => {
+          const source = nodeInfo.get(edge.from);
+          return source !== undefined && !source.passiveSource && !deferred.has(edge.from);
+        });
+
+        // No event reached this node. Data-only chains stay dormant even when
+        // they end at a sink: a data source only runs when an activated node
+        // with a real event pulls it, never on its own.
+        if (eventEdges.length === 0) {
+          deferred.add(node.id);
+          continue;
+        }
+
+        const activeEventEdges = this.activeEdges(eventEdges, statuses, outputs, blocked);
+        const activated =
+          node.join === 'any'
+            ? activeEventEdges.length > 0
+            : activeEventEdges.length === eventEdges.length;
+
+        if (!activated) {
+          const activeEdges = this.activeEdges(nodeEdges, statuses, outputs, blocked);
+          const inputs = collectInputs(info.ports, activeEdges, outputs);
+          statuses.set(node.id, 'SKIPPED');
+          await this.settleNode(
+            runId,
+            null,
+            node,
+            new Date(),
+            'SKIPPED',
+            traceInputOf(node, inputs),
+            null,
+            null,
+          );
+          continue;
+        }
+
+        for (const edge of nodeEdges) {
+          await materialize(edge.from);
+        }
+        await runNode(node, definition, info.ports);
+      }
+
+      for (const node of order) {
+        if (!deferred.has(node.id)) {
+          continue;
+        }
+        deferred.delete(node.id);
+        if (aborted || controller.signal.aborted) {
+          aborted = true;
+          statuses.set(node.id, 'CANCELLED');
+          await this.settleNode(
+            runId,
+            null,
+            node,
+            new Date(),
+            'CANCELLED',
+            traceInputOf(node, {}),
+            null,
+            CANCELLED_MESSAGE,
+          );
+          continue;
+        }
+        statuses.set(node.id, 'SKIPPED');
+        await this.settleNode(
+          runId,
+          null,
+          node,
+          new Date(),
+          'SKIPPED',
+          traceInputOf(node, {}),
+          null,
+          null,
+        );
       }
     } finally {
       this.activeRuns.delete(runId);
@@ -497,8 +688,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       : failures.length > 0
         ? 'FAILED'
         : 'SUCCEEDED';
-    const error =
-      failures.length > 0 ? failures.join('；') : aborted ? '管线运行已取消' : null;
+    const error = failures.length > 0 ? failures.join('；') : aborted ? '管线运行已取消' : null;
 
     try {
       await this.prisma.chatPipelineRun.update({
@@ -530,11 +720,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private emitRunEvent(
-    runId: string,
-    plan: RunPlan,
-    status: ChatPipelineRunStatus,
-  ): void {
+  private emitRunEvent(runId: string, plan: RunPlan, status: ChatPipelineRunStatus): void {
     this.events.emit({
       runId,
       graphId: plan.graph.id,
@@ -623,9 +809,7 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
    * runs, otherwise the channel's bound card. Values use the same normalized
    * keys the channel snapshot exposes.
    */
-  private async loadPersonaValues(
-    plan: RunPlan,
-  ): Promise<Record<string, ChatPersonaValue> | null> {
+  private async loadPersonaValues(plan: RunPlan): Promise<Record<string, ChatPersonaValue> | null> {
     let cardId = plan.personaCardId;
 
     try {
@@ -647,6 +831,76 @@ export class ChatPipelineRunner implements OnModuleInit, OnModuleDestroy {
       );
       return null;
     }
+  }
+
+  /**
+   * Messages older than the anchor, oldest first. The anchor time comes from the
+   * staged message object; a missing/unparsable one falls back to the stored row.
+   */
+  private async loadHistory(input: PipelineHistoryInput): Promise<PipelineHistoryMessage[]> {
+    const conversationId = input.conversationId.trim();
+    if (!conversationId) {
+      return [];
+    }
+
+    let before: Date | null = null;
+    if (input.sentAt) {
+      const parsed = new Date(input.sentAt);
+      before = Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (!before && input.messageId) {
+      const anchor = await this.prisma.chatMessageRecord.findUnique({
+        where: { id: input.messageId },
+        select: { sentAt: true },
+      });
+      before = anchor?.sentAt ?? null;
+    }
+    if (!before) {
+      return [];
+    }
+
+    const rows = await this.prisma.chatMessageRecord.findMany({
+      where: {
+        conversationId,
+        ...(input.messageId ? { id: { not: input.messageId } } : {}),
+        sentAt: { lt: before },
+      },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      take: input.limit,
+      select: {
+        id: true,
+        senderName: true,
+        isSelf: true,
+        text: true,
+        kind: true,
+        sentAt: true,
+        images: {
+          select: { url: true, media: { select: { description: true } } },
+          orderBy: { position: 'asc' },
+        },
+        voices: {
+          select: { url: true, description: true },
+          orderBy: { position: 'asc' },
+        },
+      },
+    });
+
+    return rows.reverse().map((row) => ({
+      id: row.id,
+      sender: row.senderName,
+      isSelf: row.isSelf,
+      text: row.text,
+      kind: row.kind,
+      sentAt: row.sentAt.toISOString(),
+      images: row.images.map((image) => ({
+        url: image.url,
+        description: image.media?.description ?? null,
+      })),
+      voices: row.voices.map((voice) => ({
+        url: voice.url,
+        transcript: voice.description,
+      })),
+    }));
   }
 
   /** Runner-owned timer: shutdown aborts the wait instead of holding the process. */
@@ -794,6 +1048,24 @@ function collectInputs(
   }
 
   return inputs;
+}
+
+/**
+ * Cards with no input ports are data sources, not events. Running them on
+ * every message burns calls (LLM, reads) even when the branch they feed never
+ * activates, so the loop defers them until an activated node pulls them.
+ * Trigger-like cards opt out with `system` or `alwaysRun`.
+ */
+function isPassiveSource(
+  definition: PipelineNodeDefinition,
+  ports: ChatPipelineIoField[],
+): boolean {
+  return (
+    definition.layout !== true &&
+    definition.system !== true &&
+    definition.alwaysRun !== true &&
+    ports.length === 0
+  );
 }
 
 /**

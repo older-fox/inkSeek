@@ -4,6 +4,7 @@ import type {
   ChatPipelineIoKind,
   ChatPipelineNodeCategory,
   ChatPipelineNodePosition,
+  ChatPipelineNodeRunSummary,
   ChatPipelineNodeStatus,
   ChatPipelineNodeType,
   ChatPipelineVariable,
@@ -378,6 +379,53 @@ export function formatRuntimeDetail(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/** Runtime variable state for the selected run, keyed by variable name. */
+export interface PipelineRuntimeVariables {
+  values: Map<string, unknown>;
+  /** Variables a successful 「写入变量」 node actually wrote during the run. */
+  written: Set<string>;
+}
+
+/**
+ * Every run resets variables to their declared values, so declarations seed the
+ * map; successful vars.set traces then override keys in completion order, and
+ * the run's final snapshot wins when the run has finished.
+ */
+export function runtimeVariablesOf(
+  declared: readonly ChatPipelineVariable[],
+  nodes: readonly ChatPipelineNodeRunSummary[],
+  final: Record<string, unknown> | null,
+): PipelineRuntimeVariables {
+  const values = new Map<string, unknown>(
+    declared.map((variable) => [variable.key, variable.value]),
+  );
+  const written = new Set<string>();
+
+  const writes = nodes
+    .filter((node) => node.nodeType === 'vars.set' && node.status === 'SUCCEEDED')
+    .sort((a, b) => (a.finishedAt ?? a.startedAt).localeCompare(b.finishedAt ?? b.startedAt));
+  for (const node of writes) {
+    const output = node.output;
+    if (output === null || typeof output !== 'object' || Array.isArray(output)) {
+      continue;
+    }
+    const record = output as Record<string, unknown>;
+    const key = record['variable'];
+    if (typeof key === 'string' && key.length > 0) {
+      values.set(key, record['value'] ?? null);
+      written.add(key);
+    }
+  }
+
+  if (final) {
+    for (const [key, value] of Object.entries(final)) {
+      values.set(key, value);
+    }
+  }
+
+  return { values, written };
 }
 
 export function formatRunTime(iso: string): string {
