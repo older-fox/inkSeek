@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Fingerprint, MessageCircle, Plus, Trash2, UsersRound, Waypoints } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
@@ -305,6 +305,7 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
 export function ConnectionsPage() {
   const channels = useChannels();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { persona?: string };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [personaChannelId, setPersonaChannelId] = useState<string | null>(null);
@@ -321,7 +322,8 @@ export function ConnectionsPage() {
     }
     appliedPersonaRef.current = requested;
     setPersonaChannelId(requested);
-  }, [search.persona, channels]);
+    void navigate({ to: '/connections', search: {}, replace: true });
+  }, [search.persona, channels, navigate]);
 
   const deleteMutation = useMutation({
     mutationFn: (channel: Channel) => api.deleteChatChannel(channel.id),
