@@ -13,6 +13,7 @@ import { PrismaService } from '../database/prisma.service.js';
 import type { AgentStep, PersonaState } from '../generated/prisma/client.js';
 import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
+import { readConversation } from './mind-conversation-read.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
@@ -237,6 +238,7 @@ export class MindRuntimeService implements OnModuleInit {
     const recall = await this.memories.recallForScene(scene, query, 12);
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
+    const conversationRead = readConversation({ scene, state, memories });
     const run = await this.prisma.agentRun.create({
       data: {
         personaId: scene.persona.id,
@@ -286,6 +288,7 @@ export class MindRuntimeService implements OnModuleInit {
         engage: decision.engage,
         reason: decision.reason,
         read: decision.read,
+        conversation: conversationRead,
       },
       0,
     );
@@ -330,6 +333,7 @@ export class MindRuntimeService implements OnModuleInit {
         memories: recall.relevant,
         coreMemories: recall.core,
         memoryStats: recall.stats,
+        conversationRead,
         settings,
         mode,
         trigger: input.trigger ?? 'MESSAGE',
