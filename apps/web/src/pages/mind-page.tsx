@@ -17,6 +17,7 @@ import {
   type MindTabKey,
 } from '@/components/mind/mind-format';
 import {
+  MindGrowthTab,
   MindJournalTab,
   MindMemoriesTab,
   MindPlansTab,
@@ -287,6 +288,7 @@ export function MindPage() {
             {tab === 'relations' ? <MindRelationsTab personaId={persona.id} /> : null}
             {tab === 'groups' ? <MindGroupsTab personaId={persona.id} /> : null}
             {tab === 'memories' ? <MindMemoriesTab personaId={persona.id} /> : null}
+            {tab === 'growth' ? <MindGrowthTab personaId={persona.id} /> : null}
             {tab === 'plans' ? (
               <MindPlansTab
                 personaId={persona.id}

@@ -78,6 +78,8 @@ export interface MindSleepBrief {
   energy: number;
   health: number;
   stress: number;
+  /** Only values already in a dangerous band; the model decides what to do. */
+  criticalWarnings: string[];
   suggestion: {
     action: 'SLEEP' | 'NAP' | 'NONE';
     minutes: number | null;
@@ -106,11 +108,6 @@ export interface MindWakeBrief {
     urgency: number;
   }[];
   overnightMessages: SceneMessage[];
-  recentMemories: {
-    title: string;
-    content: string;
-    occurredAt: string;
-  }[];
   unconsolidatedCount: number;
 }
 
@@ -132,11 +129,16 @@ export interface MemoryPromptItem {
   secret: boolean;
 }
 
+/** How many memories exist for this persona, so the model knows the library is larger than the prompt. */
+export interface MindMemoryStats {
+  total: number;
+  recent7d: number;
+  lastAt: string | null;
+}
+
 export const MIND_EMBEDDING_DIM = 256;
-export const MIND_MAX_TOOL_STEPS = 6;
+export const MIND_MAX_TOOL_STEPS = 10;
 export const MIND_MAX_TOOL_MS = 25_000;
-export const MIND_MAX_MEMORY_WRITES = 5;
-export const MIND_MAX_TODOS = 3;
 /** Hard per-turn cap; daily caps and cooldowns live in MindDriftService. */
 export const MIND_MAX_RELATIONSHIP_DELTA = 5;
 
@@ -256,15 +258,59 @@ export function isQuietHour(hour: number, quietHours: unknown): boolean {
   return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
-export function formatSceneForPrompt(messages: readonly SceneMessage[]): string {
+export function formatSceneForPrompt(
+  messages: readonly SceneMessage[],
+  timeZone?: string | null,
+): string {
+  let previousDay = '';
+  let previousAt: number | null = null;
   return messages
     .map((message) => {
+      const at = new Date(message.sentAt);
+      const valid = !Number.isNaN(at.getTime());
+      const day = valid ? localDateKey(at, timeZone) : '';
+      const clock = valid ? formatLocalClock(at, timeZone) : message.sentAt;
+      const label = valid ? (day === previousDay ? clock : `${day.slice(5)} ${clock}`) : clock;
+      const gap = previousAt !== null && valid ? at.getTime() - previousAt : 0;
+      const gapLabel = gap >= 30 * 60_000 ? ` · 隔 ${formatElapsed(gap)}` : '';
+      if (valid) {
+        previousDay = day;
+        previousAt = at.getTime();
+      }
       const sender = message.isSelf ? '我' : message.senderName;
       const images = message.images.length > 0 ? ` [图片：${message.images.join('；')}]` : '';
       const text = message.text.trim() || (message.kind === 'FACE' ? '[表情]' : '[空消息]');
-      return `[${message.sentAt}] ${sender}：${text}${images}`;
+      return `[${label}${gapLabel}] ${sender}：${text}${images}`;
     })
     .join('\n');
+}
+
+function formatLocalClock(date: Date, timeZone?: string | null): string {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timeZone || undefined,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  } catch {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+}
+
+function formatElapsed(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) {
+    return `${minutes} 分钟`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours < 24) {
+    return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
+  }
+  const days = Math.floor(hours / 24);
+  const leftover = hours % 24;
+  return leftover === 0 ? `${days} 天` : `${days} 天 ${leftover} 小时`;
 }
 
 export function personaValueText(

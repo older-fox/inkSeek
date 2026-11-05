@@ -2,6 +2,7 @@ import type {
   AgentTodoRecord,
   PersonaJournalRecord,
   PersonaMemoryKind,
+  PersonaMemoryRecord,
   PersonaMemoryVisibility,
   StickerRecord,
 } from '@inkseek/shared';
@@ -193,6 +194,124 @@ export function MindMemoriesTab({ personaId }: { personaId: string }) {
       </MindDrawer>
     </>
   );
+}
+
+export function MindGrowthTab({ personaId }: { personaId: string }) {
+  const knowledgeQuery = useQuery({
+    queryKey: ['mind', 'memories', personaId, 'growth', 'world'],
+    queryFn: () => api.mindMemories({ personaId, sourceType: 'WEB', limit: 100, offset: 0 }),
+    enabled: Boolean(personaId),
+    staleTime: 8_000,
+  });
+  const reflectionQuery = useQuery({
+    queryKey: ['mind', 'memories', personaId, 'growth', 'self'],
+    queryFn: () => api.mindMemories({ personaId, kind: 'REFLECTION', limit: 100, offset: 0 }),
+    enabled: Boolean(personaId),
+    staleTime: 8_000,
+  });
+  const knowledge = knowledgeQuery.data ?? [];
+  const reflections = reflectionQuery.data ?? [];
+
+  if (knowledgeQuery.isPending || reflectionQuery.isPending) {
+    return (
+      <div className="grid place-items-center py-16">
+        <LoaderCircle className="size-5 animate-spin text-brass-300" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-jade-400/15 bg-jade-400/[0.04] px-3 py-2.5">
+          <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-jade-300/80">
+            World Knowledge
+          </p>
+          <p className="mt-1 text-lg text-mist-100">{knowledge.length}</p>
+          <p className="text-[0.66rem] text-mist-600">从网页读到、并留下来的内容</p>
+        </div>
+        <div className="rounded-xl border border-brass-400/15 bg-brass-400/[0.04] px-3 py-2.5">
+          <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-brass-300/80">
+            Reflections
+          </p>
+          <p className="mt-1 text-lg text-mist-100">{reflections.length}</p>
+          <p className="text-[0.66rem] text-mist-600">它对自己的看法和改变</p>
+        </div>
+      </div>
+
+      <MindSection title={`World · ${knowledge.length}`} count="看过的世界">
+        {knowledge.length === 0 ? (
+          <EmptyState compact text="还没有从网页吸收的内容。等 TA 在空闲时自己去看点什么。" />
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <LazyList
+              items={knowledge}
+              step={20}
+              renderItem={(memory) => <GrowthCard key={memory.id} memory={memory} />}
+            />
+          </div>
+        )}
+      </MindSection>
+
+      <MindSection title={`Self · ${reflections.length}`} count="缓慢发生的变化">
+        {reflections.length === 0 ? (
+          <EmptyState compact text="还没有自我反思。到点后 TA 会回看最近的经历。" />
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <LazyList
+              items={reflections}
+              step={20}
+              renderItem={(memory) => <GrowthCard key={memory.id} memory={memory} />}
+            />
+          </div>
+        )}
+      </MindSection>
+    </div>
+  );
+}
+
+function GrowthCard({ memory }: { memory: PersonaMemoryRecord }) {
+  const source = memorySourceUrl(memory);
+  return (
+    <div className="rounded-xl border border-mist-100/[0.06] bg-ink-950/25 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded-full border border-brass-400/20 px-1.5 py-0.5 font-mono text-[0.62rem] text-brass-300">
+          {MEMORY_KIND_LABELS[memory.kind]}
+        </span>
+        <span className="font-mono text-[0.62rem] text-mist-600">
+          {formatTime(memory.occurredAt)} · 置信度 {memory.confidence}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[0.78rem] leading-5 text-mist-300">{memory.content}</p>
+      {source ? (
+        <a
+          href={source}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-block truncate font-mono text-[0.62rem] text-jade-300/80 underline decoration-jade-400/30 hover:text-jade-200"
+        >
+          {sourceHost(source)}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function memorySourceUrl(memory: PersonaMemoryRecord): string {
+  const structured = memory.structured;
+  if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
+    return '';
+  }
+  const url = (structured as Record<string, unknown>)['sourceUrl'];
+  return typeof url === 'string' ? url : '';
+}
+
+function sourceHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 export function MindPlansTab({

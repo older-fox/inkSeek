@@ -49,6 +49,21 @@ export class MindSettingsService {
     if (input.privateBurstSeconds !== undefined) {
       data.privateBurstSeconds = input.privateBurstSeconds;
     }
+    if (input.lifeEventChancePercent !== undefined) {
+      data.lifeEventChancePercent = input.lifeEventChancePercent;
+    }
+    if (input.lifeEventDailyLimit !== undefined) {
+      data.lifeEventDailyLimit = input.lifeEventDailyLimit;
+    }
+    if (input.curiosityChancePercent !== undefined) {
+      data.curiosityChancePercent = input.curiosityChancePercent;
+    }
+    if (input.curiosityDailyLimit !== undefined) {
+      data.curiosityDailyLimit = input.curiosityDailyLimit;
+    }
+    if (input.reflectionIntervalHours !== undefined) {
+      data.reflectionIntervalHours = input.reflectionIntervalHours;
+    }
     if (input.imageDescriptionPrompt !== undefined) {
       data.imageDescriptionPrompt = input.imageDescriptionPrompt.trim();
     }
@@ -78,6 +93,11 @@ export class MindSettingsService {
         maxBeatDelayMs: input.maxBeatDelayMs ?? 4000,
         replyAvoidSeconds: input.replyAvoidSeconds ?? 180,
         privateBurstSeconds: input.privateBurstSeconds ?? 0,
+        lifeEventChancePercent: input.lifeEventChancePercent ?? 1,
+        lifeEventDailyLimit: input.lifeEventDailyLimit ?? 1,
+        curiosityChancePercent: input.curiosityChancePercent ?? 15,
+        curiosityDailyLimit: input.curiosityDailyLimit ?? 0,
+        reflectionIntervalHours: input.reflectionIntervalHours ?? 6,
         imageDescriptionPrompt: input.imageDescriptionPrompt?.trim() ?? '',
         providerId: input.providerId ?? null,
         model: input.model ?? null,
@@ -122,6 +142,11 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     maxBeatDelayMs: row.maxBeatDelayMs,
     replyAvoidSeconds: row.replyAvoidSeconds,
     privateBurstSeconds: row.privateBurstSeconds,
+    lifeEventChancePercent: row.lifeEventChancePercent,
+    lifeEventDailyLimit: row.lifeEventDailyLimit,
+    curiosityChancePercent: row.curiosityChancePercent,
+    curiosityDailyLimit: row.curiosityDailyLimit,
+    reflectionIntervalHours: row.reflectionIntervalHours,
     imageDescriptionPrompt: row.imageDescriptionPrompt,
     quietHours: row.quietHours,
     providerId: row.providerId,

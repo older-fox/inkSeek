@@ -77,7 +77,12 @@ export class PersonaStateService {
     if (input.stress !== undefined) data.stress = clamp(input.stress, 0, 100);
     if (input.socialBattery !== undefined) data.socialBattery = clamp(input.socialBattery, 0, 100);
     if (input.attention !== undefined) data.attention = clamp(input.attention, 0, 100);
-    if (input.currentActivity !== undefined) data.currentActivity = input.currentActivity;
+    if (input.currentActivity !== undefined) {
+      data.currentActivity = input.currentActivity;
+      if (input.currentActivity !== before.currentActivity) {
+        data.activitySince = input.currentActivity ? new Date() : null;
+      }
+    }
     if (input.location !== undefined) data.location = input.location;
     if (input.sleepDebt !== undefined) data.sleepDebt = clamp(input.sleepDebt, 0, 100);
     if (input.health !== undefined) data.health = clamp(input.health, 0, 100);
@@ -121,8 +126,6 @@ export class PersonaStateService {
         moodValence: clamp(state.moodValence + valenceDelta, -100, 100),
         moodArousal: clamp(state.moodArousal + arousalDelta, 0, 100),
         stress: clamp(state.stress + (negative ? intensity * 0.2 : -intensity * 0.08), 0, 100),
-        energy: clamp(state.energy - 1.5, 0, 100),
-        socialBattery: clamp(state.socialBattery - 2, 0, 100),
         lastHeartbeatAt: new Date(),
       },
     });
@@ -133,13 +136,16 @@ export class PersonaStateService {
     });
   }
 
-  async applyTurnCost(personaId: string, engaged: boolean, meta?: StateChangeMeta): Promise<void> {
+  /** Engagement only leaves an attention trace; energy and social battery are the model's call. */
+  async recordTurnAttention(
+    personaId: string,
+    engaged: boolean,
+    meta?: StateChangeMeta,
+  ): Promise<void> {
     const state = await this.ensure(personaId);
     const next = await this.prisma.personaState.update({
       where: { personaId },
       data: {
-        energy: clamp(state.energy - (engaged ? 2 : 0.5), 0, 100),
-        socialBattery: clamp(state.socialBattery - (engaged ? 3 : 1), 0, 100),
         attention: clamp(state.attention + (engaged ? 3 : 1), 0, 100),
       },
     });
@@ -213,7 +219,12 @@ export class PersonaStateService {
           ? { grooming: clamp(state.grooming + deltas.grooming, 0, 100) }
           : {}),
         ...(deltas.currentActivity !== undefined
-          ? { currentActivity: deltas.currentActivity }
+          ? {
+              currentActivity: deltas.currentActivity,
+              ...(deltas.currentActivity !== state.currentActivity
+                ? { activitySince: deltas.currentActivity ? new Date() : null }
+                : {}),
+            }
           : {}),
         ...(deltas.location !== undefined ? { location: deltas.location } : {}),
         ...(deltas.markWake ? { lastWakeAt: new Date(), lastHeartbeatAt: new Date() } : {}),
@@ -278,6 +289,7 @@ export class PersonaStateService {
 
     if (sleeping && state.currentActivity.length === 0) {
       data.currentActivity = '睡觉';
+      data.activitySince = new Date(now);
     }
 
     const next = await this.prisma.personaState.update({ where: { personaId: persona.id }, data });
@@ -363,6 +375,7 @@ function toRecord(state: PersonaState): PersonaStateRecord {
     socialBattery: state.socialBattery,
     attention: state.attention,
     currentActivity: state.currentActivity,
+    activitySince: state.activitySince?.toISOString() ?? null,
     location: state.location,
     sleepDebt: state.sleepDebt,
     health: state.health,

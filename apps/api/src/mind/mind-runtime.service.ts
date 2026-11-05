@@ -38,6 +38,7 @@ type Trigger = 'MESSAGE' | 'HEARTBEAT' | 'PROACTIVE' | 'MANUAL';
 @Injectable()
 export class MindRuntimeService implements OnModuleInit {
   private readonly logger = new Logger(MindRuntimeService.name);
+  private readonly consolidating = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -233,7 +234,8 @@ export class MindRuntimeService implements OnModuleInit {
       scene.persona.values as Record<string, unknown> | null,
     );
     const query = buildMemoryQuery(scene);
-    const memories = await this.memories.searchForScene(scene, query, 10);
+    const recall = await this.memories.recallForScene(scene, query, 12);
+    const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const run = await this.prisma.agentRun.create({
       data: {
@@ -325,7 +327,9 @@ export class MindRuntimeService implements OnModuleInit {
         scene,
         state,
         social: decision.read,
-        memories,
+        memories: recall.relevant,
+        coreMemories: recall.core,
+        memoryStats: recall.stats,
         settings,
         mode,
         trigger: input.trigger ?? 'MESSAGE',
@@ -434,6 +438,7 @@ export class MindRuntimeService implements OnModuleInit {
       }
     }
     await this.writeBack(run.id, scene, plan, decision.read, state, settings);
+    void this.consolidateIfNeeded(scene.persona.id, scene, state);
     await this.executor.execute({
       plan,
       scene,
@@ -525,7 +530,21 @@ export class MindRuntimeService implements OnModuleInit {
       : [];
     const unconsolidated = await this.memories.countUnconsolidated(personaId);
 
-    if (dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2) {
+    // Only idle beats roll for everyday events or curiosity, so busy days never
+    // stack a second storyline on top of the messages already being handled.
+    // Reflection is scheduled by time and takes priority over both.
+    const idle = dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2;
+    const reflection = !quiet && (await this.reflectionDue(personaId, settings));
+    const lifeEvent =
+      !reflection && idle && !quiet && (await this.rollLifeEvent(personaId, settings, timeZone));
+    const curiosity =
+      !reflection &&
+      !lifeEvent &&
+      idle &&
+      !quiet &&
+      (await this.rollCuriosity(personaId, settings, timeZone));
+
+    if (!lifeEvent && !curiosity && !reflection && idle) {
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '无到期事项');
       return null;
     }
@@ -568,11 +587,6 @@ export class MindRuntimeService implements OnModuleInit {
       12,
       new Date(now.getTime() - 12 * 3600_000),
     );
-    const recentMemories = await this.memories.list({
-      personaId,
-      limit: 6,
-      offset: 0,
-    });
     const wakeBrief: MindWakeBrief = {
       now,
       timeZone: timeZone ?? 'server-local',
@@ -594,13 +608,29 @@ export class MindRuntimeService implements OnModuleInit {
         urgency: intent.urgency,
       })),
       overnightMessages,
-      recentMemories: recentMemories.map((memory) => ({
-        title: memory.title,
-        content: memory.content,
-        occurredAt: memory.occurredAt,
-      })),
       unconsolidatedCount: unconsolidated,
     };
+
+    const reflectionBrief = reflection
+      ? {
+          recent: (await this.memories.list({ personaId, limit: 20, offset: 0 })).map((memory) => ({
+            kind: memory.kind,
+            content: memory.content,
+            occurredAt: memory.occurredAt,
+            confidence: memory.confidence,
+            sourceType: memory.sourceType,
+          })),
+          journal:
+            (
+              await this.prisma.personaJournal.findFirst({
+                where: { personaId },
+                orderBy: { date: 'desc' },
+                select: { content: true },
+              })
+            )?.content ?? null,
+        }
+      : undefined;
+    const decayed = reflection ? await this.maybeDecayMemories(personaId, timeZone) : 0;
 
     const mode: PersonaMindMode =
       settings.mode === 'LIVE' && proactiveAllowed
@@ -613,7 +643,8 @@ export class MindRuntimeService implements OnModuleInit {
       ...dueTodos.map((todo) => todo.title),
       ...dueIntentions.map((intent) => intent.reason || intent.seed),
     ].join('；');
-    const memories = await this.memories.searchForScene(scene, query, 10);
+    const recall = await this.memories.recallForScene(scene, query, 12);
+    const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const startedAt = new Date();
     const run = await this.prisma.agentRun.create({
@@ -628,18 +659,60 @@ export class MindRuntimeService implements OnModuleInit {
       },
     });
     await this.step(run.id, 'ATTENTION', '唤醒简报', { wakeBrief }, { decision: decision.read }, 0);
+    if (lifeEvent) {
+      await this.step(
+        run.id,
+        'ATTENTION',
+        '生活事件判定',
+        { chancePercent: settings.lifeEventChancePercent },
+        { hit: true },
+        0,
+      );
+    }
+    if (reflection) {
+      await this.step(
+        run.id,
+        'ATTENTION',
+        '自我反思',
+        { intervalHours: settings.reflectionIntervalHours },
+        { due: true, recentMemories: reflectionBrief?.recent.length ?? 0 },
+        0,
+      );
+    }
+    if (curiosity) {
+      await this.step(
+        run.id,
+        'ATTENTION',
+        '好奇探索',
+        {
+          chancePercent: settings.curiosityChancePercent,
+          dailyLimit: settings.curiosityDailyLimit,
+        },
+        { hit: true },
+        0,
+      );
+    }
+    if (decayed > 0) {
+      await this.step(run.id, 'CONSOLIDATION', '记忆衰减', { staleAfterDays: 30 }, { decayed }, 0);
+    }
 
     try {
       const plannerResult = await this.planner.plan({
         scene,
         state,
         social: decision.read,
-        memories,
+        memories: recall.relevant,
+        coreMemories: recall.core,
+        memoryStats: recall.stats,
         settings,
         mode,
         trigger: 'HEARTBEAT',
         wakeBrief,
         sleepBrief,
+        lifeEvent,
+        curiosity,
+        reflection,
+        reflectionBrief,
       });
       await this.step(
         run.id,
@@ -729,29 +802,7 @@ export class MindRuntimeService implements OnModuleInit {
       if (!plan.nextWakeAt || !settings.selfScheduleEnabled) {
         await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), plan.reason);
       }
-      await this.memories
-        .consolidate(personaId)
-        .then(async (result) => {
-          if (result.created > 0) {
-            await this.writeJournal(personaId, result.summary, scene, state);
-            if (result.episodeIds.length > 0) {
-              await this.step(
-                run.id,
-                'CONSOLIDATION',
-                '整理近期记忆',
-                {
-                  episodeIds: result.episodeIds,
-                },
-                {
-                  created: result.created,
-                  summary: result.summary,
-                },
-                0,
-              );
-            }
-          }
-        })
-        .catch(() => undefined);
+      await this.consolidateIfNeeded(personaId, scene, state, run.id);
       return {
         runId: run.id,
         engage: plan.engage,
@@ -829,7 +880,7 @@ export class MindRuntimeService implements OnModuleInit {
   ): Promise<void> {
     resolveSceneRefs(scene, plan);
     await this.states.applyEmotion(scene.persona.id, plan.felt ?? social.felt, { runId });
-    await this.states.applyTurnCost(scene.persona.id, plan.engage, { runId });
+    await this.states.recordTurnAttention(scene.persona.id, plan.engage, { runId });
     const drift = await this.applyDrift(scene, plan);
     await this.step(
       runId,
@@ -876,7 +927,7 @@ export class MindRuntimeService implements OnModuleInit {
         significant,
       });
     }
-    for (const todo of plan.todos.slice(0, 3)) {
+    for (const todo of plan.todos) {
       await this.prisma.agentTodo.create({
         data: {
           personaId: scene.persona.id,
@@ -1101,6 +1152,107 @@ export class MindRuntimeService implements OnModuleInit {
     });
   }
 
+  /**
+   * Rolls whether this idle beat may consider an everyday event. The roll and
+   * the daily cap only decide whether the model gets the nudge; what actually
+   * happened and which values moved is still the model's call.
+   */
+  private async rollLifeEvent(
+    personaId: string,
+    settings: MindSettingsRecord,
+    timeZone: string | null,
+  ): Promise<boolean> {
+    const chance = settings.lifeEventChancePercent;
+    const limit = settings.lifeEventDailyLimit;
+    if (chance <= 0 || limit <= 0) {
+      return false;
+    }
+    const now = new Date();
+    const today = localDateKey(now, timeZone);
+    const recent = await this.prisma.agentStep.findMany({
+      where: {
+        title: '生活事件判定',
+        run: { personaId },
+        createdAt: { gte: new Date(now.getTime() - 48 * 3600_000) },
+      },
+      select: { createdAt: true },
+    });
+    const used = recent.filter((step) => localDateKey(step.createdAt, timeZone) === today).length;
+    if (used >= limit) {
+      return false;
+    }
+    return Math.random() * 100 < chance;
+  }
+
+  /**
+   * Rolls whether an idle beat is spent reading about something the persona
+   * cares about. curiosityDailyLimit = 0 means no daily cap; the probability
+   * still keeps quiet days quiet.
+   */
+  private async rollCuriosity(
+    personaId: string,
+    settings: MindSettingsRecord,
+    timeZone: string | null,
+  ): Promise<boolean> {
+    const chance = settings.curiosityChancePercent;
+    if (chance <= 0) {
+      return false;
+    }
+    const limit = settings.curiosityDailyLimit;
+    if (limit > 0) {
+      const now = new Date();
+      const today = localDateKey(now, timeZone);
+      const recent = await this.prisma.agentStep.findMany({
+        where: {
+          title: '好奇探索',
+          run: { personaId },
+          createdAt: { gte: new Date(now.getTime() - 48 * 3600_000) },
+        },
+        select: { createdAt: true },
+      });
+      const used = recent.filter((step) => localDateKey(step.createdAt, timeZone) === today).length;
+      if (used >= limit) {
+        return false;
+      }
+    }
+    return Math.random() * 100 < chance;
+  }
+
+  private async reflectionDue(personaId: string, settings: MindSettingsRecord): Promise<boolean> {
+    const hours = settings.reflectionIntervalHours;
+    if (hours <= 0) {
+      return false;
+    }
+    const last = await this.prisma.agentStep.findFirst({
+      where: { title: '自我反思', run: { personaId } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!last) {
+      return true;
+    }
+    return Date.now() - last.createdAt.getTime() >= hours * 3600_000;
+  }
+
+  /** Runs at most once per persona-local day; stale knowledge fades slowly. */
+  private async maybeDecayMemories(personaId: string, timeZone: string | null): Promise<number> {
+    const now = new Date();
+    const today = localDateKey(now, timeZone);
+    const last = await this.prisma.agentStep.findFirst({
+      where: {
+        title: '记忆衰减',
+        run: { personaId },
+        createdAt: { gte: new Date(now.getTime() - 48 * 3600_000) },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (last && localDateKey(last.createdAt, timeZone) === today) {
+      return 0;
+    }
+    return this.memories.decay(personaId);
+  }
+
   private async reschedule(
     personaId: string,
     minutes: number,
@@ -1141,6 +1293,48 @@ export class MindRuntimeService implements OnModuleInit {
           earliestAt: hadActions ? undefined : new Date(Date.now() + 3_600_000),
         },
       });
+    }
+  }
+
+  /**
+   * Long-term memory upkeep is a small, best-effort LLM task. Running it after
+   * normal turns as well as heartbeats keeps the knowledge base growing even
+   * when no heartbeat plans. The per-persona guard stops a heartbeat and a
+   * message turn from summarizing the same episodes twice.
+   */
+  private async consolidateIfNeeded(
+    personaId: string,
+    scene: MindScene,
+    state: PersonaState,
+    runId?: string,
+  ): Promise<void> {
+    if (this.consolidating.has(personaId)) {
+      return;
+    }
+    this.consolidating.add(personaId);
+    try {
+      if ((await this.memories.countUnconsolidated(personaId)) < 2) {
+        return;
+      }
+      const result = await this.memories.consolidate(personaId);
+      if (result.created === 0) {
+        return;
+      }
+      await this.writeJournal(personaId, result.summary, scene, state);
+      if (runId && result.episodeIds.length > 0) {
+        await this.step(
+          runId,
+          'CONSOLIDATION',
+          '整理近期记忆',
+          { episodeIds: result.episodeIds },
+          { created: result.created, summary: result.summary },
+          0,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(`记忆整理失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.consolidating.delete(personaId);
     }
   }
 

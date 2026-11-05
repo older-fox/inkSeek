@@ -56,7 +56,6 @@ export class MindSocialService {
     const comfort = isGroup ? (scene.stance?.comfort ?? 0) : 0;
     const audienceRisk = isGroup ? (scene.stance?.audienceRisk ?? 0) : 0;
     const groupAttention = isGroup ? (scene.stance?.attention ?? 0) : 0;
-    const speakRate = isGroup ? (scene.stance?.speakRate ?? 0) : 0;
     const mentionBonus = mentioned ? 22 : 0;
     const questionBonus = QUESTION_PATTERN.test(text) ? 10 : 0;
     const conflict = CONFLICT_PATTERN.test(text);
@@ -76,10 +75,14 @@ export class MindSocialService {
       -100,
       100,
     );
+    // Group stance fields are zero-based: 0 means "no strong signal yet", not
+    // uncomfortable. Secrets add caution but are capped so a large memory bank
+    // cannot permanently saturate risk.
+    const secretRisk = Math.min(18, secretCount * 2);
     const risk = clamp(
-      (isGroup ? audienceRisk * 0.4 + (50 - comfort) * 0.3 + 8 : 0) +
+      (isGroup ? audienceRisk * 0.4 + 8 - comfort * 0.3 : 0) +
         hostility * 0.2 +
-        secretCount * 7 +
+        secretRisk +
         (sleeping ? 18 : 0),
       0,
       100,
@@ -177,9 +180,7 @@ export class MindSocialService {
       mentioned,
       blocked: Boolean(blocked),
       sleeping,
-      speakRate,
       affinity,
-      messageCount: scene.messages.length,
     });
 
     return {
@@ -287,9 +288,7 @@ function decideEngage(input: {
   mentioned: boolean;
   blocked: boolean;
   sleeping: boolean;
-  speakRate: number;
   affinity: number;
-  messageCount: number;
 }): boolean {
   if (input.blocked) return false;
   if (input.scene.stance?.mentionOnly && !input.mentioned) return false;
@@ -298,7 +297,6 @@ function decideEngage(input: {
   if (input.sleeping && input.affinity < 50) return false;
   if (input.read.attention < 30) return false;
   if (input.read.desire - input.read.risk * 0.6 < 5) return false;
-  if (input.speakRate < 25 && input.messageCount > 6) return false;
   return true;
 }
 

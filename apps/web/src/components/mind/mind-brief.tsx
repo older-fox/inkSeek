@@ -83,6 +83,11 @@ export function MindBrief({
                   <Activity className="size-3 text-jade-300" />
                   {stateMoodLabel(state)} · {state.currentActivity || '在线'}
                 </span>
+                {activityDuration(state.activitySince) ? (
+                  <span className="rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2.5 py-1">
+                    已持续 {activityDuration(state.activitySince)}
+                  </span>
+                ) : null}
                 {state.location ? (
                   <span className="rounded-full border border-mist-100/[0.08] bg-ink-950/30 px-2.5 py-1">
                     位置 {state.location}
@@ -229,4 +234,21 @@ export function MindBrief({
       </section>
     </div>
   );
+}
+
+function activityDuration(iso: string | null): string {
+  if (!iso) {
+    return '';
+  }
+  const elapsed = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 60_000) {
+    return '';
+  }
+  const minutes = Math.round(elapsed / 60_000);
+  if (minutes < 60) {
+    return `${minutes} 分钟`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
 }

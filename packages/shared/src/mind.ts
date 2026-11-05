@@ -84,6 +84,16 @@ export interface MindSettingsRecord {
   maxBeatDelayMs: number;
   replyAvoidSeconds: number;
   privateBurstSeconds: number;
+  /** Percent chance per idle heartbeat; 0 disables everyday events. */
+  lifeEventChancePercent: number;
+  /** Per persona-local day cap. */
+  lifeEventDailyLimit: number;
+  /** Percent chance per idle heartbeat; 0 disables curiosity exploration. */
+  curiosityChancePercent: number;
+  /** Per persona-local day cap; 0 means unlimited. */
+  curiosityDailyLimit: number;
+  /** Minimum hours between self-reflection passes; 0 disables reflection. */
+  reflectionIntervalHours: number;
   imageDescriptionPrompt: string;
   quietHours: unknown;
   providerId: string | null;
@@ -101,6 +111,7 @@ export interface PersonaStateRecord {
   socialBattery: number;
   attention: number;
   currentActivity: string;
+  activitySince: string | null;
   location: string;
   sleepDebt: number;
   health: number;
@@ -563,6 +574,11 @@ export const mindSettingsUpdateSchema = z.object({
   maxBeatDelayMs: z.number().int().min(0).max(60_000).optional(),
   replyAvoidSeconds: z.number().int().min(0).max(7200).optional(),
   privateBurstSeconds: z.number().int().min(0).max(30).optional(),
+  lifeEventChancePercent: z.number().int().min(0).max(20).optional(),
+  lifeEventDailyLimit: z.number().int().min(0).max(5).optional(),
+  curiosityChancePercent: z.number().int().min(0).max(100).optional(),
+  curiosityDailyLimit: z.number().int().min(0).max(500).optional(),
+  reflectionIntervalHours: z.number().int().min(0).max(168).optional(),
   imageDescriptionPrompt: z.string().max(4000).optional(),
   quietHours: z.unknown().optional(),
   providerId: z.string().max(64).nullable().optional(),
@@ -690,6 +706,7 @@ export const personaMemoryQuerySchema = z.object({
   query: z.string().max(2000).optional(),
   scope: z.enum(personaMemoryScopes).optional(),
   kind: z.enum(personaMemoryKinds).optional(),
+  sourceType: z.enum(personaMemorySourceTypes).optional(),
   subjectType: z.enum(personaMemorySubjectTypes).optional(),
   subjectId: z.string().max(64).optional(),
   includeDeleted: z.coerce.boolean().optional(),

@@ -20,11 +20,28 @@ import {
   parseJsonArray,
   readNumber,
   readString,
+  type MindMemoryStats,
   type MindScene,
   type MemoryPromptItem,
 } from './mind.types.js';
 
-const VECTOR_CANDIDATE_LIMIT = 500;
+/**
+ * Retrieval is two-pool: the most recent memories plus any older memory that
+ * matters. Without the importance pool, a memory bank larger than the recent
+ * limit would silently make old knowledge unreachable.
+ */
+const VECTOR_RECENT_LIMIT = 600;
+const VECTOR_IMPORTANT_LIMIT = 300;
+const VECTOR_IMPORTANCE_FLOOR = 60;
+const CORE_MEMORY_LIMIT = 3;
+const CORE_IMPORTANCE_FLOOR = 60;
+const CORE_KINDS: readonly PersonaMemoryKind[] = [
+  'FACT',
+  'PREFERENCE',
+  'PROMISE',
+  'BOUNDARY',
+  'REFLECTION',
+];
 const DEDUPE_THRESHOLD = 0.94;
 /**
  * Scenes are not a chat log. Ordinary conversation is only recorded after a
@@ -138,7 +155,11 @@ export class PersonaMemoryService {
     }
     if (content || input.title !== undefined || input.subjectName !== undefined) {
       data.embedding = embedText(
-        [input.title ?? existing.title, content ?? existing.content, input.subjectName ?? existing.subjectName]
+        [
+          input.title ?? existing.title,
+          content ?? existing.content,
+          input.subjectName ?? existing.subjectName,
+        ]
           .filter(Boolean)
           .join('\n'),
       );
@@ -165,6 +186,7 @@ export class PersonaMemoryService {
       ...(input.includeDeleted ? {} : { status: 'ACTIVE' as const }),
       ...(input.scope ? { scope: input.scope } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.sourceType ? { sourceType: input.sourceType } : {}),
       ...(input.subjectType ? { subjectType: input.subjectType } : {}),
       ...(input.subjectId ? { subjectId: input.subjectId } : {}),
     };
@@ -179,11 +201,7 @@ export class PersonaMemoryService {
       return rows.map(toRecord);
     }
 
-    const candidates = await this.prisma.personaMemory.findMany({
-      where,
-      orderBy: [{ occurredAt: 'desc' }],
-      take: VECTOR_CANDIDATE_LIMIT,
-    });
+    const candidates = await this.loadCandidates(where);
     const queryEmbedding = embedText(input.query);
     const scored = candidates
       .map((row) => ({
@@ -196,35 +214,115 @@ export class PersonaMemoryService {
     return scored.map((entry) => ({ ...toRecord(entry.row), score: round(entry.score) }));
   }
 
-  async searchForScene(
+  /**
+   * Two-layer recall for a turn: a few stable "who I am / what I promised"
+   * memories that must stay in view, plus the memories that actually match
+   * this moment. Keeping them separate stops a busy recent episode from
+   * pushing long-term knowledge out of the prompt budget.
+   */
+  async recallForScene(
     scene: MindScene,
     query: string,
-    limit = 12,
-  ): Promise<PersonaMemoryRecord[]> {
-    const candidates = await this.prisma.personaMemory.findMany({
-      where: {
-        personaId: scene.persona.id,
-        channelId: scene.persona.channelId,
-        status: 'ACTIVE',
-        OR: [
-          { visibility: { not: 'SCENE' } },
-          { visibility: 'SCENE', conversationId: scene.conversation.id },
-          { visibility: 'SCENE', conversationId: null },
-        ],
-      },
-      orderBy: [{ occurredAt: 'desc' }],
-      take: VECTOR_CANDIDATE_LIMIT,
-    });
-    if (candidates.length === 0) {
-      return [];
-    }
+    limit = 10,
+  ): Promise<{
+    core: PersonaMemoryRecord[];
+    relevant: PersonaMemoryRecord[];
+    stats: MindMemoryStats;
+  }> {
+    const where = this.sceneWhere(scene);
+    const statsWhere: Prisma.PersonaMemoryWhereInput = {
+      personaId: scene.persona.id,
+      channelId: scene.persona.channelId,
+      status: 'ACTIVE',
+    };
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [coreRows, candidates, total, recent7d, latest] = await Promise.all([
+      this.prisma.personaMemory.findMany({
+        where: {
+          ...where,
+          kind: { in: [...CORE_KINDS] },
+          importance: { gte: CORE_IMPORTANCE_FLOOR },
+        },
+        orderBy: [{ importance: 'desc' }, { updatedAt: 'desc' }],
+        take: CORE_MEMORY_LIMIT,
+      }),
+      this.loadCandidates(where),
+      this.prisma.personaMemory.count({ where: statsWhere }),
+      this.prisma.personaMemory.count({
+        where: { ...statsWhere, occurredAt: { gte: weekAgo } },
+      }),
+      this.prisma.personaMemory.findFirst({
+        where: statsWhere,
+        orderBy: [{ occurredAt: 'desc' }],
+        select: { occurredAt: true },
+      }),
+    ]);
+    const coreIds = new Set(coreRows.map((row) => row.id));
     const queryEmbedding = embedText(query);
-    const scored = candidates
+    const relevant = candidates
+      .filter((row) => !coreIds.has(row.id))
       .map((row) => ({ row, score: scoreMemory(row, queryEmbedding, query) }))
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
-    await this.markRecalled(scored.map((entry) => entry.row.id));
-    return scored.map((entry) => ({ ...toRecord(entry.row), score: round(entry.score) }));
+    await this.markRecalled(
+      [...coreRows, ...relevant.map((entry) => entry.row)].map((row) => row.id),
+    );
+    return {
+      core: coreRows.map(toRecord),
+      relevant: relevant.map((entry) => ({
+        ...toRecord(entry.row),
+        score: round(entry.score),
+      })),
+      stats: {
+        total,
+        recent7d,
+        lastAt: latest?.occurredAt.toISOString() ?? null,
+      },
+    };
+  }
+
+  private async loadCandidates(where: Prisma.PersonaMemoryWhereInput): Promise<PersonaMemory[]> {
+    const [recent, important] = await Promise.all([
+      this.prisma.personaMemory.findMany({
+        where,
+        orderBy: [{ occurredAt: 'desc' }],
+        take: VECTOR_RECENT_LIMIT,
+      }),
+      this.prisma.personaMemory.findMany({
+        where: { ...where, importance: { gte: VECTOR_IMPORTANCE_FLOOR } },
+        orderBy: [{ importance: 'desc' }, { occurredAt: 'desc' }],
+        take: VECTOR_IMPORTANT_LIMIT,
+      }),
+    ]);
+    const byId = new Map<string, PersonaMemory>();
+    for (const row of [...recent, ...important]) {
+      byId.set(row.id, row);
+    }
+    return [...byId.values()];
+  }
+
+  /**
+   * Visibility, channel and temporal-validity rules for scene recall. Memories
+   * whose validTo has passed stay in the library but no longer shape replies.
+   */
+  private sceneWhere(scene: MindScene): Prisma.PersonaMemoryWhereInput {
+    const now = new Date();
+    return {
+      personaId: scene.persona.id,
+      channelId: scene.persona.channelId,
+      status: 'ACTIVE',
+      AND: [
+        {
+          OR: [
+            { visibility: { not: 'SCENE' } },
+            { visibility: 'SCENE', conversationId: scene.conversation.id },
+            { visibility: 'SCENE', conversationId: null },
+          ],
+        },
+        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+        { OR: [{ validTo: null }, { validTo: { gt: now } }] },
+      ],
+    };
   }
 
   async applyDrafts(
@@ -232,11 +330,14 @@ export class PersonaMemoryService {
     drafts: readonly MemoryDraft[],
   ): Promise<PersonaMemoryRecord[]> {
     const created: PersonaMemoryRecord[] = [];
-    for (const draft of drafts.slice(0, 5)) {
+    for (const draft of drafts) {
       if (!draft.content.trim()) {
         continue;
       }
       const visibility = draft.visibility ?? 'SCENE';
+      const structured = parseStructured(draft.structured);
+      const sourceUrl = readString(structured?.['sourceUrl']).trim();
+      const supersedesId = readString(structured?.['supersedesId']).trim();
       const record = await this.create({
         personaId: scene.persona.id,
         conversationId:
@@ -254,9 +355,19 @@ export class PersonaMemoryService {
         visibility:
           scene.conversation.kind === 'PRIVATE' && visibility === 'SCENE' ? 'PRIVATE' : visibility,
         occurredAt: draft.occurredAt,
-        sourceType: 'MESSAGE',
+        sourceType: sourceUrl ? 'WEB' : 'MESSAGE',
         sourceIds: draft.sourceIds ?? [scene.anchor.messageId],
       });
+      if (supersedesId && supersedesId !== record.id) {
+        await this.prisma.personaMemory.updateMany({
+          where: { id: supersedesId, personaId: scene.persona.id },
+          data: {
+            status: 'SUPERSEDED',
+            supersededById: record.id,
+            validTo: new Date(),
+          },
+        });
+      }
       created.push(record);
     }
     return created;
@@ -287,14 +398,20 @@ export class PersonaMemoryService {
     if (last && Date.now() - last.occurredAt.getTime() < gap) {
       return null;
     }
+    const timeZone =
+      readString((input.scene.persona.values as Record<string, unknown> | null)?.['time_zone']) ||
+      null;
     const transcript = formatSceneForPrompt(
       input.scene.messages.slice(-8).map((message) => ({
         ...message,
         text: truncate(message.text, 160),
         images: message.images.slice(0, 1),
       })),
+      timeZone,
     );
-    const reply = input.engage ? `我最终决定回应，姿态是「${input.stance}」。` : '我最终决定保持沉默。';
+    const reply = input.engage
+      ? `我最终决定回应，姿态是「${input.stance}」。`
+      : '我最终决定保持沉默。';
     const content = [
       `场景：${input.scene.conversation.name || input.scene.conversation.externalId}`,
       transcript,
@@ -339,6 +456,36 @@ export class PersonaMemoryService {
     });
   }
 
+  /**
+   * Light forgetting: knowledge and reflections that have not been recalled
+   * for a month lose a little importance/confidence. Boundaries, promises and
+   * high-importance memories are never touched here.
+   */
+  async decay(personaId: string): Promise<number> {
+    const cutoff = new Date(Date.now() - 30 * 86_400_000);
+    const rows = await this.prisma.personaMemory.findMany({
+      where: {
+        personaId,
+        status: 'ACTIVE',
+        kind: { in: ['FACT', 'PREFERENCE', 'REFLECTION'] },
+        importance: { gt: 22 },
+        confidence: { gt: 31 },
+        occurredAt: { lt: cutoff },
+        OR: [{ lastRecalledAt: null }, { lastRecalledAt: { lt: cutoff } }],
+      },
+      select: { id: true },
+      take: 500,
+    });
+    if (rows.length === 0) {
+      return 0;
+    }
+    await this.prisma.personaMemory.updateMany({
+      where: { id: { in: rows.map((row) => row.id) } },
+      data: { importance: { decrement: 2 }, confidence: { decrement: 1 } },
+    });
+    return rows.length;
+  }
+
   async consolidate(personaId: string): Promise<{
     created: number;
     summary: string;
@@ -364,17 +511,35 @@ export class PersonaMemoryService {
       where: { channelId: persona.channelId },
       select: { id: true, nickname: true },
     });
-    const contactByName = new Map(
-      contacts.map((contact) => [contact.nickname.trim(), contact.id]),
-    );
+    const contactByName = new Map(contacts.map((contact) => [contact.nickname.trim(), contact.id]));
+    const existing = await this.prisma.personaMemory.findMany({
+      where: {
+        personaId,
+        status: 'ACTIVE',
+        kind: { in: [...CORE_KINDS] },
+      },
+      orderBy: [{ importance: 'desc' }, { updatedAt: 'desc' }],
+      take: 12,
+    });
     const prompt = [
-      `你在整理人格「${persona.name}」最近的情景记忆。把下面的经历压缩成最多 3 条长期记忆。`,
-      '只保留会影响未来行为的事实、偏好、承诺、边界或关系变化。不要编造。',
+      `你在整理人格「${persona.name}」最近的情景记忆，并把它们沉淀进长期知识库。写多少条由你判断，只保留真正值得长期保留的内容。`,
+      '只保留会影响未来行为的事实、偏好、承诺、边界、关系变化或反思。不要编造。',
+      '记忆要具体：保留人名、时间、偏好细节和因果，不要写成“聊了天”“关系变好了”这种空话。',
+      '已有长期记忆不要重复。如果新经历补充或修正了旧事实，输出合并后的完整内容，而不是另起一条。',
       '输出 JSON 数组，每项字段：kind(FACT/PREFERENCE/PROMISE/BOUNDARY/REFLECTION)、scope(SELF/RELATION/GROUP/SCENE/WORLD/PROCEDURE)、subjectType(PERSON/GROUP/SELF/WORLD/TOPIC)、subjectName、content、importance(0-100)、confidence(0-100)、visibility(PRIVATE/SCENE/CHANNEL/PUBLIC)。',
       '直接输出 JSON，不要解释。',
+      existing.length > 0
+        ? `已有长期记忆：\n${existing
+            .map((memory) => `- [${memory.kind}] ${memory.content.slice(0, 160)}`)
+            .join('\n')}`
+        : '',
       '---',
-      episodes.map((episode) => `[${episode.occurredAt.toISOString()}] ${episode.content}`).join('\n\n'),
-    ].join('\n');
+      episodes
+        .map((episode) => `[${episode.occurredAt.toISOString()}] ${episode.content}`)
+        .join('\n\n'),
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     let summary = '';
     let created = 0;
@@ -383,7 +548,7 @@ export class PersonaMemoryService {
         prompt,
         system: '你是长期记忆整理器，只输出 JSON 数组。',
         temperature: 0.2,
-        maxTokens: 1200,
+        maxTokens: 2400,
         source: 'mind.consolidate',
       });
       const parsed = parseJsonArray(completion.text);
@@ -404,9 +569,18 @@ export class PersonaMemoryService {
         const subjectName = readString(record['subjectName']);
         await this.create({
           personaId,
-          conversationId: episodes.find((episode) => episode.conversationId)?.conversationId ?? null,
-          scope: enumValue<PersonaMemoryScope>(record['scope'], ['SELF', 'RELATION', 'GROUP', 'SCENE', 'WORLD', 'PROCEDURE'], 'WORLD'),
-          kind: enumValue<PersonaMemoryKind>(record['kind'], ['EPISODE', 'FACT', 'PREFERENCE', 'PROMISE', 'BOUNDARY', 'REFLECTION', 'PROCEDURE'], 'FACT'),
+          conversationId:
+            episodes.find((episode) => episode.conversationId)?.conversationId ?? null,
+          scope: enumValue<PersonaMemoryScope>(
+            record['scope'],
+            ['SELF', 'RELATION', 'GROUP', 'SCENE', 'WORLD', 'PROCEDURE'],
+            'WORLD',
+          ),
+          kind: enumValue<PersonaMemoryKind>(
+            record['kind'],
+            ['EPISODE', 'FACT', 'PREFERENCE', 'PROMISE', 'BOUNDARY', 'REFLECTION', 'PROCEDURE'],
+            'FACT',
+          ),
           subjectType,
           subjectId:
             subjectType === 'PERSON'
@@ -420,7 +594,11 @@ export class PersonaMemoryService {
           content,
           importance: clamp(readNumber(record['importance'], 55), 0, 100),
           confidence: clamp(readNumber(record['confidence'], 65), 0, 100),
-          visibility: enumValue<PersonaMemoryVisibility>(record['visibility'], ['PRIVATE', 'SCENE', 'CHANNEL', 'PUBLIC'], 'CHANNEL'),
+          visibility: enumValue<PersonaMemoryVisibility>(
+            record['visibility'],
+            ['PRIVATE', 'SCENE', 'CHANNEL', 'PUBLIC'],
+            'CHANNEL',
+          ),
           sourceType: 'HEARTBEAT',
           sourceIds: episodes.map((episode) => episode.id),
         });
@@ -485,7 +663,7 @@ export class PersonaMemoryService {
         status: 'ACTIVE',
       },
       orderBy: { updatedAt: 'desc' },
-      take: 80,
+      take: 200,
     });
     let best: PersonaMemory | null = null;
     let bestScore = DEDUPE_THRESHOLD;
@@ -507,20 +685,10 @@ function scoreMemory(row: PersonaMemory, queryEmbedding: number[], query: string
   const recency = Math.exp(-ageDays / 60);
   const importance = row.importance / 100;
   const recall = Math.min(1, row.recallCount / 10);
-  return (
-    semantic * 0.45 +
-    keyword * 0.2 +
-    importance * 0.15 +
-    recency * 0.12 +
-    recall * 0.08
-  );
+  return semantic * 0.45 + keyword * 0.2 + importance * 0.15 + recency * 0.12 + recall * 0.08;
 }
 
-function enumValue<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-  fallback: T,
-): T {
+function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : fallback;
@@ -532,6 +700,25 @@ function round(value: number): number {
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}…`;
+}
+
+function parseStructured(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) {
+    return value;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function jsonOrNull(value: unknown): Prisma.InputJsonValue {

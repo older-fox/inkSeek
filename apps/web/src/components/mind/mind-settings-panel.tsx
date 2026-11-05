@@ -36,6 +36,11 @@ export function MindSettingsPanel({
   const [quietInterval, setQuietInterval] = useState(90);
   const [replyAvoid, setReplyAvoid] = useState(180);
   const [privateBurst, setPrivateBurst] = useState(0);
+  const [lifeEventChance, setLifeEventChance] = useState(1);
+  const [lifeEventLimit, setLifeEventLimit] = useState(1);
+  const [curiosityChance, setCuriosityChance] = useState(15);
+  const [curiosityLimit, setCuriosityLimit] = useState(0);
+  const [reflectionHours, setReflectionHours] = useState(6);
   const [imagePrompt, setImagePrompt] = useState('');
   const appliedSettingsRef = useRef('');
 
@@ -56,6 +61,11 @@ export function MindSettingsPanel({
     setQuietInterval(settings.quietIntervalMinutes);
     setReplyAvoid(settings.replyAvoidSeconds);
     setPrivateBurst(settings.privateBurstSeconds);
+    setLifeEventChance(settings.lifeEventChancePercent);
+    setLifeEventLimit(settings.lifeEventDailyLimit);
+    setCuriosityChance(settings.curiosityChancePercent);
+    setCuriosityLimit(settings.curiosityDailyLimit);
+    setReflectionHours(settings.reflectionIntervalHours);
     setImagePrompt(settings.imageDescriptionPrompt);
   }, [settings]);
 
@@ -94,6 +104,11 @@ export function MindSettingsPanel({
     settings.quietIntervalMinutes !== quietInterval ||
     settings.replyAvoidSeconds !== replyAvoid ||
     settings.privateBurstSeconds !== privateBurst ||
+    settings.lifeEventChancePercent !== lifeEventChance ||
+    settings.lifeEventDailyLimit !== lifeEventLimit ||
+    settings.curiosityChancePercent !== curiosityChance ||
+    settings.curiosityDailyLimit !== curiosityLimit ||
+    settings.reflectionIntervalHours !== reflectionHours ||
     settings.imageDescriptionPrompt !== imagePrompt;
 
   return (
@@ -239,6 +254,71 @@ export function MindSettingsPanel({
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">生活小事</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          只在没有任何待办、意图的空闲心跳里掷骰，命中后由 TA
+          自己判断这段时间发生了什么、要不要改数值。 默认很稀疏，避免一天像电视剧一样。
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <NumberField
+            label="每次心跳概率（%）"
+            hint="0 关闭；1% 约两三天一次"
+            value={lifeEventChance}
+            min={0}
+            max={20}
+            onChange={setLifeEventChance}
+            compact
+          />
+          <NumberField
+            label="每日上限"
+            hint="按人格时区计算"
+            value={lifeEventLimit}
+            min={0}
+            max={5}
+            onChange={setLifeEventLimit}
+            compact
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">好奇与成长</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          空闲时才可能自己去网上看看在意的话题，读到的东西会沉淀成世界知识或自我反思；反思到点就做，用来让经历慢慢变成性格变化。
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <NumberField
+            label="好奇概率（%）"
+            hint="0 关闭；只在空闲心跳掷骰"
+            value={curiosityChance}
+            min={0}
+            max={100}
+            onChange={setCuriosityChance}
+            compact
+          />
+          <NumberField
+            label="每日探索上限"
+            hint="0 表示不限制"
+            value={curiosityLimit}
+            min={0}
+            max={500}
+            onChange={setCuriosityLimit}
+            compact
+          />
+        </div>
+        <div className="mt-2">
+          <NumberField
+            label="自我反思间隔（小时）"
+            hint="0 关闭；默认 6 小时一次"
+            value={reflectionHours}
+            min={0}
+            max={168}
+            onChange={setReflectionHours}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
         <p className="text-[0.8rem] text-mist-300">图片理解</p>
         <div className="mt-2">
           <TextAreaField
@@ -268,6 +348,11 @@ export function MindSettingsPanel({
             quietIntervalMinutes: quietInterval,
             replyAvoidSeconds: replyAvoid,
             privateBurstSeconds: privateBurst,
+            lifeEventChancePercent: lifeEventChance,
+            lifeEventDailyLimit: lifeEventLimit,
+            curiosityChancePercent: curiosityChance,
+            curiosityDailyLimit: curiosityLimit,
+            reflectionIntervalHours: reflectionHours,
             imageDescriptionPrompt: imagePrompt.trim(),
           })
         }

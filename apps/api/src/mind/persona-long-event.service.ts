@@ -4,6 +4,7 @@ import { LlmService } from '../ai/llm.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaLongEvent, PersonaState } from '../generated/prisma/client.js';
 import { selfTraitLines } from './mind-behavior.js';
+import { criticalAdvisory } from './mind-fatigue.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import {
   localHour,
@@ -81,6 +82,7 @@ const MIN_SLEEP_FALLBACK_MS = 5 * 60 * 60 * 1000;
 const MAX_SLEEP_FALLBACK_MS = 10 * 60 * 60 * 1000;
 const SETTLEMENT_TIMEOUT_MS = 20_000;
 const WAKE_JUDGE_TIMEOUT_MS = 12_000;
+const REST_SUGGEST_AWAKE_HOURS = 16;
 
 @Injectable()
 export class PersonaLongEventService {
@@ -268,6 +270,11 @@ export class PersonaLongEventService {
       ? Math.max(0, Math.round((now.getTime() - lastEnd.getTime()) / 60_000))
       : null;
     const endedAt = last?.endedAt ?? null;
+    const critical = criticalAdvisory(awakeMinutes, {
+      health: state.health,
+      sleepDebt: state.sleepDebt,
+      stress: state.stress,
+    });
     return {
       localTime: localClock(now, zone),
       timeZone: zone ?? 'server-local',
@@ -295,6 +302,7 @@ export class PersonaLongEventService {
       energy: state.energy,
       health: state.health,
       stress: state.stress,
+      criticalWarnings: critical.warnings,
       suggestion: suggestRest({
         hour: localHour(now, zone),
         sleepDebt: state.sleepDebt,
@@ -351,6 +359,12 @@ export class PersonaLongEventService {
       ]);
       const values = persona.values as Record<string, unknown> | null;
       const sleepDepth = clampInt(readNumber(values?.['sleep_depth'], 2), 2, 0, 4);
+      const awakeBeforeMinutes = await this.awakeMinutesBefore(event, state);
+      const critical = criticalAdvisory(awakeBeforeMinutes, {
+        health: state.health,
+        sleepDebt: state.sleepDebt,
+        stress: state.stress,
+      });
       const prompt = wakeJudgePrompt({
         personaName: persona.name,
         identity: persona.identity,
@@ -361,6 +375,8 @@ export class PersonaLongEventService {
         senderName: input.senderName ?? '',
         text: input.text,
         mentions: input.recentMentions,
+        awakeBeforeMinutes,
+        criticalWarnings: critical.warnings,
       });
       const system = [
         `你就是「${persona.name}」${persona.identity ? `（${persona.identity}）` : ''}，正在休息，不是助手。`,
@@ -415,6 +431,29 @@ export class PersonaLongEventService {
       this.logger.warn(`长时事件唤醒判定失败：${message}`);
       return this.fallbackWake(event, input, message);
     }
+  }
+
+  private async awakeMinutesBefore(
+    event: PersonaLongEvent,
+    state: PersonaState,
+  ): Promise<number | null> {
+    const previous = await this.prisma.personaLongEvent.findFirst({
+      where: {
+        personaId: event.personaId,
+        id: { not: event.id },
+        kind: { in: ['SLEEP', 'NAP'] },
+        endedAt: { not: null, lte: event.startedAt },
+      },
+      orderBy: { endedAt: 'desc' },
+      select: { endedAt: true },
+    });
+    const lastWake =
+      previous?.endedAt ??
+      (state.lastWakeAt && state.lastWakeAt <= event.startedAt ? state.lastWakeAt : null);
+    if (!lastWake) {
+      return null;
+    }
+    return Math.max(0, Math.round((event.startedAt.getTime() - lastWake.getTime()) / 60_000));
   }
 
   private fallbackWake(
@@ -658,6 +697,8 @@ function wakeJudgePrompt(input: {
   senderName: string;
   text: string;
   mentions: number;
+  awakeBeforeMinutes: number | null;
+  criticalWarnings: string[];
 }): string {
   const elapsedMinutes = Math.max(
     0,
@@ -683,6 +724,13 @@ function wakeJudgePrompt(input: {
     `已经过去 ${elapsedMinutes} 分钟${plannedMinutes ? `，原计划 ${plannedMinutes} 分钟` : ''}。`,
     `睡眠深度 ${input.sleepDepth}/4（${depthLabel}）。`,
     `现在：精力 ${input.state.energy}、睡眠债 ${input.state.sleepDebt}、压力 ${input.state.stress}、心情好坏 ${input.state.moodValence}。`,
+    input.awakeBeforeMinutes !== null
+      ? `睡前已经连续清醒约 ${formatHours(input.awakeBeforeMinutes / 60)}。`
+      : '',
+    ...input.criticalWarnings.map((warning) => `临界提醒：${warning}`),
+    input.criticalWarnings.length > 0
+      ? '这些只是临界提醒；醒不醒、要不要继续睡，由你自己判断。'
+      : '',
     `最近 ${input.event.wakeWindowMinutes} 分钟内被点名 ${input.mentions} 次；平时大约 ${input.event.wakeMentions} 次才算一直被叫。`,
     keywords.length > 0 ? `睡前你在意的词：${keywords.join('、')}（只是参考，不是硬规则）。` : '',
     '',
@@ -713,7 +761,7 @@ function suggestRest(input: {
     night ||
     input.sleepDebt >= 55 ||
     input.energy <= 25 ||
-    (awakeHours !== null && awakeHours >= 17)
+    (awakeHours !== null && awakeHours >= REST_SUGGEST_AWAKE_HOURS)
   ) {
     const base = 420 + (input.sleepDebt - 35) * 2.5 + sleepDepthExtra;
     const minutes = Math.min(600, Math.max(300, Math.round(base / 15) * 15));
@@ -763,6 +811,10 @@ function localClock(date: Date, timeZone?: string | null): string {
     // Fall back to server local time.
   }
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatHours(hours: number): string {
+  return `${Math.round(hours * 10) / 10} 小时`;
 }
 
 function readSettlement(value: unknown): LongEventSettlement | null {

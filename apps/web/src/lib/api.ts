@@ -225,6 +225,7 @@ export const api = {
     if (query.query) params.set('query', query.query);
     if (query.scope) params.set('scope', query.scope);
     if (query.kind) params.set('kind', query.kind);
+    if (query.sourceType) params.set('sourceType', query.sourceType);
     if (query.subjectType) params.set('subjectType', query.subjectType);
     if (query.includeDeleted) params.set('includeDeleted', 'true');
     if (query.offset) params.set('offset', String(query.offset));

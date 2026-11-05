@@ -80,7 +80,7 @@ model PersonaCard {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  versions     PersonaVersion[]
+  versions PersonaVersion[]
 
   @@index([name])
   @@index([updatedAt])
@@ -142,19 +142,19 @@ model ChatChannel {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  contacts        ChatContact[]
-  conversations   ChatConversation[]
-  messages        ChatMessageRecord[]
-  persona         ChatChannelPersona?
-  mindSettings    ChatMindSettings?
-  relationships   PersonaRelationship[]
-  groupStances    PersonaGroupStance[]
-  memories        PersonaMemory[]
-  todos           AgentTodo[]
-  intentions      AgentIntention[]
-  agentRuns       AgentRun[]
-  agentActions    AgentAction[]
-  journal         PersonaJournal[]
+  contacts      ChatContact[]
+  conversations ChatConversation[]
+  messages      ChatMessageRecord[]
+  persona       ChatChannelPersona?
+  mindSettings  ChatMindSettings?
+  relationships PersonaRelationship[]
+  groupStances  PersonaGroupStance[]
+  memories      PersonaMemory[]
+  todos         AgentTodo[]
+  intentions    AgentIntention[]
+  agentRuns     AgentRun[]
+  agentActions  AgentAction[]
+  journal       PersonaJournal[]
 
   @@unique([platform, accountId])
 }
@@ -204,9 +204,9 @@ model ChatContact {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  messages        ChatMessageRecord[]
-  memberships     ChatGroupMember[]
-  relationships   PersonaRelationship[]
+  messages      ChatMessageRecord[]
+  memberships   ChatGroupMember[]
+  relationships PersonaRelationship[]
 
   @@unique([channelId, externalId])
   @@index([channelId])
@@ -280,9 +280,9 @@ model ChatMessageRecord {
   /// Rendered quote snapshot so a deleted or out-of-cache target still displays.
   replySnapshot     Json?
 
-  images       ChatImageAsset[]
-  voices       ChatVoiceAsset[]
-  forward      ChatForward?
+  images  ChatImageAsset[]
+  voices  ChatVoiceAsset[]
+  forward ChatForward?
 
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
@@ -571,55 +571,70 @@ enum AgentActionStatus {
 
 /// Per-channel switch and safety budget for the mind runtime.
 model ChatMindSettings {
-  id                   String         @id @default(cuid())
-  channelId            String         @unique
-  channel              ChatChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  mode                 PersonaMindMode @default(OFF)
-  heartbeatEnabled     Boolean        @default(true)
-  proactiveEnabled     Boolean        @default(false)
-  selfScheduleEnabled  Boolean        @default(true)
-  wakeIntervalMinutes  Int            @default(45)
-  wakeMinMinutes       Int            @default(10)
-  wakeMaxMinutes       Int            @default(240)
-  quietIntervalMinutes Int            @default(90)
-  dailyMessageBudget   Int            @default(30)
-  dailyProactiveBudget Int            @default(3)
-  maxBeats             Int            @default(3)
-  minBeatDelayMs       Int            @default(800)
-  maxBeatDelayMs       Int            @default(4000)
+  id                      String          @id @default(cuid())
+  channelId               String          @unique
+  channel                 ChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  mode                    PersonaMindMode @default(OFF)
+  heartbeatEnabled        Boolean         @default(true)
+  proactiveEnabled        Boolean         @default(false)
+  selfScheduleEnabled     Boolean         @default(true)
+  wakeIntervalMinutes     Int             @default(45)
+  wakeMinMinutes          Int             @default(10)
+  wakeMaxMinutes          Int             @default(240)
+  quietIntervalMinutes    Int             @default(90)
+  dailyMessageBudget      Int             @default(30)
+  dailyProactiveBudget    Int             @default(3)
+  maxBeats                Int             @default(3)
+  minBeatDelayMs          Int             @default(800)
+  maxBeatDelayMs          Int             @default(4000)
   /// After the model decides to reply, other reply tasks in the same
   /// conversation are suppressed for this many seconds. 0 disables the lock.
-  replyAvoidSeconds    Int            @default(180)
+  replyAvoidSeconds       Int             @default(180)
   /// Private-chat burst merging: wait this many seconds of quiet before one
   /// reply. 0 disables merging.
-  privateBurstSeconds  Int            @default(0)
+  privateBurstSeconds     Int             @default(0)
+  /// Chance in percent, rolled only on idle heartbeats, that the model gets to
+  /// consider a small everyday event. 0 disables life events.
+  lifeEventChancePercent  Int             @default(1)
+  /// Hard cap on life events per persona-local day so idle days stay quiet.
+  lifeEventDailyLimit     Int             @default(1)
+  /// Chance in percent, rolled only on idle heartbeats, that the persona gets
+  /// to spend the beat reading about something it cares about. 0 disables it.
+  curiosityChancePercent  Int             @default(15)
+  /// Optional cap per persona-local day; 0 means unlimited.
+  curiosityDailyLimit     Int             @default(0)
+  /// Minimum hours between self-reflection passes. 0 disables reflection.
+  reflectionIntervalHours Int             @default(6)
   /// Empty means use the built-in mind image-description prompt.
-  imageDescriptionPrompt String       @default("")
-  quietHours           Json?
-  providerId           String?
-  model                String?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  imageDescriptionPrompt  String          @default("")
+  quietHours              Json?
+  providerId              String?
+  model                   String?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
 }
 
 /// Live self-state. One row per channel persona instance.
 model PersonaState {
-  id              String              @id @default(cuid())
-  personaId       String              @unique
-  persona         ChatChannelPersona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  moodValence     Int                 @default(0)
-  moodArousal     Int                 @default(50)
-  moodDominance   Int                 @default(0)
-  energy          Int                 @default(70)
-  stress          Int                 @default(20)
-  socialBattery   Int                 @default(70)
-  attention       Int                 @default(60)
-  currentActivity String              @default("")
-  location        String              @default("")
-  sleepDebt       Int                 @default(0)
+  id              String             @id @default(cuid())
+  personaId       String             @unique
+  persona         ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  moodValence     Int                @default(0)
+  moodArousal     Int                @default(50)
+  moodDominance   Int                @default(0)
+  energy          Int                @default(70)
+  stress          Int                @default(20)
+  socialBattery   Int                @default(70)
+  attention       Int                @default(60)
+  currentActivity String             @default("")
+  /// When `currentActivity` last changed; lets the model see that an activity
+  /// has gone stale instead of repeating "正在做饭" for a whole day.
+  activitySince   DateTime?
+  location        String             @default("")
+  sleepDebt       Int                @default(0)
   /// Body health. Long sleep events and rough wake-ups move this.
-  health          Int                 @default(80)
-  grooming        Int                 @default(70)
+  health          Int                @default(80)
+  grooming        Int                @default(70)
   lastWakeAt      DateTime?
   /// Next heartbeat wake; survives the lease so state and scheduler share one row.
   nextWakeAt      DateTime?
@@ -628,9 +643,9 @@ model PersonaState {
   leaseUntil      DateTime?
   leaseOwner      String?
   /// Why the next wake was scheduled (manual, heartbeat safety net, plan...).
-  wakeReason      String              @default("")
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  wakeReason      String             @default("")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([nextWakeAt])
 }
@@ -691,26 +706,26 @@ model PersonaChangeLog {
 /// Relationship toward one channel contact. `base*` is the operator-authored
 /// baseline; `*` is the live value after events. All dimensions are -100..100.
 model PersonaRelationship {
-  id                 String           @id @default(cuid())
+  id                 String             @id @default(cuid())
   personaId          String
   persona            ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
   channelId          String
-  channel            ChatChannel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel            ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
   contactId          String
-  contact            ChatContact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  affinity           Int              @default(0)
-  trust              Int              @default(0)
-  intimacy           Int              @default(0)
-  attraction         Int              @default(0)
-  hostility          Int              @default(0)
-  fear               Int              @default(0)
-  respect            Int              @default(0)
-  obligation         Int              @default(0)
-  dependency         Int              @default(0)
-  possessiveness     Int              @default(0)
-  friction           Int              @default(0)
-  unresolvedConflict Int              @default(0)
-  familiarity        Int              @default(0)
+  contact            ChatContact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  affinity           Int                @default(0)
+  trust              Int                @default(0)
+  intimacy           Int                @default(0)
+  attraction         Int                @default(0)
+  hostility          Int                @default(0)
+  fear               Int                @default(0)
+  respect            Int                @default(0)
+  obligation         Int                @default(0)
+  dependency         Int                @default(0)
+  possessiveness     Int                @default(0)
+  friction           Int                @default(0)
+  unresolvedConflict Int                @default(0)
+  familiarity        Int                @default(0)
   relationTags       Json?
   addressHere        Json?
   publicMask         Json?
@@ -719,12 +734,12 @@ model PersonaRelationship {
   sharedEvents       Json?
   /// Per-person fields without a first-class column (legacy editor extras).
   extras             Json?
-  disclosureScope    String           @default("SCENE")
-  blocked            Boolean          @default(false)
+  disclosureScope    String             @default("SCENE")
+  blocked            Boolean            @default(false)
   mutedUntil         DateTime?
   lastInteractionAt  DateTime?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   @@unique([personaId, contactId])
   @@index([channelId, contactId])
@@ -733,32 +748,32 @@ model PersonaRelationship {
 
 /// Attitude toward one group conversation.
 model PersonaGroupStance {
-  id             String           @id @default(cuid())
+  id             String             @id @default(cuid())
   personaId      String
   persona        ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
   channelId      String
-  channel        ChatChannel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel        ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
   conversationId String
-  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  comfort        Int              @default(0)
-  belonging      Int              @default(0)
-  attention      Int              @default(0)
-  formality      Int              @default(0)
-  speakRate      Int              @default(0)
-  audienceRisk   Int              @default(0)
-  role           String           @default("")
-  narrative      String           @default("")
+  conversation   ChatConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  comfort        Int                @default(0)
+  belonging      Int                @default(0)
+  attention      Int                @default(0)
+  formality      Int                @default(0)
+  speakRate      Int                @default(0)
+  audienceRisk   Int                @default(0)
+  role           String             @default("")
+  narrative      String             @default("")
   boundaries     Json?
   tabooTopics    Json?
-  sceneRules     String           @default("")
-  mentionOnly    Boolean          @default(false)
-  topic          String           @default("")
-  phase          String           @default("")
+  sceneRules     String             @default("")
+  mentionOnly    Boolean            @default(false)
+  topic          String             @default("")
+  phase          String             @default("")
   /// Per-group fields without a first-class column (legacy editor extras).
   extras         Json?
   lastReadAt     DateTime?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@unique([personaId, conversationId])
   @@index([channelId, conversationId])
@@ -767,38 +782,38 @@ model PersonaGroupStance {
 /// One durable memory. Embeddings are stored as Float[] so the first version does
 /// not depend on a pgvector extension; retrieval scores them in the application.
 model PersonaMemory {
-  id                 String                   @id @default(cuid())
-  personaId          String
-  persona            ChatChannelPersona       @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  channelId          String
-  channel            ChatChannel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversationId     String?
-  scope              PersonaMemoryScope
-  kind               PersonaMemoryKind
-  subjectType        PersonaMemorySubjectType
-  subjectId          String                   @default("")
-  subjectName        String                   @default("")
-  title              String                   @default("")
-  content            String
-  structured         Json?
-  importance         Int                      @default(50)
-  confidence         Int                      @default(70)
-  emotionalValence   Int                      @default(0)
-  emotionalArousal   Int                      @default(0)
-  visibility         PersonaMemoryVisibility  @default(SCENE)
-  status             PersonaMemoryStatus      @default(ACTIVE)
-  occurredAt         DateTime                 @default(now())
-  validFrom          DateTime?
-  validTo            DateTime?
-  lastRecalledAt     DateTime?
-  recallCount        Int                      @default(0)
-  sourceType         PersonaMemorySourceType  @default(INFERENCE)
-  sourceIds          String[]                 @default([])
-  embedding          Float[]                  @default([])
-  consolidatedAt     DateTime?
-  supersededById     String?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  id               String                   @id @default(cuid())
+  personaId        String
+  persona          ChatChannelPersona       @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  channelId        String
+  channel          ChatChannel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId   String?
+  scope            PersonaMemoryScope
+  kind             PersonaMemoryKind
+  subjectType      PersonaMemorySubjectType
+  subjectId        String                   @default("")
+  subjectName      String                   @default("")
+  title            String                   @default("")
+  content          String
+  structured       Json?
+  importance       Int                      @default(50)
+  confidence       Int                      @default(70)
+  emotionalValence Int                      @default(0)
+  emotionalArousal Int                      @default(0)
+  visibility       PersonaMemoryVisibility  @default(SCENE)
+  status           PersonaMemoryStatus      @default(ACTIVE)
+  occurredAt       DateTime                 @default(now())
+  validFrom        DateTime?
+  validTo          DateTime?
+  lastRecalledAt   DateTime?
+  recallCount      Int                      @default(0)
+  sourceType       PersonaMemorySourceType  @default(INFERENCE)
+  sourceIds        String[]                 @default([])
+  embedding        Float[]                  @default([])
+  consolidatedAt   DateTime?
+  supersededById   String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
 
   @@index([personaId, status, occurredAt])
   @@index([personaId, subjectType, subjectId])
@@ -808,25 +823,25 @@ model PersonaMemory {
 
 /// Persona-authored (or operator-authored) future task with a wake condition.
 model AgentTodo {
-  id                   String          @id @default(cuid())
-  personaId            String
-  persona              ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  channelId            String
-  channel              ChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  title                String
-  detail               String          @default("")
-  kind                 String          @default("follow_up")
-  priority             Int             @default(50)
-  dueAt                DateTime?
-  wakeCondition        Json?
-  recurrence           String?
-  status               AgentTodoStatus @default(PENDING)
-  source               String          @default("MIND")
-  relatedContactId     String?
+  id                    String             @id @default(cuid())
+  personaId             String
+  persona               ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  channelId             String
+  channel               ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title                 String
+  detail                String             @default("")
+  kind                  String             @default("follow_up")
+  priority              Int                @default(50)
+  dueAt                 DateTime?
+  wakeCondition         Json?
+  recurrence            String?
+  status                AgentTodoStatus    @default(PENDING)
+  source                String             @default("MIND")
+  relatedContactId      String?
   relatedConversationId String?
-  completedAt          DateTime?
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  completedAt           DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   @@index([personaId, status, dueAt])
   @@index([personaId, status, createdAt])
@@ -834,55 +849,55 @@ model AgentTodo {
 
 /// A pending proactive act: the persona wants to say or do something.
 model AgentIntention {
-  id             String               @id @default(cuid())
-  personaId      String
-  persona        ChatChannelPersona   @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  channelId      String
-  channel        ChatChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  targetType     String               @default("PERSON")
-  targetId       String               @default("")
-  reason         String               @default("")
-  seed           String               @default("")
-  urgency        Int                  @default(50)
-  earliestAt     DateTime             @default(now())
-  expiresAt      DateTime?
-  status         AgentIntentionStatus @default(PENDING)
-  attempts       Int                  @default(0)
-  lastAttemptAt  DateTime?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id            String               @id @default(cuid())
+  personaId     String
+  persona       ChatChannelPersona   @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  channelId     String
+  channel       ChatChannel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  targetType    String               @default("PERSON")
+  targetId      String               @default("")
+  reason        String               @default("")
+  seed          String               @default("")
+  urgency       Int                  @default(50)
+  earliestAt    DateTime             @default(now())
+  expiresAt     DateTime?
+  status        AgentIntentionStatus @default(PENDING)
+  attempts      Int                  @default(0)
+  lastAttemptAt DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   @@index([personaId, status, earliestAt])
 }
 
 /// One mind turn, including heartbeat and proactive turns.
 model AgentRun {
-  id              String           @id @default(cuid())
-  personaId       String
-  persona         ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  channelId       String
-  channel         ChatChannel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversationId  String?
-  conversation    ChatConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  messageId       String?
-  trigger         AgentRunTrigger  @default(MESSAGE)
-  mode            PersonaMindMode  @default(LIVE)
-  status          AgentRunStatus   @default(RUNNING)
-  providerId      String?
-  model           String?
-  promptTokens    Int?
+  id               String             @id @default(cuid())
+  personaId        String
+  persona          ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  channelId        String
+  channel          ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId   String?
+  conversation     ChatConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  messageId        String?
+  trigger          AgentRunTrigger    @default(MESSAGE)
+  mode             PersonaMindMode    @default(LIVE)
+  status           AgentRunStatus     @default(RUNNING)
+  providerId       String?
+  model            String?
+  promptTokens     Int?
   completionTokens Int?
-  cost            Float?
-  latencyMs       Int?
-  decision        Json?
-  socialRead      Json?
-  plan            Json?
-  scene           Json?
-  error           String?
-  startedAt       DateTime         @default(now())
-  finishedAt      DateTime?
-  steps           AgentStep[]
-  actions         AgentAction[]
+  cost             Float?
+  latencyMs        Int?
+  decision         Json?
+  socialRead       Json?
+  plan             Json?
+  scene            Json?
+  error            String?
+  startedAt        DateTime           @default(now())
+  finishedAt       DateTime?
+  steps            AgentStep[]
+  actions          AgentAction[]
 
   @@index([personaId, startedAt])
   @@index([conversationId, startedAt])
@@ -906,25 +921,25 @@ model AgentStep {
 
 /// Outbound/persistence action journal. `idempotencyKey` makes retries safe.
 model AgentAction {
-  id             String            @id @default(cuid())
+  id             String             @id @default(cuid())
   runId          String?
-  run            AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  run            AgentRun?          @relation(fields: [runId], references: [id], onDelete: SetNull)
   personaId      String
   persona        ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
   channelId      String
-  channel        ChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel        ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
   conversationId String?
-  conversation   ChatConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversation   ChatConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   kind           AgentActionKind
   payload        Json
-  status         AgentActionStatus @default(PENDING)
-  idempotencyKey String            @unique
+  status         AgentActionStatus  @default(PENDING)
+  idempotencyKey String             @unique
   sentMessageId  String?
   error          String?
   approvedAt     DateTime?
   sentAt         DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([personaId, createdAt])
   @@index([status, createdAt])
@@ -933,22 +948,22 @@ model AgentAction {
 /// Local sticker library metadata. Bytes live on disk; the row carries the
 /// description and embedding used for mood/scene retrieval.
 model StickerAsset {
-  id          String   @id @default(cuid())
-  sha256      String   @unique
+  id          String    @id @default(cuid())
+  sha256      String    @unique
   filePath    String
   mimeType    String?
-  byteSize    Int      @default(0)
+  byteSize    Int       @default(0)
   width       Int?
   height      Int?
-  tags        String[] @default([])
-  description String   @default("")
-  embedding   Float[]  @default([])
-  scope       String   @default("GLOBAL")
-  enabled     Boolean  @default(true)
-  usageCount  Int      @default(0)
+  tags        String[]  @default([])
+  description String    @default("")
+  embedding   Float[]   @default([])
+  scope       String    @default("GLOBAL")
+  enabled     Boolean   @default(true)
+  usageCount  Int       @default(0)
   lastUsedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([enabled, lastUsedAt])
 }
@@ -977,16 +992,16 @@ model LlmPromptLog {
 
 /// First-person journal entry produced by deep consolidation.
 model PersonaJournal {
-  id                    String              @id @default(cuid())
+  id                    String             @id @default(cuid())
   personaId             String
-  persona               ChatChannelPersona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  persona               ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
   channelId             String
-  channel               ChatChannel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel               ChatChannel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
   date                  String
   content               String
-  mood                  String              @default("")
-  consolidatedMemoryIds String[]            @default([])
-  createdAt             DateTime            @default(now())
+  mood                  String             @default("")
+  consolidatedMemoryIds String[]           @default([])
+  createdAt             DateTime           @default(now())
 
   @@unique([personaId, date])
   @@index([personaId, createdAt])

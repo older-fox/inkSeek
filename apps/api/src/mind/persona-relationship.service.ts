@@ -158,7 +158,7 @@ export class PersonaRelationshipService {
     reason = '',
     source = 'DRIFT',
   ): Promise<void> {
-    for (const signal of signals.slice(0, 8)) {
+    for (const signal of signals) {
       const relationship = await this.ensureForContact(personaId, signal.contactId);
       const data: Prisma.PersonaRelationshipUpdateInput = {};
       const changes: Prisma.PersonaChangeLogCreateManyInput[] = [];

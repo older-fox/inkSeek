@@ -224,43 +224,45 @@ const STANCE_LABELS: Record<StanceField, string> = {
   audienceRisk: '怕被围观',
 };
 
+// Group stance fields default to 0 ("no signal yet"), so 0 must read as neutral
+// rather than uncomfortable; only pronounced values get a strong description.
 const STANCE_BEHAVIOR: Record<StanceField, (value: number) => string> = {
   comfort: (value) =>
-    value >= 65
+    value >= 50
       ? '在这个群很放松，会开玩笑、说真心话'
-      : value < 35
-        ? '在群里不自在，会收着说、尽量避免出头'
-        : '状态一般，正常参与',
+      : value >= 15
+        ? '还算自在，能正常参与'
+        : '没什么特别感觉，正常参与，不刻意表现',
   belonging: (value) =>
-    value >= 65
+    value >= 50
       ? '觉得自己是群里的一份子，会维护群里的气氛'
-      : value < 35
-        ? '觉得自己是外人，不太想融入'
-        : '有一点归属感，但不深',
+      : value >= 15
+        ? '有一点归属感，但不深'
+        : '还没有明显归属感，也不排斥',
   attention: (value) =>
-    value >= 65
+    value >= 50
       ? '很关注这个群的动静，消息基本都看'
-      : value < 35
-        ? '不太关注，只扫一眼或等被叫'
-        : '关注度一般',
+      : value >= 15
+        ? '会留意，但不追着看'
+        : '不太关注，偶尔扫一眼',
   formality: (value) =>
-    value >= 65
+    value >= 50
       ? '说话偏正式、克制，玩笑很少'
-      : value < 35
-        ? '很随意，想到什么说什么'
-        : '介于随意和正式之间',
+      : value >= 15
+        ? '介于随意和正式之间'
+        : '比较随意，想到什么说什么',
   speakRate: (value) =>
-    value >= 65
+    value >= 50
       ? '在这个群很主动，常自己起话头'
-      : value < 35
-        ? '很少主动发言，多数时候只看'
-        : '有人接话时会参与',
+      : value >= 15
+        ? '有人接话时会参与'
+        : '不常主动开口，但不会刻意回避',
   audienceRisk: (value) =>
-    value >= 65
+    value >= 50
       ? '很怕在群里说错被围观，会反复斟酌或干脆不说'
-      : value < 35
-        ? '不太怕被围观，敢在群里直说'
-        : '会注意场合，但不至于不敢说',
+      : value >= 15
+        ? '会注意场合，但不至于不敢说'
+        : '不太怕被围观，敢在群里直说',
 };
 
 function band(value: number): 'low' | 'mid' | 'high' {
@@ -360,7 +362,9 @@ export function stanceLines(
   }
   return STANCE_FIELDS.map((key) => {
     const value = stance[key];
-    return typeOfNumber(value) ? { key, value, weight: Math.abs(value - 50) } : null;
+    return typeOfNumber(value) && Math.abs(value) >= 10
+      ? { key, value, weight: Math.abs(value) }
+      : null;
   })
     .filter((item): item is { key: StanceField; value: number; weight: number } => item !== null)
     .sort((left, right) => right.weight - left.weight)

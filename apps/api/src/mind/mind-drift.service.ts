@@ -21,18 +21,14 @@ const DAY_MS = 24 * 3600_000;
 const SELF_PER_TURN = 1;
 const SELF_DAILY = 4;
 const SELF_COOLDOWN_MS = 45 * 60_000;
-const SELF_MAX_KEYS = 2;
 
 const GROUP_PER_TURN = 2;
 const GROUP_DAILY = 8;
 const GROUP_COOLDOWN_MS = 30 * 60_000;
-const GROUP_MAX_KEYS = 3;
 
 const RELATION_PER_TURN = 5;
 const RELATION_DAILY = 10;
 const RELATION_COOLDOWN_MS = 10 * 60_000;
-const RELATION_MAX_DIMENSIONS = 4;
-const RELATION_MAX_CONTACTS = 3;
 
 const GROOMING_PER_TURN = 8;
 const GROOMING_DAILY = 30;
@@ -292,8 +288,7 @@ export class MindDriftService {
         const [key, delta] = entry;
         return isSelfTraitKey(key) && Number.isFinite(delta) && Math.abs(delta) >= 0.5;
       })
-      .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
-      .slice(0, SELF_MAX_KEYS);
+      .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]));
 
     for (const [key, raw] of candidates) {
       const current = numeric(values[key]);
@@ -362,8 +357,7 @@ export class MindDriftService {
         (item): item is { field: GroupField; raw: number } =>
           typeof item.raw === 'number' && Number.isFinite(item.raw) && Math.abs(item.raw) >= 0.5,
       )
-      .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw))
-      .slice(0, GROUP_MAX_KEYS);
+      .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw));
 
     for (const { field, raw } of candidates) {
       const delta = this.limitDelta({
@@ -414,7 +408,7 @@ export class MindDriftService {
     const accepted: RelationshipSignal[] = [];
     const summary: { contactId: string; deltas: Record<string, number> }[] = [];
 
-    for (const signal of plan.relationshipSignals.slice(0, RELATION_MAX_CONTACTS)) {
+    for (const signal of plan.relationshipSignals) {
       if (!known.has(signal.contactId)) {
         continue;
       }
@@ -428,8 +422,7 @@ export class MindDriftService {
           (item): item is { field: RelationField; raw: number } =>
             typeof item.raw === 'number' && Number.isFinite(item.raw) && Math.abs(item.raw) >= 0.5,
         )
-        .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw))
-        .slice(0, RELATION_MAX_DIMENSIONS);
+        .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw));
 
       for (const { field, raw } of candidates) {
         const delta = this.limitDelta({
