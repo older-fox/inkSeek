@@ -26,10 +26,6 @@ const GROUP_PER_TURN = 2;
 const GROUP_DAILY = 8;
 const GROUP_COOLDOWN_MS = 30 * 60_000;
 
-const RELATION_PER_TURN = 5;
-const RELATION_DAILY = 10;
-const RELATION_COOLDOWN_MS = 10 * 60_000;
-
 const GROOMING_PER_TURN = 8;
 const GROOMING_DAILY = 30;
 const GROOMING_COOLDOWN_MS = 5 * 60_000;
@@ -113,16 +109,15 @@ export class MindDriftService {
     const group = await this.applyGroupStance(scene, plan, ledger);
     summary.group = group;
 
-    const relations = await this.applyRelationships(scene, plan, ledger);
+    const relations = await this.applyRelationships(scene, plan);
     summary.relations = relations;
     return summary;
   }
 
   /**
    * Explicit relationship patch requested through the `relationship.update`
-   * tool. Numeric fields still obey per-turn spans, daily caps and cooldowns;
-   * qualitative fields (tags, addresses, boundaries, promises...) write
-   * directly because they are not scores.
+   * tool. The persona owns these numbers: values land as written, only clamped
+   * to the storage range.
    */
   async applyRelationshipPatch(input: {
     personaId: string;
@@ -134,7 +129,6 @@ export class MindDriftService {
   }): Promise<{
     contactId: string;
     applied: Record<string, number>;
-    blocked: string[];
     relationship: PersonaRelationshipRecord;
     attributesUpdated: string[];
     attributesRejected: RelationshipAttributeRejection[];
@@ -148,9 +142,7 @@ export class MindDriftService {
       ...attributePatch?.fields,
       ...input.fields,
     };
-    const ledger = await this.loadLedger(input.personaId);
     const applied: Record<string, number> = {};
-    const blocked: string[] = [];
     const attributesUpdated = attributePatch?.updated ?? [];
     const attributesRejected = attributePatch?.rejected ?? [];
 
@@ -158,7 +150,6 @@ export class MindDriftService {
       return {
         contactId: input.contactId,
         applied,
-        blocked,
         relationship: current,
         attributesUpdated,
         attributesRejected,
@@ -170,33 +161,12 @@ export class MindDriftService {
       if (typeof desiredRaw !== 'number' || !Number.isFinite(desiredRaw)) {
         continue;
       }
-      const desired = clamp(desiredRaw, -100, 100);
-      if (desired === current[field]) {
-        continue;
-      }
-      const delta = this.limitDelta({
-        ledger,
-        scope: 'RELATION',
-        targetId: input.contactId,
-        key: field,
-        proposed: desired - current[field],
-        perTurn: RELATION_PER_TURN,
-        daily: RELATION_DAILY,
-        cooldownMs: RELATION_COOLDOWN_MS,
-      });
-      if (delta === 0) {
-        blocked.push(field);
-        continue;
-      }
-      const next = clamp(current[field] + delta, -100, 100);
-      const actual = next - current[field];
-      if (actual === 0) {
-        blocked.push(field);
+      const next = Math.round(clamp(desiredRaw, -100, 100));
+      if (next === current[field]) {
         continue;
       }
       patch[field] = next;
-      applied[field] = actual;
-      this.remember(ledger, 'RELATION', input.contactId, field, actual);
+      applied[field] = next - current[field];
     }
 
     const relationship = await this.relationships.update(input.personaId, patch, {
@@ -206,7 +176,6 @@ export class MindDriftService {
     return {
       contactId: input.contactId,
       applied,
-      blocked,
       relationship,
       attributesUpdated,
       attributesRejected,
@@ -399,7 +368,6 @@ export class MindDriftService {
   private async applyRelationships(
     scene: MindScene,
     plan: ActionPlan,
-    ledger: Map<string, LedgerEntry>,
   ): Promise<{ contactId: string; deltas: Record<string, number> }[]> {
     if (plan.relationshipSignals.length === 0) {
       return [];
@@ -425,16 +393,7 @@ export class MindDriftService {
         .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw));
 
       for (const { field, raw } of candidates) {
-        const delta = this.limitDelta({
-          ledger,
-          scope: 'RELATION',
-          targetId: signal.contactId,
-          key: field,
-          proposed: raw,
-          perTurn: RELATION_PER_TURN,
-          daily: RELATION_DAILY,
-          cooldownMs: RELATION_COOLDOWN_MS,
-        });
+        const delta = Math.round(raw);
         if (delta === 0) {
           continue;
         }
@@ -444,7 +403,6 @@ export class MindDriftService {
           continue;
         }
         deltas[field] = actual;
-        this.remember(ledger, 'RELATION', signal.contactId, field, actual);
       }
 
       if (Object.keys(deltas).length === 0) {

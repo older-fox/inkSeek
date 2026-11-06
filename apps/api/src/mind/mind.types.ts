@@ -11,6 +11,9 @@ export type MindState = PersonaState;
 export type MindGroupStance = PersonaGroupStance & { conversation: ChatConversation };
 export type MindConversation = ChatConversation;
 
+/** How long a reply keeps the same sender in an active exchange. */
+export const MIND_ACTIVE_EXCHANGE_MINUTES = 10;
+
 /** A newer message from the same sender in the same conversation replaced this turn. */
 export class MindTurnInterruptedError extends Error {
   constructor() {
@@ -27,6 +30,23 @@ export function isMindTurnInterrupted(error: unknown, signal?: AbortSignal): boo
     error instanceof MindTurnInterruptedError ||
     (error instanceof Error && error.name === 'AbortError')
   );
+}
+
+/** The model replied, but neither the JSON envelope nor a tool call could be recovered. */
+export class MindPlannerProtocolError extends Error {
+  constructor(
+    message: string,
+    readonly raw: string,
+    readonly toolCalls: readonly ToolExecution[] = [],
+  ) {
+    super(message);
+    this.name = 'MindPlannerProtocolError';
+  }
+}
+
+export interface ParsedToolCall {
+  name: string;
+  input: unknown;
 }
 
 export interface SceneMessage {
@@ -135,6 +155,29 @@ export interface MindWakeBrief {
   unconsolidatedCount: number;
 }
 
+/**
+ * Compact view of everything still open, so the model can see its backlog on
+ * every turn instead of only the few intentions that happen to be due.
+ */
+export interface MindActiveIntentionsBrief {
+  total: number;
+  pending: number;
+  deferred: number;
+  targets: {
+    targetType: string;
+    targetId: string;
+    name: string;
+    count: number;
+    samples: {
+      id: string;
+      need: string;
+      seed: string;
+      urgency: number;
+      createdAt: string;
+    }[];
+  }[];
+}
+
 /** How a previous proactive attempt landed, shown to the model as feedback. */
 export interface MindIntentionFeedback {
   need: string;
@@ -172,8 +215,6 @@ export interface MindMemoryStats {
 export const MIND_EMBEDDING_DIM = 256;
 export const MIND_MAX_TOOL_STEPS = 10;
 export const MIND_MAX_TOOL_MS = 25_000;
-/** Hard per-turn cap; daily caps and cooldowns live in MindDriftService. */
-export const MIND_MAX_RELATIONSHIP_DELTA = 5;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -218,23 +259,307 @@ export function readStringArray(value: unknown): string[] {
 }
 
 export function parseJsonObject(text: string): Record<string, unknown> | null {
-  const trimmed = text
+  const trimmed = stripCodeFence(text);
+  const start = trimmed.indexOf('{');
+  if (start < 0) {
+    return null;
+  }
+  const candidate = trimmed.slice(start);
+  const balanced = extractFirstJsonObject(candidate);
+  if (balanced) {
+    const parsed = tryParseObject(balanced);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  const repaired = repairTruncatedJson(candidate);
+  return repaired ? tryParseObject(repaired) : null;
+}
+
+/**
+ * Models sometimes emit tool calls as XML envelopes instead of the documented
+ * JSON. Besides `<tool_call>{"name":...}</tool_call>`, some split the name and
+ * arguments into two envelopes: `<tool_call>sticker.search</tool_call>` followed
+ * by `<tool_call>{"query":"..."}</tool_call>`.
+ */
+export function parseToolCallEnvelopes(text: string): ParsedToolCall[] {
+  const calls: ParsedToolCall[] = [];
+  const pattern = /<tool_call>([\s\S]*?)<\/tool_call>/gi;
+  let pendingName: string | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const body = match[1]?.trim();
+    if (!body) {
+      continue;
+    }
+
+    const inline = splitToolNameAndArguments(body);
+    if (inline) {
+      calls.push({ name: inline.name, input: normalizeToolInput(inline.input) });
+      pendingName = null;
+      continue;
+    }
+
+    const parsed = parseJsonObject(body);
+    if (parsed) {
+      const explicitName = readString(parsed['name'] ?? parsed['tool']).trim();
+      const name = explicitName || pendingName || '';
+      if (!name) {
+        continue;
+      }
+      calls.push({
+        name,
+        input: normalizeToolInput(
+          explicitName ? (parsed['arguments'] ?? parsed['input'] ?? {}) : parsed,
+        ),
+      });
+      pendingName = null;
+      continue;
+    }
+
+    const bare = body.replace(/^["'`]+|["'`]+$/gu, '').trim();
+    if (/^[A-Za-z_][\w.-]*\.[\w.-]+$/u.test(bare)) {
+      pendingName = bare;
+    }
+  }
+  return calls;
+}
+
+function splitToolNameAndArguments(body: string): { name: string; input: unknown } | null {
+  const match = /^([A-Za-z_][\w.-]*)\s*(\{[\s\S]*)$/u.exec(body);
+  const name = match?.[1];
+  if (!name?.includes('.')) {
+    return null;
+  }
+  const parsed = parseJsonObject(match?.[2] ?? '');
+  return parsed ? { name, input: parsed } : null;
+}
+
+function normalizeToolInput(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value ?? {};
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * DeepSeek models sometimes emit their native DSML markup instead of the
+ * documented JSON:
+ *
+ * <｜｜DSML｜｜ calls>
+ * <｜｜DSML｜｜ invoke name="memory.search">
+ * <｜｜DSML｜｜ parameter name="query" string="true">年糕</｜｜DSML｜｜ parameter>
+ * </｜｜DSML｜｜ invoke>
+ * </｜｜DSML｜｜ calls>
+ */
+export function parseDsmlToolCalls(text: string): ParsedToolCall[] {
+  if (!/DSML/iu.test(text)) {
+    return [];
+  }
+  const calls: ParsedToolCall[] = [];
+  const bar = String.raw`[|｜]{1,2}`;
+  const invokePattern = new RegExp(
+    `<${bar}\\s*DSML\\s*${bar}\\s*invoke\\s+name="([^"]+)"[^>]*>([\\s\\S]*?)<\\/${bar}\\s*DSML\\s*${bar}\\s*invoke\\s*>`,
+    'giu',
+  );
+  const parameterPattern = new RegExp(
+    `<${bar}\\s*DSML\\s*${bar}\\s*parameter\\s+name="([^"]+)"([^>]*?)>([\\s\\S]*?)<\\/${bar}\\s*DSML\\s*${bar}\\s*parameter\\s*>`,
+    'giu',
+  );
+  let invoke: RegExpExecArray | null;
+  while ((invoke = invokePattern.exec(text)) !== null) {
+    const name = invoke[1];
+    if (!name) {
+      continue;
+    }
+    const input: Record<string, unknown> = {};
+    const body = invoke[2] ?? '';
+    parameterPattern.lastIndex = 0;
+    let parameter: RegExpExecArray | null;
+    while ((parameter = parameterPattern.exec(body)) !== null) {
+      const key = parameter[1];
+      if (!key) {
+        continue;
+      }
+      input[key] = dsmlParameterValue(parameter[3] ?? '', parameter[2] ?? '');
+    }
+    calls.push({ name, input });
+  }
+  return calls;
+}
+
+function dsmlParameterValue(raw: string, attributes: string): unknown {
+  const value = raw.trim();
+  if (/string\s*=\s*"true"/iu.test(attributes)) {
+    return value;
+  }
+  if (!value) {
+    return '';
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function stripCodeFence(text: string): string {
+  return text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '');
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  if (start < 0 || end <= start) {
-    return null;
-  }
+}
+
+function tryParseObject(text: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as unknown;
+    const parsed = JSON.parse(text) as unknown;
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null;
   } catch {
     return null;
   }
+}
+
+/** Returns the first complete `{...}` block, ignoring braces inside strings. */
+function extractFirstJsonObject(text: string): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (char === '\\') {
+        escape = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+    if (char === '}' && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * A truncated final `}` is the most common protocol failure. Try closing the
+ * open string/objects first; if a key/value was cut mid-way, drop the last
+ * incomplete property and close the remaining object.
+ */
+function repairTruncatedJson(text: string): string | null {
+  let current = text.trim();
+  for (let attempt = 0; attempt < 24 && current; attempt += 1) {
+    const closed = closeTruncatedJson(current);
+    if (closed && tryParseObject(closed)) {
+      return closed;
+    }
+    const cut = lastTopLevelComma(current);
+    if (cut < 0) {
+      break;
+    }
+    current = current.slice(0, cut).trimEnd();
+  }
+  return null;
+}
+
+function closeTruncatedJson(text: string): string | null {
+  let inString = false;
+  let escape = false;
+  const stack: string[] = [];
+  for (const char of text) {
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (char === '\\') {
+        escape = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      stack.push('}');
+    } else if (char === '[') {
+      stack.push(']');
+    } else if (char === '}' || char === ']') {
+      const expected = stack.pop();
+      if (expected !== char) {
+        return null;
+      }
+    }
+  }
+  let result = text;
+  if (inString) {
+    if (escape) {
+      result += '\\';
+    }
+    result += '"';
+  }
+  result = result.replace(/[\s,]+$/u, '');
+  if (result.endsWith(':')) {
+    result = result.slice(0, -1).replace(/[\s,]+$/u, '');
+  }
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    result += stack[index];
+  }
+  return result;
+}
+
+function lastTopLevelComma(text: string): number {
+  let inString = false;
+  let escape = false;
+  let depth = 0;
+  let last = -1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (char === '\\') {
+        escape = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') {
+      depth += 1;
+    } else if (char === '}' || char === ']') {
+      depth -= 1;
+    } else if (char === ',' && depth === 1) {
+      last = index;
+    }
+  }
+  return last;
 }
 
 export function parseJsonArray(text: string): unknown[] | null {

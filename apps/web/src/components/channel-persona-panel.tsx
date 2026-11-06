@@ -147,7 +147,7 @@ function PersonaFieldEditor({
   field: PersonaField;
   value: PersonaValue | undefined;
   onCancel: () => void;
-  onCommit: (value: PersonaValue) => void;
+  onCommit: (value: PersonaValue | undefined) => void;
 }) {
   const [text, setText] = useState(() => {
     if (Array.isArray(value)) {
@@ -184,12 +184,20 @@ function PersonaFieldEditor({
         onCommit(Math.max(0, Math.min(100, Math.round(numeric))));
         return;
       case 'duration':
+        if (text.trim() === '') {
+          onCommit(undefined);
+          return;
+        }
         if (!numericValid || numeric < 0) {
           return;
         }
         onCommit(Math.round(numeric));
         return;
       case 'number':
+        if (text.trim() === '') {
+          onCommit(undefined);
+          return;
+        }
         if (!numericValid) {
           return;
         }
@@ -269,8 +277,18 @@ function PersonaFieldEditor({
             <span className="shrink-0 text-[0.74rem] text-mist-500">{field.suffix}</span>
           ) : null}
         </div>
+        {text.trim() === '' ? (
+          <p className="text-[0.66rem] text-mist-500">留空保存会清除这一项</p>
+        ) : field.kind === 'duration' && numericValid && numeric < 0 ? (
+          <p className="text-[0.66rem] text-rose-300/80">时长不能小于 0</p>
+        ) : !numericValid ? (
+          <p className="text-[0.66rem] text-rose-300/80">请输入有效数字</p>
+        ) : null}
         <EditorActions
-          disabled={!numericValid || (field.kind === 'duration' && numeric < 0)}
+          disabled={
+            (text.trim() !== '' && !numericValid) ||
+            (field.kind === 'duration' && numericValid && numeric < 0)
+          }
           onCancel={onCancel}
           onCommit={commit}
         />
@@ -585,7 +603,7 @@ function PersonaFieldCard({
 }: {
   field: PersonaField;
   value: PersonaValue | undefined;
-  onChange: (value: PersonaValue) => void;
+  onChange: (value: PersonaValue | undefined) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const inlineControl =
@@ -654,7 +672,7 @@ function GroupSection({
 }: {
   group: PersonaGroup;
   values: Record<string, PersonaValue>;
-  onChange: (key: string, value: PersonaValue) => void;
+  onChange: (key: string, value: PersonaValue | undefined) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -896,16 +914,25 @@ export function ChannelPersonaPanel({
     return null;
   }
 
-  const handleChange = (key: string, value: PersonaValue) => {
+  const handleChange = (key: string, value: PersonaValue | undefined) => {
     if (!channel || !values || !meta) {
       return;
     }
-    if (isStateField(key)) {
+    if (value !== undefined && isStateField(key)) {
       void saveStateField(key, value);
       return;
     }
+    const current = values[key];
+    if (value === undefined ? current === undefined : current === value) {
+      return;
+    }
     const label = PERSONA_FIELD_LABELS.get(key) ?? key;
-    const next = { ...values, [key]: value };
+    const next = { ...values };
+    if (value === undefined) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
     const nextMeta = appendPersonaHistory(meta, {
       field: label,
       from: formatPersonaValue(values[key]),
@@ -1184,7 +1211,9 @@ export function ChannelPersonaPanel({
                   ? '正在保存…'
                   : syncState === 'error'
                     ? '保存失败，稍后重试'
-                    : '编辑即时保存到服务端'}
+                    : syncState === 'saved'
+                      ? '已保存到服务端'
+                      : '编辑即时保存到服务端'}
               </p>
             </footer>
           </motion.div>

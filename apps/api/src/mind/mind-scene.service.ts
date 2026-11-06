@@ -323,6 +323,39 @@ export class MindSceneService {
   }
 
   /**
+   * True when this sender already had a message before the persona's latest
+   * reply and is now continuing the same exchange. The mention-only switch
+   * still blocks cold messages; this only prevents dropping its own follow-up.
+   */
+  async isActiveExchange(
+    conversationId: string,
+    senderId: string,
+    windowMinutes: number,
+  ): Promise<boolean> {
+    const since = new Date(Date.now() - Math.max(1, windowMinutes) * 60_000);
+    const rows = await this.prisma.chatMessageRecord.findMany({
+      where: { conversationId, sentAt: { gte: since } },
+      orderBy: { sentAt: 'desc' },
+      take: 20,
+      select: { isSelf: true, senderId: true, sentAt: true },
+    });
+    const lastSelf = rows.find((row) => row.isSelf);
+    const lastInbound = rows.find((row) => !row.isSelf && row.senderId === senderId);
+    if (!lastSelf || !lastInbound) {
+      return false;
+    }
+    const selfAt = lastSelf.sentAt.getTime();
+    const inboundAt = lastInbound.sentAt.getTime();
+    if (inboundAt <= selfAt) {
+      return false;
+    }
+    return rows.some(
+      (row) =>
+        !row.isSelf && row.senderId === senderId && row.sentAt.getTime() <= selfAt,
+    );
+  }
+
+  /**
    * Frequency signal for long events: how many messages in the window were
    * actually aimed at the persona (at/poke/name). The current message has
    * already been stored, so it is included.

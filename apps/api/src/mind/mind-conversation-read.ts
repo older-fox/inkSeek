@@ -60,6 +60,53 @@ export interface RepetitionRead {
   topics: { text: string; count: number }[];
 }
 
+export interface BoundaryEscalation {
+  phrase: string;
+  count: number;
+  /** The other side kept pushing after the most recent refusal. */
+  continued: boolean;
+}
+
+const BOUNDARY_PATTERNS: readonly { label: string; re: RegExp }[] = [
+  { label: '松开', re: /松开|放开|松手/u },
+  { label: '别碰', re: /别碰|不许碰|不许乱碰|不要碰|手放好|拿开/u },
+  { label: '说停', re: /说停|喊停/u },
+  { label: '别这样', re: /别这样|不要这样|不行不行|真不行/u },
+  { label: '别贴太近', re: /别贴|贴太近|别凑/u },
+];
+
+/**
+ * Repeated-refusal read. It only reports that the other side kept pushing
+ * after a refusal; how to respond stays with the planner.
+ */
+export function readBoundaryEscalation(scene: MindScene): BoundaryEscalation | null {
+  const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-16);
+  if (selfMessages.length < 2) {
+    return null;
+  }
+  const counts = new Map<string, number>();
+  const lastAt = new Map<string, string>();
+  for (const message of selfMessages) {
+    for (const pattern of BOUNDARY_PATTERNS) {
+      if (!pattern.re.test(message.text)) {
+        continue;
+      }
+      counts.set(pattern.label, (counts.get(pattern.label) ?? 0) + 1);
+      lastAt.set(pattern.label, message.sentAt);
+    }
+  }
+  const top = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+  if (!top || top[1] < 2) {
+    return null;
+  }
+  const [phrase, count] = top;
+  const at = lastAt.get(phrase);
+  const continued = Boolean(
+    at && scene.messages.some((message) => !message.isSelf && message.sentAt > at),
+  );
+  return { phrase, count, continued };
+}
+
 const REPETITION_STOP_CHARS = new Set([
   ...'的了呢吗吧啊呀哦嗯我你他她它们这那什么怎样个一有是在不没和与或而且但因为所以如果时候现在已经还是就是不要会能要想说看给对很太又再才只来去上下里外到得地着过',
 ]);

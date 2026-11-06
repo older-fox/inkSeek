@@ -18,6 +18,8 @@ export interface ExecutePlanInput {
   settings: MindSettingsRecord;
   mode: string;
   runId: string;
+  /** Unsolicited turn: proactive sends do not draw from the daily message budget. */
+  proactive?: boolean;
   /** Set when a newer message from the same sender superseded this turn. */
   signal?: AbortSignal;
 }
@@ -89,6 +91,7 @@ export class MindActionExecutor {
         continue;
       }
       if (
+        !input.proactive &&
         input.settings.dailyMessageBudget > 0 &&
         budgetUsed >= input.settings.dailyMessageBudget
       ) {
@@ -267,6 +270,7 @@ export class MindActionExecutor {
         status: 'SENT',
         kind: { in: ['MESSAGE', 'STICKER', 'FACE'] },
         createdAt: { gte: start },
+        run: { trigger: 'MESSAGE' },
       },
     });
   }

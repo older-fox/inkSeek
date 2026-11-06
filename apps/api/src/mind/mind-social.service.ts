@@ -5,12 +5,14 @@ import {
   clamp,
   isQuietHour,
   localHour,
+  MIND_ACTIVE_EXCHANGE_MINUTES,
   normalizeTimeZone,
   readString,
   readStringArray,
   type MindScene,
   type SceneCastMember,
 } from './mind.types.js';
+import { readBoundaryEscalation } from './mind-conversation-read.js';
 
 export interface SocialDecision {
   read: SocialRead;
@@ -20,6 +22,8 @@ export interface SocialDecision {
   mentioned: boolean;
   sleeping: boolean;
   secretCount: number;
+  activeExchange: boolean;
+  boundaryEscalation: { phrase: string; count: number; continued: boolean } | null;
 }
 
 const CONFLICT_PATTERN = /滚|闭嘴|讨厌|恶心|烦|吵|骂|挑衅|废物|傻|蠢|去死|别来|拉黑|决裂/u;
@@ -44,6 +48,8 @@ export class MindSocialService {
     const hour = localHour(new Date(), timeZone);
     const quiet = isQuietHour(hour, null);
     const mentioned = isMentioned(scene, personas);
+    const activeExchange = isActiveExchange(scene);
+    const boundaryEscalation = readBoundaryEscalation(scene);
     const sleeping = quiet || (state.energy < 20 && state.currentActivity.includes('睡'));
     const text = lastInbound?.text ?? '';
 
@@ -124,6 +130,7 @@ export class MindSocialService {
       );
     }
     if (mentioned) reasons.push('消息点名或@了我');
+    if (activeExchange) reasons.push('这是刚才对话的延续');
     if (conflict) reasons.push('消息里有冲突信号');
     if (affection) reasons.push('消息里有亲近信号');
     if (secretCount > 0) {
@@ -141,8 +148,13 @@ export class MindSocialService {
     if (blocked) {
       hardConstraints.push('已将对方拉黑或静音');
     }
-    if (isGroup && scene.stance?.mentionOnly && !mentioned) {
+    if (isGroup && scene.stance?.mentionOnly && !mentioned && !activeExchange) {
       hardConstraints.push('本群仅被@才回');
+    }
+    if (boundaryEscalation?.continued) {
+      reasons.push(
+        `你最近 ${boundaryEscalation.count} 次说过「${boundaryEscalation.phrase}」，对方在你拒绝之后仍在继续接近`,
+      );
     }
 
     const nonNegotiable = readStringArray(personas?.['non_negotiable']);
@@ -152,7 +164,7 @@ export class MindSocialService {
 
     const suggestedStance = pickStance({
       blocked: Boolean(blocked),
-      mentionOnly: Boolean(scene.stance?.mentionOnly && !mentioned),
+      mentionOnly: Boolean(scene.stance?.mentionOnly && !mentioned && !activeExchange),
       risk,
       hostility,
       attraction,
@@ -173,12 +185,14 @@ export class MindSocialService {
       suggestedStance,
       reasons,
       hardConstraints,
+      activeExchange,
     };
 
     const engage = decideEngage({
       scene,
       read,
       mentioned,
+      activeExchange,
       blocked: Boolean(blocked),
       sleeping,
       affinity,
@@ -194,6 +208,8 @@ export class MindSocialService {
       mentioned,
       sleeping,
       secretCount,
+      activeExchange,
+      boundaryEscalation,
     };
   }
 }
@@ -207,6 +223,37 @@ function isMentioned(scene: MindScene, personas: Record<string, unknown> | null)
   const recent = scene.messages.slice(-4).filter((message) => !message.isSelf);
   return recent.some(
     (message) => message.mentionedSelf || names.some((name) => message.text.includes(name)),
+  );
+}
+
+/**
+ * Keeps the mention-only switch, but not at the cost of dropping the sender we
+ * just answered. A follow-up within the window is part of the same exchange.
+ */
+function isActiveExchange(scene: MindScene): boolean {
+  const inbound = scene.messages.filter((message) => !message.isSelf);
+  const self = scene.messages.filter((message) => message.isSelf);
+  const lastInbound = inbound[inbound.length - 1];
+  const lastSelf = self[self.length - 1];
+  if (!lastInbound || !lastSelf) {
+    return false;
+  }
+  const lastSelfAt = Date.parse(lastSelf.sentAt);
+  const lastInboundAt = Date.parse(lastInbound.sentAt);
+  if (!Number.isFinite(lastSelfAt) || !Number.isFinite(lastInboundAt)) {
+    return false;
+  }
+  if (Date.now() - lastSelfAt > MIND_ACTIVE_EXCHANGE_MINUTES * 60_000) {
+    return false;
+  }
+  if (lastInboundAt <= lastSelfAt) {
+    return false;
+  }
+  return inbound.some(
+    (message) =>
+      message !== lastInbound &&
+      message.senderId === lastInbound.senderId &&
+      Date.parse(message.sentAt) <= lastSelfAt,
   );
 }
 
@@ -287,12 +334,15 @@ function decideEngage(input: {
   scene: MindScene;
   read: SocialRead;
   mentioned: boolean;
+  activeExchange: boolean;
   blocked: boolean;
   sleeping: boolean;
   affinity: number;
 }): boolean {
   if (input.blocked) return false;
-  if (input.scene.stance?.mentionOnly && !input.mentioned) return false;
+  if (input.scene.stance?.mentionOnly && !input.mentioned && !input.activeExchange) {
+    return false;
+  }
   if (input.mentioned) return true;
   if (input.scene.conversation.kind === 'PRIVATE') return input.read.attention >= 18;
   if (input.sleeping && input.affinity < 50) return false;

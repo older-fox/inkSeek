@@ -52,6 +52,8 @@ const DRY_RUN_BLOCKED_TOOLS = new Set([
   'sticker.describe',
   'sticker.collect',
   'todo.create',
+  'intention.update',
+  'intention.cancel',
   'self.attributes.update',
 ]);
 
@@ -93,6 +95,9 @@ const TOOL_SEARCH_KEYWORDS: Record<string, readonly string[]> = {
   'sticker.describe': ['表情', '表情包', '识别', '描述', '重新看'],
   'sticker.collect': ['表情', '收藏', '图片'],
   'todo.create': ['待办', '任务', '计划'],
+  'intention.list': ['意图', '待发', '未结', '想说的', '主动'],
+  'intention.update': ['意图', '待发', '合并', '修改', '想说的'],
+  'intention.cancel': ['意图', '待发', '取消', '放弃', '过时'],
   'self.state': ['状态', '心情', '精力', '社交电量'],
   'self.attributes.list': ['自身属性', '人设', '设定', '背景', '性格', '属性列表'],
   'self.attributes.get': ['自身属性', '人设', '设定', '背景', '性格', '属性值'],
@@ -121,6 +126,12 @@ export const MIND_TOOL_MENU: readonly { name: string; hint: string }[] = [
   { name: 'sticker.describe', hint: '重新识别一张表情（stickerId/focus）' },
   { name: 'sticker.collect', hint: '把对话里的图片收进表情库（image/tags）' },
   { name: 'todo.create', hint: '明确邀请+答应后建待办（title/inviteMessageId/acceptMessageId）' },
+  { name: 'intention.list', hint: '查未结/已结的待发意图（status/limit）' },
+  {
+    name: 'intention.update',
+    hint: '改一条未结意图，用来合并重复（id/seed/need/urgency/confidence/risk/earliestAt）',
+  },
+  { name: 'intention.cancel', hint: '取消一条过时或不想说的意图（id/reason）' },
   { name: 'self.state', hint: '读心情/精力/压力等当前状态（无参数）' },
   { name: 'self.attributes.list', hint: '列出自身属性键（无参数）' },
   { name: 'self.attributes.get', hint: '读自身属性的值（keys）' },
@@ -177,7 +188,7 @@ export const MIND_TOOL_CATALOG = [
   {
     name: 'relationship.update',
     description:
-      '按需调整某个联系人的关系属性。attributes 可传 relationship.get 返回的任意属性键（37 项全覆盖），也可用同名顶层参数；数值为绝对值，服务端仍按单轮跨度/每日上限/冷却限幅；标签、称呼、边界、承诺、公开范围、对象档案等非数值字段直接写入。调整前可先用 relationship.get 查看现状与可用键。',
+      '按需调整某个联系人的关系属性。attributes 可传 relationship.get 返回的任意属性键（37 项全覆盖），也可用同名顶层参数；数值为绝对值，写入即生效，仅夹在 -100..100；标签、称呼、边界、承诺、公开范围、对象档案等非数值字段直接写入。调整前可先用 relationship.get 查看现状与可用键。',
     input: {
       contactId: 'string? 联系人 ID/QQ/昵称，默认当前对话对象',
       attributes:
@@ -258,6 +269,42 @@ export const MIND_TOOL_CATALOG = [
       inviteMessageId: 'string（邀请消息 ID）',
       acceptMessageId: 'string（答应消息 ID）',
       withContactId: 'string?',
+    },
+  },
+  {
+    name: 'intention.list',
+    description:
+      '查看自己记下的待发意图（想以后再对谁说的事）。默认只看未结的 PENDING/DEFERRED，按紧迫度排序；用来在新增前查重、找出该合并或该放弃的旧念头。返回 id、对象、need、seed 和评分。',
+    input: {
+      status: 'PENDING|DEFERRED|SENT|CANCELLED|EXPIRED? 默认只看未结',
+      targetContactId: 'string? 只看对某个联系人的意图',
+      limit: 'number? 1-50，默认 20',
+    },
+  },
+  {
+    name: 'intention.update',
+    description:
+      '修改一条还未发出的意图。合并重复时，把新想法并进保留的那条，再取消多余的。只能改 PENDING/DEFERRED 状态的意图。',
+    input: {
+      id: 'string（意图 ID，来自【未结意图】或 intention.list）',
+      seed: 'string? 到时候想说的核心意思',
+      reason: 'string? 为什么想留到以后说',
+      need: 'string? care|connect|share|followup|play|learn',
+      urgency: 'number? 0-100',
+      confidence: 'number? 0-100',
+      risk: 'number? 0-100',
+      earliestAt: 'ISO datetime? 最早适合提的时间',
+      expiresAt: 'ISO datetime | null? 过期时间',
+      targetContactId: 'string? 改成对某个联系人；传空字符串表示改成只和自己有关',
+    },
+  },
+  {
+    name: 'intention.cancel',
+    description:
+      '取消一条过时、重复或已经不想说的待发意图；会记下取消原因，不再排期叫醒。',
+    input: {
+      id: 'string（意图 ID）',
+      reason: 'string? 为什么取消',
     },
   },
   {
@@ -366,6 +413,12 @@ export class MindToolsService {
         return this.stickerCollect(args, context);
       case 'todo.create':
         return this.todoCreate(args, context);
+      case 'intention.list':
+        return this.intentionList(args, context);
+      case 'intention.update':
+        return this.intentionUpdate(args, context);
+      case 'intention.cancel':
+        return this.intentionCancel(args, context);
       case 'self.state':
         return stateSummary(context.state);
       case 'self.attributes.list':
@@ -845,7 +898,6 @@ export class MindToolsService {
     return {
       contactId: result.contactId,
       applied: result.applied,
-      blocked: result.blocked,
       updated: result.attributesUpdated,
       rejected: result.attributesRejected,
     };
@@ -1018,6 +1070,214 @@ export class MindToolsService {
     });
     return { id: row.id, title: row.title, dueAt: row.dueAt?.toISOString() ?? null };
   }
+
+  private async intentionList(args: Record<string, unknown>, context: MindToolContext) {
+    const statusArg = readString(args['status']).trim().toUpperCase();
+    const statuses = ['PENDING', 'DEFERRED', 'SENT', 'CANCELLED', 'EXPIRED'] as const;
+    const status = statuses.find((value) => value === statusArg) ?? null;
+    const limit = Math.round(clamp(readNumber(args['limit'], 20), 1, 50));
+    const personaId = context.scene.persona.id;
+    const targetRef = readString(args['targetContactId']).trim();
+    const targetId = targetRef ? this.resolveContactId(context, targetRef) : '';
+    const [rows, activeCount] = await Promise.all([
+      this.prisma.agentIntention.findMany({
+        where: {
+          personaId,
+          ...(status ? { status } : { status: { in: ['PENDING', 'DEFERRED'] } }),
+          ...(targetId ? { targetType: 'PERSON', targetId } : {}),
+        },
+        orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }],
+        take: limit,
+      }),
+      this.prisma.agentIntention.count({
+        where: { personaId, status: { in: ['PENDING', 'DEFERRED'] } },
+      }),
+    ]);
+    const nameById = await this.intentionTargetNames(rows);
+    return {
+      activeCount,
+      returned: rows.length,
+      intentions: rows.map((row) => ({
+        ...compactIntention(row),
+        targetName:
+          row.targetType === 'SELF'
+            ? '自己'
+            : (nameById.get(row.targetId) ??
+              (row.targetType === 'GROUP' ? `群 ${row.targetId}` : `联系人 ${row.targetId}`)),
+      })),
+    };
+  }
+
+  private async intentionUpdate(args: Record<string, unknown>, context: MindToolContext) {
+    const id = readString(args['id']).trim();
+    if (!id) {
+      throw new Error('id 不能为空；先用 intention.list 查看意图 ID');
+    }
+    const row = await this.prisma.agentIntention.findFirst({
+      where: { id, personaId: context.scene.persona.id },
+    });
+    if (!row) {
+      throw new Error('找不到这条意图');
+    }
+    if (row.status !== 'PENDING' && row.status !== 'DEFERRED') {
+      throw new Error('只能修改还没发出的意图（PENDING/DEFERRED）');
+    }
+    const data: Prisma.AgentIntentionUpdateInput = {};
+    if ('seed' in args) {
+      const seed = readString(args['seed']).trim();
+      if (!seed) {
+        throw new Error('seed 不能为空');
+      }
+      data.seed = seed.slice(0, 4000);
+    }
+    if ('reason' in args) {
+      data.reason = readString(args['reason']).trim().slice(0, 2000);
+    }
+    if ('need' in args) {
+      data.need = readString(args['need']).trim().slice(0, 40);
+    }
+    for (const field of ['urgency', 'confidence', 'risk'] as const) {
+      if (field in args) {
+        const value = readNumericInput(args[field]);
+        if (value === null) {
+          throw new Error(`${field} 需要是 0-100 的数字`);
+        }
+        data[field] = Math.round(clamp(value, 0, 100));
+      }
+    }
+    if ('earliestAt' in args) {
+      const date = parseDate(args['earliestAt']);
+      if (!date) {
+        throw new Error('earliestAt 不是有效时间');
+      }
+      data.earliestAt = date;
+    }
+    if ('expiresAt' in args) {
+      if (args['expiresAt'] === null || String(args['expiresAt']).trim() === '') {
+        data.expiresAt = null;
+      } else {
+        const date = parseDate(args['expiresAt']);
+        if (!date) {
+          throw new Error('expiresAt 不是有效时间');
+        }
+        data.expiresAt = date;
+      }
+    }
+    if ('targetContactId' in args) {
+      const ref = readString(args['targetContactId']).trim();
+      if (ref) {
+        data.targetType = 'PERSON';
+        data.targetId = this.resolveContactId(context, ref);
+      } else {
+        data.targetType = 'SELF';
+        data.targetId = '';
+      }
+    }
+    if (Object.keys(data).length === 0) {
+      throw new Error('没有要修改的字段');
+    }
+    const updated = await this.prisma.agentIntention.update({ where: { id: row.id }, data });
+    return compactIntention(updated);
+  }
+
+  private async intentionCancel(args: Record<string, unknown>, context: MindToolContext) {
+    const id = readString(args['id']).trim();
+    if (!id) {
+      throw new Error('id 不能为空；先用 intention.list 查看意图 ID');
+    }
+    const row = await this.prisma.agentIntention.findFirst({
+      where: { id, personaId: context.scene.persona.id },
+    });
+    if (!row) {
+      throw new Error('找不到这条意图');
+    }
+    if (row.status !== 'PENDING' && row.status !== 'DEFERRED') {
+      throw new Error('只能取消还没发出的意图（PENDING/DEFERRED）');
+    }
+    const reason = readString(args['reason']).trim();
+    const updated = await this.prisma.agentIntention.update({
+      where: { id: row.id },
+      data: {
+        status: 'CANCELLED',
+        feedback: reason ? `已放弃：${reason}`.slice(0, 500) : '已放弃',
+        feedbackAt: new Date(),
+      },
+    });
+    return { id: updated.id, status: updated.status, feedback: updated.feedback };
+  }
+
+  private async intentionTargetNames(
+    rows: readonly { targetType: string; targetId: string }[],
+  ): Promise<Map<string, string>> {
+    const personIds = [
+      ...new Set(
+        rows
+          .filter((row) => row.targetType === 'PERSON' && row.targetId)
+          .map((row) => row.targetId),
+      ),
+    ];
+    const groupIds = [
+      ...new Set(
+        rows
+          .filter((row) => row.targetType === 'GROUP' && row.targetId)
+          .map((row) => row.targetId),
+      ),
+    ];
+    const [contacts, groups] = await Promise.all([
+      personIds.length > 0
+        ? this.prisma.chatContact.findMany({
+            where: { id: { in: personIds } },
+            select: { id: true, nickname: true },
+          })
+        : Promise.resolve([]),
+      groupIds.length > 0
+        ? this.prisma.chatConversation.findMany({
+            where: { id: { in: groupIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    return new Map<string, string>([
+      ...contacts.map((contact) => [contact.id, contact.nickname] as const),
+      ...groups.map((group) => [group.id, group.name] as const),
+    ]);
+  }
+}
+
+function compactIntention(row: {
+  id: string;
+  status: string;
+  targetType: string;
+  targetId: string;
+  need: string;
+  seed: string;
+  reason: string;
+  urgency: number;
+  confidence: number;
+  risk: number;
+  attempts: number;
+  earliestAt: Date;
+  expiresAt: Date | null;
+  createdAt: Date;
+  feedback: string;
+}) {
+  return {
+    id: row.id,
+    status: row.status,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    need: row.need,
+    seed: row.seed.slice(0, 200),
+    reason: row.reason.slice(0, 200),
+    urgency: row.urgency,
+    confidence: row.confidence,
+    risk: row.risk,
+    attempts: row.attempts,
+    earliestAt: row.earliestAt.toISOString(),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    feedback: row.feedback.slice(0, 300),
+  };
 }
 
 function compactMemory(memory: PersonaMemoryRecord) {

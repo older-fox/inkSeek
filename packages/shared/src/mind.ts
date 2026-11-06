@@ -78,7 +78,6 @@ export interface MindSettingsRecord {
   wakeMaxMinutes: number;
   quietIntervalMinutes: number;
   dailyMessageBudget: number;
-  dailyProactiveBudget: number;
   /** Model turns spent on proactive/heartbeat wakes per day; 0 = unlimited. */
   proactiveWakeDailyLimit: number;
   /** Minimum seconds between proactive/heartbeat wakes; 0 = off. */
@@ -535,6 +534,8 @@ export interface SocialRead {
   suggestedStance: string;
   reasons: string[];
   hardConstraints: string[];
+  /** A follow-up from the sender the persona just replied to, within the window. */
+  activeExchange: boolean;
 }
 
 export type OutgoingBeat =
@@ -664,6 +665,8 @@ export interface ActionPlan {
   relationshipSignals: RelationshipSignal[];
   todos: TodoDraft[];
   intentions?: IntentionDraft[];
+  /** Due intentions this turn actually used; only these become SENT. */
+  handledIntentionIds?: string[];
   dialogue?: DialogueDecision;
   self?: SelfDriftSignal;
   groupStance?: GroupStanceSignal;
@@ -701,7 +704,6 @@ export const mindSettingsUpdateSchema = z.object({
   wakeMaxMinutes: z.number().int().min(1).max(10080).optional(),
   quietIntervalMinutes: z.number().int().min(1).max(1440).optional(),
   dailyMessageBudget: z.number().int().min(0).max(500).optional(),
-  dailyProactiveBudget: z.number().int().min(-9999).max(50).optional(),
   proactiveWakeDailyLimit: z.number().int().min(0).max(500).optional(),
   proactiveWakeMinGapSeconds: z.number().int().min(0).max(86400).optional(),
   maxBeats: z.number().int().min(1).max(8).optional(),

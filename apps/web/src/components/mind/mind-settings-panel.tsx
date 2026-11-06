@@ -28,7 +28,6 @@ export function MindSettingsPanel({
   const [proactive, setProactive] = useState(false);
   const [maxBeats, setMaxBeats] = useState(3);
   const [messageBudget, setMessageBudget] = useState(30);
-  const [proactiveBudget, setProactiveBudget] = useState(3);
   const [proactiveWakeLimit, setProactiveWakeLimit] = useState(0);
   const [proactiveWakeGap, setProactiveWakeGap] = useState(0);
   const [selfSchedule, setSelfSchedule] = useState(true);
@@ -55,7 +54,6 @@ export function MindSettingsPanel({
     setProactive(settings.proactiveEnabled);
     setMaxBeats(settings.maxBeats);
     setMessageBudget(settings.dailyMessageBudget);
-    setProactiveBudget(settings.dailyProactiveBudget);
     setProactiveWakeLimit(settings.proactiveWakeDailyLimit);
     setProactiveWakeGap(settings.proactiveWakeMinGapSeconds);
     setSelfSchedule(settings.selfScheduleEnabled);
@@ -100,7 +98,6 @@ export function MindSettingsPanel({
     settings.proactiveEnabled !== proactive ||
     settings.maxBeats !== maxBeats ||
     settings.dailyMessageBudget !== messageBudget ||
-    settings.dailyProactiveBudget !== proactiveBudget ||
     settings.proactiveWakeDailyLimit !== proactiveWakeLimit ||
     settings.proactiveWakeMinGapSeconds !== proactiveWakeGap ||
     settings.selfScheduleEnabled !== selfSchedule ||
@@ -172,20 +169,12 @@ export function MindSettingsPanel({
           onChange={setMaxBeats}
         />
         <NumberField
-          label="每日消息额度"
-          hint="跨私聊与群聊合计；0 表示不限制"
+          label="每日回复额度"
+          hint="只统计被动回复；主动消息不计入、不受此限制；0 表示不限制"
           value={messageBudget}
           min={0}
           max={500}
           onChange={setMessageBudget}
-        />
-        <NumberField
-          label="每日主动额度"
-          hint="心跳主动开启话题的次数上限；0 表示不主动，负数表示不限制"
-          value={proactiveBudget}
-          min={-1}
-          max={50}
-          onChange={setProactiveBudget}
         />
         <NumberField
           label="每日自发唤醒上限"
@@ -362,7 +351,6 @@ export function MindSettingsPanel({
             proactiveEnabled: proactive,
             maxBeats,
             dailyMessageBudget: messageBudget,
-            dailyProactiveBudget: proactiveBudget,
             proactiveWakeDailyLimit: proactiveWakeLimit,
             proactiveWakeMinGapSeconds: proactiveWakeGap,
             selfScheduleEnabled: selfSchedule,

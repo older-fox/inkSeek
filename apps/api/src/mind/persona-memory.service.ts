@@ -45,6 +45,13 @@ const CORE_KINDS: readonly PersonaMemoryKind[] = [
 ];
 const DEDUPE_THRESHOLD = 0.94;
 /**
+ * The same exchange is often written twice within minutes with slightly
+ * different wording ("碰到胸" vs "连续两次碰到胸"). For a short window, use a
+ * lower bar; outside it, keep the stricter long-term threshold.
+ */
+const DEDUPE_RECENT_THRESHOLD = 0.82;
+const DEDUPE_RECENT_MS = 24 * 60 * 60 * 1000;
+/**
  * The same event often gets written once as FACT and once as PROMISE.
  * Only merge across kinds for long-term relation facts, and only when the
  * text is nearly identical; episodes and procedures keep their own rows.
@@ -81,6 +88,7 @@ export class PersonaMemoryService {
     const embedding = embedText(
       [input.title, content, input.subjectName].filter(Boolean).join('\n'),
     );
+    const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
 
     const existing = await this.findDuplicate(
       persona.id,
@@ -91,16 +99,29 @@ export class PersonaMemoryService {
     );
     if (existing) {
       const sourceIds = Array.from(new Set([...existing.sourceIds, ...(input.sourceIds ?? [])]));
+      const incomingImportance = clamp(input.importance ?? 50, 0, 100);
+      const preferNew =
+        incomingImportance > existing.importance + 5 ||
+        (incomingImportance >= existing.importance &&
+          occurredAt.getTime() > existing.occurredAt.getTime());
+      const nextContent = preferNew ? content : existing.content;
+      const nextTitle = preferNew ? (input.title ?? existing.title) : existing.title;
+      const nextSubjectName = input.subjectName ?? existing.subjectName;
+      const nextEmbedding = embedText(
+        [nextTitle, nextContent, nextSubjectName].filter(Boolean).join('\n'),
+      );
       const updated = await this.prisma.personaMemory.update({
         where: { id: existing.id },
         data: {
-          content: content.length > existing.content.length ? content : existing.content,
-          title: input.title ?? existing.title,
-          subjectName: input.subjectName ?? existing.subjectName,
-          importance: Math.max(existing.importance, clamp(input.importance ?? 50, 0, 100)),
+          content: nextContent,
+          title: nextTitle,
+          subjectName: nextSubjectName,
+          conversationId: existing.conversationId ?? input.conversationId ?? null,
+          importance: Math.max(existing.importance, incomingImportance),
           confidence: Math.max(existing.confidence, clamp(input.confidence ?? 70, 0, 100)),
           sourceIds,
-          embedding,
+          embedding: nextEmbedding,
+          occurredAt: preferNew ? occurredAt : existing.occurredAt,
         },
       });
       return toRecord(updated);
@@ -124,7 +145,7 @@ export class PersonaMemoryService {
         emotionalValence: clamp(input.emotionalValence ?? 0, -100, 100),
         emotionalArousal: clamp(input.emotionalArousal ?? 0, 0, 100),
         visibility: input.visibility,
-        occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
+        occurredAt,
         sourceType: input.sourceType,
         sourceIds: input.sourceIds ?? [],
         embedding,
@@ -250,7 +271,7 @@ export class PersonaMemoryService {
       status: 'ACTIVE',
     };
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [coreRows, candidates, total, recent7d, latest] = await Promise.all([
+    const [coreCandidates, candidates, total, recent7d, latest] = await Promise.all([
       this.prisma.personaMemory.findMany({
         where: {
           ...where,
@@ -258,7 +279,7 @@ export class PersonaMemoryService {
           importance: { gte: CORE_IMPORTANCE_FLOOR },
         },
         orderBy: [{ importance: 'desc' }, { updatedAt: 'desc' }],
-        take: CORE_MEMORY_LIMIT,
+        take: CORE_MEMORY_LIMIT * 6,
       }),
       this.loadCandidates(where),
       this.prisma.personaMemory.count({ where: statsWhere }),
@@ -271,17 +292,21 @@ export class PersonaMemoryService {
         select: { occurredAt: true },
       }),
     ]);
+    const coreRows = pickDiverseCore(coreCandidates, CORE_MEMORY_LIMIT);
     const coreIds = new Set(coreRows.map((row) => row.id));
     const queryEmbedding = embedText(query);
     const relevant = candidates
       .filter((row) => !coreIds.has(row.id))
-      .map((row) => ({ row, score: scoreMemory(row, queryEmbedding, query) }))
+      .map((row) => ({
+        row,
+        score: scoreMemory(row, queryEmbedding, query) + contextBias(row, scene),
+      }))
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
     if (options.markRecalled !== false) {
-      await this.markRecalled(
-        [...coreRows, ...relevant.map((entry) => entry.row)].map((row) => row.id),
-      );
+      // Core memories are always shown, so counting them as "recalled" would
+      // inflate the same few rows hundreds of times. Only matching rows count.
+      await this.markRecalled(relevant.map((entry) => entry.row.id));
     }
     return {
       core: coreRows.map(toRecord),
@@ -680,15 +705,20 @@ export class PersonaMemoryService {
       orderBy: { updatedAt: 'desc' },
       take: 300,
     });
+    const now = Date.now();
     let best: PersonaMemory | null = null;
     let bestScore = 0;
     for (const candidate of candidates) {
-      const threshold =
-        candidate.kind === kind
-          ? DEDUPE_THRESHOLD
-          : CROSS_KIND_DEDUPE_KINDS.has(kind) && CROSS_KIND_DEDUPE_KINDS.has(candidate.kind)
-            ? CROSS_KIND_DEDUPE_THRESHOLD
-            : Number.POSITIVE_INFINITY;
+      const sameKind = candidate.kind === kind;
+      const recent =
+        Math.abs(now - candidate.occurredAt.getTime()) <= DEDUPE_RECENT_MS;
+      const threshold = sameKind
+        ? recent
+          ? DEDUPE_RECENT_THRESHOLD
+          : DEDUPE_THRESHOLD
+        : CROSS_KIND_DEDUPE_KINDS.has(kind) && CROSS_KIND_DEDUPE_KINDS.has(candidate.kind)
+          ? CROSS_KIND_DEDUPE_THRESHOLD
+          : Number.POSITIVE_INFINITY;
       const score = cosineSimilarity(embedding, candidate.embedding);
       if (score >= threshold && score > bestScore) {
         best = candidate;
@@ -707,6 +737,52 @@ function scoreMemory(row: PersonaMemory, queryEmbedding: number[], query: string
   const importance = row.importance / 100;
   const recall = Math.min(1, row.recallCount / 10);
   return semantic * 0.45 + keyword * 0.2 + importance * 0.15 + recency * 0.12 + recall * 0.08;
+}
+
+/** Keeps the three long-term slots from becoming three versions of one confession. */
+function pickDiverseCore(rows: PersonaMemory[], limit: number): PersonaMemory[] {
+  const picked: PersonaMemory[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.subjectType}:${row.subjectId || row.subjectName}:${row.kind}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    picked.push(row);
+    if (picked.length >= limit) {
+      return picked;
+    }
+  }
+  for (const row of rows) {
+    if (picked.length >= limit) {
+      break;
+    }
+    if (!picked.includes(row)) {
+      picked.push(row);
+    }
+  }
+  return picked;
+}
+
+/** Same-conversation and same-person memories outrank old drama from another group. */
+function contextBias(row: PersonaMemory, scene: MindScene): number {
+  let bias = 0;
+  if (row.conversationId === scene.conversation.id) {
+    bias += 0.1;
+  } else if (row.conversationId) {
+    bias -= 0.05;
+  }
+  const partner =
+    scene.conversation.kind === 'PRIVATE'
+      ? scene.cast.find((member) => !member.isSelf)?.contactId
+      : scene.anchor.senderId;
+  if (row.subjectId && partner && row.subjectId === partner) {
+    bias += 0.08;
+  } else if (row.subjectId && scene.cast.some((member) => member.contactId === row.subjectId)) {
+    bias += 0.04;
+  }
+  return bias;
 }
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

@@ -14,7 +14,6 @@ const SETTINGS_DEFAULTS = {
   wakeMaxMinutes: 240,
   quietIntervalMinutes: 90,
   dailyMessageBudget: 30,
-  dailyProactiveBudget: 3,
   proactiveWakeDailyLimit: 0,
   proactiveWakeMinGapSeconds: 0,
   maxBeats: 3,
@@ -79,9 +78,6 @@ export class MindSettingsService {
       data.quietIntervalMinutes = input.quietIntervalMinutes;
     }
     if (input.dailyMessageBudget !== undefined) data.dailyMessageBudget = input.dailyMessageBudget;
-    if (input.dailyProactiveBudget !== undefined) {
-      data.dailyProactiveBudget = input.dailyProactiveBudget;
-    }
     if (input.proactiveWakeDailyLimit !== undefined) {
       data.proactiveWakeDailyLimit = input.proactiveWakeDailyLimit;
     }
@@ -135,7 +131,6 @@ export class MindSettingsService {
         wakeMaxMinutes: input.wakeMaxMinutes ?? 240,
         quietIntervalMinutes: input.quietIntervalMinutes ?? 90,
         dailyMessageBudget: input.dailyMessageBudget ?? 30,
-        dailyProactiveBudget: input.dailyProactiveBudget ?? 3,
         proactiveWakeDailyLimit: input.proactiveWakeDailyLimit ?? 0,
         proactiveWakeMinGapSeconds: input.proactiveWakeMinGapSeconds ?? 0,
         maxBeats: input.maxBeats ?? 3,
@@ -186,7 +181,6 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     wakeMaxMinutes: row.wakeMaxMinutes,
     quietIntervalMinutes: row.quietIntervalMinutes,
     dailyMessageBudget: row.dailyMessageBudget,
-    dailyProactiveBudget: row.dailyProactiveBudget,
     proactiveWakeDailyLimit: row.proactiveWakeDailyLimit,
     proactiveWakeMinGapSeconds: row.proactiveWakeMinGapSeconds,
     maxBeats: row.maxBeats,

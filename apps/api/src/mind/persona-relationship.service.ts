@@ -7,7 +7,7 @@ import type {
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatContact, PersonaRelationship, Prisma } from '../generated/prisma/client.js';
 import { jsonOrNull, jsonValue } from './mind-json.js';
-import { clamp, MIND_MAX_RELATIONSHIP_DELTA, type MindPersona } from './mind.types.js';
+import { clamp, type MindPersona } from './mind.types.js';
 
 const DIMENSIONS = [
   'affinity',
@@ -176,7 +176,7 @@ export class PersonaRelationshipService {
         if (raw === undefined) {
           continue;
         }
-        const delta = clamp(raw, -MIND_MAX_RELATIONSHIP_DELTA, MIND_MAX_RELATIONSHIP_DELTA);
+        const delta = Math.round(raw);
         if (delta === 0) {
           continue;
         }

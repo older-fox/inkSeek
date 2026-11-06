@@ -583,7 +583,6 @@ model ChatMindSettings {
   wakeMaxMinutes             Int             @default(240)
   quietIntervalMinutes       Int             @default(90)
   dailyMessageBudget         Int             @default(30)
-  dailyProactiveBudget       Int             @default(3)
   /// Model turns spent on proactive/heartbeat wakes per day. 0 means unlimited;
   /// message-triggered replies do not consume this budget.
   proactiveWakeDailyLimit    Int             @default(0)

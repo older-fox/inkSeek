@@ -331,18 +331,14 @@ export function relationshipLines(
   if (!relationship) {
     return ['关系未知：按陌生人对待'];
   }
-  const negativeDimensions = new Set<RelationDimension>([
-    'hostility',
-    'fear',
-    'friction',
-    'unresolvedConflict',
-  ]);
   return RELATION_DIMENSIONS.map((key) => {
     const value = relationship[key];
     if (!typeOfNumber(value)) {
       return null;
     }
-    const neutral = negativeDimensions.has(key) ? 0 : 35;
+    // Salience is distance from "no signal" (0), not from a mid-point: a low
+    // but real intimacy/trust value matters more than an untouched respect 0.
+    const neutral = 0;
     return { key, value, weight: Math.abs(value - neutral) };
   })
     .filter(
