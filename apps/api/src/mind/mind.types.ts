@@ -90,12 +90,21 @@ export interface SceneCastMember {
   } | null;
 }
 
+/** A group member the persona already knows from other conversations. */
+export interface SceneKnownCastMember {
+  contactId: string;
+  nickname: string;
+  memoryCount: number;
+}
+
 export interface MindScene {
   persona: MindPersona;
   conversation: MindConversation;
   anchor: ChatMessageSnapshot;
   messages: SceneMessage[];
   cast: SceneCastMember[];
+  /** Group turns only: present members with history elsewhere, without leaking it. */
+  knownCast: SceneKnownCastMember[];
   stance: MindGroupStance | null;
   startedAt: Date;
 }

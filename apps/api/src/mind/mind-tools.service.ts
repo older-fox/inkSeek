@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaState, Prisma } from '../generated/prisma/client.js';
 import { checkTodoConsent } from './mind-consent.js';
+import { jsonValue } from './mind-json.js';
 import { relationshipLines } from './mind-behavior.js';
 import { MindDriftService } from './mind-drift.service.js';
 import {
@@ -672,6 +673,7 @@ export class MindToolsService {
     const stateChanged: string[] = [];
     const rejected: { key: string; reason: string }[] = [];
     const historyEntries: PersonaHistoryEntry[] = [];
+    const logRows: Prisma.PersonaChangeLogCreateManyInput[] = [];
 
     for (const [rawKey, rawValue] of entries) {
       const key = rawKey.trim();
@@ -718,11 +720,23 @@ export class MindToolsService {
           rejected.push({ key, reason: '姓名不能为空' });
           continue;
         }
-        const previous = values[key];
+        const previous =
+          key === 'name' ? persona.name : key === 'identity' ? persona.identity : persona.quote;
         topLevel[key] = text;
         values[key] = text;
         cardChanged.push(key);
         historyEntries.push(historyEntry(key, previous, text, reason));
+        logRows.push({
+          personaId,
+          scope: 'SELF',
+          targetId: '',
+          field: key,
+          beforeValue: auditValue(previous),
+          afterValue: auditValue(text),
+          delta: null,
+          reason,
+          source: 'TOOL',
+        });
         continue;
       }
 
@@ -735,12 +749,27 @@ export class MindToolsService {
         rejected.push({ key, reason: normalized.reason });
         continue;
       }
-      if (JSON.stringify(values[key]) === JSON.stringify(normalized.value)) {
+      const previous = values[key];
+      if (JSON.stringify(previous) === JSON.stringify(normalized.value)) {
         continue;
       }
-      historyEntries.push(historyEntry(key, values[key], normalized.value, reason));
+      historyEntries.push(historyEntry(key, previous, normalized.value, reason));
       values[key] = normalized.value;
       cardChanged.push(key);
+      logRows.push({
+        personaId,
+        scope: 'SELF',
+        targetId: '',
+        field: key,
+        beforeValue: auditValue(previous),
+        afterValue: auditValue(normalized.value),
+        delta:
+          typeof previous === 'number' && typeof normalized.value === 'number'
+            ? normalized.value - previous
+            : null,
+        reason,
+        source: 'TOOL',
+      });
     }
 
     if (cardChanged.length === 0 && stateChanged.length === 0) {
@@ -766,6 +795,9 @@ export class MindToolsService {
       if (topLevel.identity !== undefined) data.identity = topLevel.identity;
       if (topLevel.quote !== undefined) data.quote = topLevel.quote;
       await this.prisma.chatChannelPersona.update({ where: { id: personaId }, data });
+      if (logRows.length > 0) {
+        await this.prisma.personaChangeLog.createMany({ data: logRows });
+      }
       context.scene.persona.values = values as Prisma.JsonValue;
       if (topLevel.name !== undefined) context.scene.persona.name = topLevel.name;
       if (topLevel.identity !== undefined) context.scene.persona.identity = topLevel.identity;
@@ -1398,6 +1430,14 @@ function normalizeCardAttribute(key: string, raw: unknown): CardNormalizeResult 
     return { ok: true, value: raw.slice(0, 50).map((item) => item.slice(0, 400)) };
   }
   return { ok: false, reason: '需要字符串、数字、布尔值或字符串数组' };
+}
+
+/** Change-log rows are summaries; exact values stay in the card revision history. */
+function auditValue(value: unknown): ReturnType<typeof jsonValue> {
+  if (typeof value === 'string' && value.length > 200) {
+    return `${value.slice(0, 200)}…`;
+  }
+  return jsonValue(value);
 }
 
 function historyEntry(

@@ -256,6 +256,7 @@ export class MindActionExecutor {
       },
       messages: [],
       cast: [],
+      knownCast: [],
       stance: null,
       startedAt: new Date(),
     };

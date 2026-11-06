@@ -36,6 +36,8 @@ const VECTOR_IMPORTANT_LIMIT = 300;
 const VECTOR_IMPORTANCE_FLOOR = 60;
 const CORE_MEMORY_LIMIT = 3;
 const CORE_IMPORTANCE_FLOOR = 60;
+/** Channel-wide memories must share at least a little text with this turn. */
+const MIN_GLOBAL_RELEVANCE = 0.03;
 const CORE_KINDS: readonly PersonaMemoryKind[] = [
   'FACT',
   'PREFERENCE',
@@ -265,11 +267,6 @@ export class PersonaMemoryService {
     stats: MindMemoryStats;
   }> {
     const where = this.sceneWhere(scene);
-    const statsWhere: Prisma.PersonaMemoryWhereInput = {
-      personaId: scene.persona.id,
-      channelId: scene.persona.channelId,
-      status: 'ACTIVE',
-    };
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const [coreCandidates, candidates, total, recent7d, latest] = await Promise.all([
       this.prisma.personaMemory.findMany({
@@ -282,21 +279,27 @@ export class PersonaMemoryService {
         take: CORE_MEMORY_LIMIT * 6,
       }),
       this.loadCandidates(where),
-      this.prisma.personaMemory.count({ where: statsWhere }),
+      this.prisma.personaMemory.count({ where }),
       this.prisma.personaMemory.count({
-        where: { ...statsWhere, occurredAt: { gte: weekAgo } },
+        where: { ...where, occurredAt: { gte: weekAgo } },
       }),
       this.prisma.personaMemory.findFirst({
-        where: statsWhere,
+        where,
         orderBy: [{ occurredAt: 'desc' }],
         select: { occurredAt: true },
       }),
     ]);
-    const coreRows = pickDiverseCore(coreCandidates, CORE_MEMORY_LIMIT);
-    const coreIds = new Set(coreRows.map((row) => row.id));
     const queryEmbedding = embedText(query);
+    // Stable background still has to touch this turn; otherwise it is not
+    // "background", it is another conversation's memory.
+    const coreRows = pickDiverseCore(
+      coreCandidates.filter((row) => this.isSceneRelevant(row, scene, queryEmbedding, query)),
+      CORE_MEMORY_LIMIT,
+    );
+    const coreIds = new Set(coreRows.map((row) => row.id));
     const relevant = candidates
       .filter((row) => !coreIds.has(row.id))
+      .filter((row) => this.isSceneRelevant(row, scene, queryEmbedding, query))
       .map((row) => ({
         row,
         score: scoreMemory(row, queryEmbedding, query) + contextBias(row, scene),
@@ -304,8 +307,8 @@ export class PersonaMemoryService {
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
     if (options.markRecalled !== false) {
-      // Core memories are always shown, so counting them as "recalled" would
-      // inflate the same few rows hundreds of times. Only matching rows count.
+      // Core memories are always candidates, so counting them as "recalled"
+      // would inflate the same few rows hundreds of times.
       await this.markRecalled(relevant.map((entry) => entry.row.id));
     }
     return {
@@ -320,6 +323,28 @@ export class PersonaMemoryService {
         lastAt: latest?.occurredAt.toISOString() ?? null,
       },
     };
+  }
+
+  /**
+   * Conversation-local memories are context by definition. Channel-wide
+   * background (self-reflection, world/topic knowledge) must share some text
+   * with this turn; private-chat partner facts stay available in private chats.
+   */
+  private isSceneRelevant(
+    row: PersonaMemory,
+    scene: MindScene,
+    queryEmbedding: number[],
+    query: string,
+  ): boolean {
+    if (row.conversationId === scene.conversation.id) {
+      return true;
+    }
+    if (scene.conversation.kind === 'PRIVATE' && row.subjectType === 'PERSON') {
+      return true;
+    }
+    const semantic = cosineSimilarity(queryEmbedding, row.embedding);
+    const keyword = keywordOverlap(query, `${row.title}\n${row.content}\n${row.subjectName}`);
+    return semantic + keyword >= MIN_GLOBAL_RELEVANCE;
   }
 
   private async loadCandidates(where: Prisma.PersonaMemoryWhereInput): Promise<PersonaMemory[]> {
@@ -348,6 +373,22 @@ export class PersonaMemoryService {
    */
   private sceneWhere(scene: MindScene): Prisma.PersonaMemoryWhereInput {
     const now = new Date();
+    const conversationId = scene.conversation.id;
+    const partnerId =
+      scene.conversation.kind === 'PRIVATE'
+        ? (scene.cast.find((member) => !member.isSelf)?.contactId ?? null)
+        : null;
+    const scopes: Prisma.PersonaMemoryWhereInput[] = [
+      { conversationId },
+      // Self/world/topic knowledge is not tied to one chat.
+      { conversationId: null, subjectType: { in: ['SELF', 'WORLD', 'TOPIC'] } },
+    ];
+    if (scene.conversation.kind === 'GROUP') {
+      scopes.push({ conversationId: null, scope: 'GROUP', subjectId: conversationId });
+    } else if (partnerId) {
+      // Facts about this partner follow the private chat; other people's stay out.
+      scopes.push({ conversationId: null, scope: 'RELATION', subjectId: partnerId });
+    }
     return {
       personaId: scene.persona.id,
       channelId: scene.persona.channelId,
@@ -356,10 +397,11 @@ export class PersonaMemoryService {
         {
           OR: [
             { visibility: { not: 'SCENE' } },
-            { visibility: 'SCENE', conversationId: scene.conversation.id },
+            { visibility: 'SCENE', conversationId },
             { visibility: 'SCENE', conversationId: null },
           ],
         },
+        { OR: scopes },
         { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
         { OR: [{ validTo: null }, { validTo: { gt: now } }] },
       ],

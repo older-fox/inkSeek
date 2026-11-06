@@ -13,6 +13,7 @@ import {
   readStringArray,
   type MindScene,
   type SceneCastMember,
+  type SceneKnownCastMember,
   type SceneMessage,
 } from './mind.types.js';
 
@@ -104,6 +105,7 @@ export class MindSceneService {
       anchor: message,
       messages,
       cast,
+      knownCast: await this.loadKnownCast(conversation, persona, cast),
       stance,
       startedAt: new Date(),
     };
@@ -248,7 +250,16 @@ export class MindSceneService {
             include: { conversation: true },
           })
         : null;
-    return { persona, conversation, anchor, messages, cast, stance, startedAt: now };
+    return {
+      persona,
+      conversation,
+      anchor,
+      messages,
+      cast,
+      knownCast: await this.loadKnownCast(conversation, persona, cast),
+      stance,
+      startedAt: now,
+    };
   }
 
   async recentMessages(
@@ -558,6 +569,56 @@ export class MindSceneService {
           : null,
       };
     });
+  }
+
+  /**
+   * Group turns should not dump private history, but the persona should know
+   * when someone present is already an acquaintance. Count memories from other
+   * conversations only; the prompt gets a hint, not their content.
+   */
+  private async loadKnownCast(
+    conversation: ChatConversation,
+    persona: ChatChannelPersona,
+    cast: SceneCastMember[],
+  ): Promise<SceneKnownCastMember[]> {
+    if (conversation.kind !== 'GROUP') {
+      return [];
+    }
+    const members = cast.filter((member) => !member.isSelf && member.contactId);
+    if (members.length === 0) {
+      return [];
+    }
+    const rows = await this.prisma.personaMemory.groupBy({
+      by: ['subjectId'],
+      where: {
+        personaId: persona.id,
+        channelId: persona.channelId,
+        status: 'ACTIVE',
+        subjectType: 'PERSON',
+        subjectId: { in: members.map((member) => member.contactId) },
+        // Channel-wide relation memories have conversationId = null, so a plain
+        // NOT would silently exclude exactly the history we want to hint at.
+        OR: [
+          { conversationId: null },
+          { conversationId: { not: conversation.id } },
+        ],
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map(
+      rows
+        .filter((row) => row.subjectId)
+        .map((row) => [row.subjectId as string, row._count._all]),
+    );
+    return members
+      .map((member) => ({
+        contactId: member.contactId,
+        nickname: member.nickname,
+        memoryCount: counts.get(member.contactId) ?? 0,
+      }))
+      .filter((member) => member.memoryCount > 0)
+      .sort((left, right) => right.memoryCount - left.memoryCount)
+      .slice(0, 5);
   }
 }
 
