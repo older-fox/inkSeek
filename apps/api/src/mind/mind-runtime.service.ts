@@ -78,6 +78,11 @@ export class MindRuntimeService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // The rehearsal script boots this service without an HTTP server; it must
+    // not reclaim live runs as if the process had restarted.
+    if (process.env.MIND_SCRIPT_CONTEXT === '1') {
+      return;
+    }
     const interrupted = await this.prisma.agentRun.updateMany({
       where: { status: 'RUNNING' },
       data: {
@@ -1015,6 +1020,8 @@ export class MindRuntimeService implements OnModuleInit {
     text: string;
     senderName?: string;
     senderExternalId?: string;
+    /** Earlier rehearsal turns; the persona's own simulated lines are isSelf. */
+    history?: { role: 'user' | 'persona'; text: string }[];
   }): Promise<MindSimulationResult> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: input.personaId },
@@ -1041,6 +1048,7 @@ export class MindRuntimeService implements OnModuleInit {
       text: input.text,
       senderName: input.senderName,
       senderExternalId: input.senderExternalId,
+      history: input.history,
     });
     if (!scene) {
       throw new NotFoundException({

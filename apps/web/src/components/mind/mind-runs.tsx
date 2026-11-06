@@ -15,7 +15,6 @@ import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatTime } from './mind-format';
 import { HeartbeatLogView } from './mind-heartbeats';
-import { MindSimulateTab } from './mind-simulate';
 import {
   EmptyState,
   LazyList,
@@ -36,7 +35,7 @@ export function MindRunsTab({
   personaId: string;
   approvalMode: boolean;
 }) {
-  const [view, setView] = useState<'runs' | 'prompts' | 'heartbeats' | 'simulate'>('runs');
+  const [view, setView] = useState<'runs' | 'prompts' | 'heartbeats'>('runs');
   const [runFocus, setRunFocus] = useState<{ id: string } | null>(null);
   return (
     <div className="space-y-4">
@@ -46,7 +45,6 @@ export function MindRunsTab({
             ['runs', '运行轨迹'],
             ['prompts', '提示词日志'],
             ['heartbeats', '心跳日志'],
-            ['simulate', '对话试跑'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -76,7 +74,7 @@ export function MindRunsTab({
         />
       ) : view === 'prompts' ? (
         <PromptList />
-      ) : view === 'heartbeats' ? (
+      ) : (
         <HeartbeatLogView
           personaId={personaId}
           onOpenRun={(id) => {
@@ -84,8 +82,6 @@ export function MindRunsTab({
             setView('runs');
           }}
         />
-      ) : (
-        <MindSimulateTab personaId={personaId} />
       )}
     </div>
   );

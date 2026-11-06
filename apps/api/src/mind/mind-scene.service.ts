@@ -139,7 +139,13 @@ export class MindSceneService {
   async buildSimulationScene(
     personaId: string,
     conversationId: string,
-    input: { text: string; senderName?: string; senderExternalId?: string },
+    input: {
+      text: string;
+      senderName?: string;
+      senderExternalId?: string;
+      /** Earlier rehearsal turns, projected as ephemeral messages. */
+      history?: { role: 'user' | 'persona'; text: string }[];
+    },
   ): Promise<MindScene | null> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -187,6 +193,22 @@ export class MindSceneService {
     const senderName =
       input.senderName?.trim() || contact?.nickname || lastInbound?.senderName || '对方';
     const now = new Date();
+    const history = input.history ?? [];
+    for (const [index, turn] of history.entries()) {
+      const at = new Date(now.getTime() - (history.length - index + 1) * 60_000);
+      messages.push({
+        id: `simulation-history-${index}`,
+        senderId: turn.role === 'persona' ? persona.id : senderId,
+        senderName: turn.role === 'persona' ? persona.name : senderName,
+        isSelf: turn.role === 'persona',
+        kind: 'TEXT',
+        text: turn.text,
+        sentAt: at.toISOString(),
+        images: [],
+        imageCount: 0,
+        mentionedSelf: false,
+      });
+    }
     const anchor: ChatMessageSnapshot = {
       messageId: '',
       channelId: persona.channelId,

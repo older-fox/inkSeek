@@ -377,14 +377,6 @@ export interface MindHeartbeatLogRecord {
   createdAt: string;
 }
 
-/** Conversation choices for the simulator, scoped to the persona's channel. */
-export interface MindConversationOption {
-  id: string;
-  name: string;
-  kind: string;
-  lastMessageAt: string | null;
-}
-
 /** One real model call made by a read-only conversation simulation. */
 export interface MindSimulationPrompt {
   system: string;
@@ -940,16 +932,6 @@ export const mindHeartbeatQuerySchema = z.object({
 });
 
 export type MindHeartbeatQueryInput = z.infer<typeof mindHeartbeatQuerySchema>;
-
-export const mindSimulationSchema = z.object({
-  personaId: z.string().min(1).max(64),
-  conversationId: z.string().max(64).optional(),
-  text: z.string().trim().min(1).max(2000),
-  senderName: z.string().max(80).optional(),
-  senderExternalId: z.string().max(120).optional(),
-});
-
-export type MindSimulationInput = z.infer<typeof mindSimulationSchema>;
 
 export const mindPromptLogQuerySchema = z.object({
   source: z.string().max(80).optional(),

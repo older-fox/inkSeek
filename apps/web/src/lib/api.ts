@@ -19,11 +19,9 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   LoginInput,
-  MindConversationOption,
   MindHeartbeatLogRecord,
   MindSettingsRecord,
   MindSettingsUpdateInput,
-  MindSimulationResult,
   ModelProviderInput,
   PersonaChangeRecord,
   PersonaGroupStanceRecord,
@@ -285,20 +283,6 @@ export const api = {
       `/mind/heartbeats/${encodeURIComponent(personaId)}?${params.toString()}`,
     );
   },
-  mindSimulationConversations: (personaId: string) =>
-    request<MindConversationOption[]>(
-      `/mind/simulate/conversations/${encodeURIComponent(personaId)}`,
-    ),
-  simulateMind: (input: {
-    personaId: string;
-    conversationId?: string;
-    text: string;
-    senderName?: string;
-  }) =>
-    request<MindSimulationResult>('/mind/simulate', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
   endMindLongEvent: (personaId: string) =>
     request<unknown>(`/mind/long-events/${encodeURIComponent(personaId)}/end`, {
       method: 'POST',

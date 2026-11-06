@@ -440,7 +440,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 
 - 顶部只保留渠道选择、渠道配置入口、立即唤醒与自动刷新（10 秒 / 30 秒 / 1 分钟 / 5 分钟，默认 30 秒，存 localStorage）。
 - 人格简报：实时状态 10 项、位置、下次唤醒、当前长时事件（叫醒难度、已收到点名、结束按钮与最近结算原因）。
-- 页签：`runs`（运行轨迹 + 提示词日志 + 心跳日志 + 对话试跑 + 待审动作）、`changes`（统一变动历史，按 scope 过滤）、`relations`、`groups`、`memories`、`plans`（待办 / 主动意图）、`journal`、`stickers`。
+- 页签：`runs`（运行轨迹 + 提示词日志 + 心跳日志 + 待审动作）、`changes`（统一变动历史，按 scope 过滤）、`relations`、`groups`、`memories`、`plans`（待办 / 主动意图）、`journal`、`stickers`。
 - 长列表按批懒渲染；页签内容在固定高度容器内滚动，后台刷新不清空页面。
 - 心智配置（模式、每日消息/主动额度、唤醒节奏、回复回避、连发合并、图片描述提示词等）并入互联中心的渠道人格面板「心智」页签，与变动历史放在一起。
 
@@ -507,7 +507,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 运行轨迹实时与详情（2026-11-06）：`AgentRunSummary` 增加触发消息预览（`messagePreview`/`messageSender`）；`LlmPromptLog` 增加 `runId`（迁移 `20261106080000_llm_prompt_run_id`），规划器调用把所属 run 写进提示词日志。运行列表首屏常驻 3 秒轮询（后台也拉取）并按 `startedAt` 合并排序，新运行自动出现在顶部；单条详情在 `RUNNING` 时每 2 秒刷新、结束后每 6 秒补拉迟到的写回步骤，提示词日志在运行中每 3 秒刷新。详情抽屉依次展示：触发消息、判断（社交读/对话节奏/底线）、生成的提示词（System/Prompt/Response）、工具调用（入参/结果/错误）、Agent 回应（气泡与情绪/姿态）、动作执行（状态/消息 ID/错误）、进入心智的完整对话、其余执行步骤与入参/产出。
 - 表情包描述式发言（2026-11-06）：提示词新增「只写说出口的话，不写动作/舞台旁白」，表情规则明确「表情是语气不是话题」，禁止在文字里点破或解说「这张图/这个表情/图里」、禁止「这图就是你/像你」，没有别的正文就只发表情；找不到合适表情不发、不用文字模拟。`sticker.search` / `sticker.describe` 的工具说明标注描述仅供挑选和确认，不得复述给用户。
 - 图片消息进入提示词与轨迹（2026-11-06）：图片消息不再渲染成 `[空消息] [图片：…]`，有描述时直接 `[图片：描述]`，没描述但有图时 `[图片]`，避免模型把表情当成空消息。`AgentRun.scene` 快照开始保存每条消息的图片描述与图片数量，运行轨迹的「收到的消息 / 进入心智的对话」会显示模型实际看到的内容；运行列表预览也会用图片描述兜底。人格发表情时把表情库描述一并写入聊天媒体对象（不覆盖已有视觉描述），因此自己发出的表情在后续上下文里同样可读。
-- 心跳日志与只读试跑（2026-11-06）：新增 `MindHeartbeatLog`（迁移 `20261106090000_mind_heartbeat_log`），每次心跳都留一条记录，包括没有进入模型的 `IDLE` / `GATED` / `LONG_EVENT` / `NO_CONVERSATION` / `REPLY_LOCK` / `DISABLED` / `FAILED`，最近 500 条/人格自动裁剪。`RUN` 记录 `outcome`、唤醒简报、计划摘要（姿态/情绪/气泡/记忆写入数/关系信号/待办/意图/长时事件/下次唤醒）、工具调用与动作执行；`GET /mind/heartbeats/:personaId` 支持 `limit`/`offset`。界面在「提示词日志」旁新增「心跳日志」，抽屉里可一键跳到对应运行轨迹。新增 `POST /mind/simulate` 只读试跑：读取真实人格、设置、状态、关系、记忆和最近 30 条聊天，临时追加一条测试消息后真实调用规划模型；跳过 `AgentRun`/记忆/关系/待办/状态/消息/提示词日志写入，写入类工具（`memory.create`、`relationship.update`、`sticker.describe`、`sticker.collect`、`todo.create`、`self.attributes.update`）在试跑中返回「已拦截」，`relationship.get`/`memory.search` 改走只读查询，召回不更新 `lastRecalledAt`。界面「对话试跑」页签选择会话、输入测试消息即可查看判断、回应、工具调用、提示词、召回记忆与进入模型的对话。
+- 心跳日志与只读试跑（2026-11-06）：新增 `MindHeartbeatLog`（迁移 `20261106090000_mind_heartbeat_log`），每次心跳都留一条记录，包括没有进入模型的 `IDLE` / `GATED` / `LONG_EVENT` / `NO_CONVERSATION` / `REPLY_LOCK` / `DISABLED` / `FAILED`，最近 500 条/人格自动裁剪。`RUN` 记录 `outcome`、唤醒简报、计划摘要（姿态/情绪/气泡/记忆写入数/关系信号/待办/意图/长时事件/下次唤醒）、工具调用与动作执行；`GET /mind/heartbeats/:personaId` 支持 `limit`/`offset`。界面在「提示词日志」旁新增「心跳日志」，抽屉里可一键跳到对应运行轨迹。对话试跑是开发期脚本，不放进产品界面：`pnpm --filter @inkseek/api test:mind` 运行 `scripts/simulate-mind-dialogue.mjs`，读取真实人格、设置、状态、关系、记忆和最近 30 条聊天，按 `scripts/fixtures/mind-dialogue.txt`（每行一条用户消息）或 `--text` 依次调用规划模型，上一轮人格回复作为临时上下文带回下一轮；`--persona`/`--conversation` 可指定对象。试跑跳过 `AgentRun`/记忆/关系/待办/状态/消息/提示词日志写入，写入类工具（`memory.create`、`relationship.update`、`sticker.describe`、`sticker.collect`、`todo.create`、`self.attributes.update`）返回「已拦截」，`relationship.get`/`memory.search` 改走只读查询，召回不更新 `lastRecalledAt`；脚本结束前对比运行/提示词/记忆/消息/心跳/待办/意图计数，发现残留会以非零退出码报警。
 
 - 属性单一真源（2026-11-04）：删除 `PersonaRelationship.baseValues`；把 `ChatPrivatePersona`/`ChatGroupPersona` 迁移进 `PersonaRelationship`/`PersonaGroupStance` 后删表；对话页人格面板改读这两张表；渠道人格面板改为服务端保存并写入 `ChatChannelPersona.history`；`PersonaState` 仍是唯一动态状态，渠道快照只做读时投影。
 - 计划同意与记忆节流（2026-11-04）：`todos` 需邀请/答应两条消息并通过时序、间隔、否定词、点名校验；普通情景记忆不再每轮写入，阈值与冷却时间见第 5 节。

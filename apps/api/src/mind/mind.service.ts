@@ -11,12 +11,9 @@ import type {
   LlmPromptLogRecord,
   MindHeartbeatLogRecord,
   MindHeartbeatQueryInput,
-  MindConversationOption,
   MindPromptLogQueryInput,
   MindSettingsRecord,
   MindSettingsUpdateInput,
-  MindSimulationInput,
-  MindSimulationResult,
   PersonaChangeRecord,
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
@@ -322,32 +319,6 @@ export class MindService {
     input: MindHeartbeatQueryInput,
   ): Promise<MindHeartbeatLogRecord[]> {
     return this.heartbeatLogs.list(personaId, input.limit, input.offset);
-  }
-
-  simulate(input: MindSimulationInput): Promise<MindSimulationResult> {
-    return this.runtime.simulate(input);
-  }
-
-  async listSimulationConversations(personaId: string): Promise<MindConversationOption[]> {
-    const persona = await this.prisma.chatChannelPersona.findUnique({
-      where: { id: personaId },
-      select: { channelId: true },
-    });
-    if (!persona) {
-      throw new NotFoundException({ code: 'PERSONA_NOT_FOUND', message: '人格不存在' });
-    }
-    const rows = await this.prisma.chatConversation.findMany({
-      where: { channelId: persona.channelId },
-      orderBy: { lastMessageAt: 'desc' },
-      take: 30,
-      select: { id: true, name: true, kind: true, lastMessageAt: true },
-    });
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      kind: row.kind,
-      lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
-    }));
   }
 
   listJournal(personaId: string, limit = 30): Promise<PersonaJournalRecord[]> {

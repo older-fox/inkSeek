@@ -22,7 +22,6 @@ import {
   mindPromptLogQuerySchema,
   mindRunQuerySchema,
   mindSettingsUpdateSchema,
-  mindSimulationSchema,
   personaGroupStanceUpdateSchema,
   personaMemoryCreateSchema,
   personaMemoryQuerySchema,
@@ -39,7 +38,6 @@ import {
   type MindPromptLogQueryInput,
   type MindRunQueryInput,
   type MindSettingsUpdateInput,
-  type MindSimulationInput,
   type PersonaGroupStanceUpdateInput,
   type PersonaMemoryCreateInput,
   type PersonaMemoryQueryInput,
@@ -279,18 +277,6 @@ export class MindController {
     @Query(new ZodValidationPipe(mindHeartbeatQuerySchema)) query: MindHeartbeatQueryInput,
   ) {
     return this.mind.listHeartbeats(personaId, query);
-  }
-
-  @Get('simulate/conversations/:personaId')
-  @ApiOperation({ summary: '读取试跑可选的会话' })
-  simulationConversations(@Param('personaId') personaId: string) {
-    return this.mind.listSimulationConversations(personaId);
-  }
-
-  @Post('simulate')
-  @ApiOperation({ summary: '用真实环境数据做一次只读对话试跑' })
-  simulate(@Body(new ZodValidationPipe(mindSimulationSchema)) input: MindSimulationInput) {
-    return this.mind.simulate(input);
   }
 
   @Get('stickers')
