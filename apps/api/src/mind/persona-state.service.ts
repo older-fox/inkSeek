@@ -3,7 +3,7 @@ import type { MindEmotion, PersonaStateRecord, PersonaStateUpdateInput } from '@
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaState } from '../generated/prisma/client.js';
 import type { Prisma } from '../generated/prisma/client.js';
-import { clamp, localHour, readString, type MindPersona } from './mind.types.js';
+import { clamp, localHour, normalizeTimeZone, readString, type MindPersona } from './mind.types.js';
 
 const SCHEDULE_LEAD_MS = 15 * 60 * 1000;
 
@@ -164,6 +164,14 @@ export class PersonaStateService {
     });
   }
 
+  /** Records that a stale activity was reviewed, even if the model kept it. */
+  async markActivityChecked(personaId: string): Promise<void> {
+    await this.prisma.personaState.updateMany({
+      where: { personaId },
+      data: { activityCheckedAt: new Date() },
+    });
+  }
+
   /** Bounded body deltas, used by long-event start/end settlement. */
   async applyBodyDeltas(
     personaId: string,
@@ -270,7 +278,7 @@ export class PersonaStateService {
       return state;
     }
     const values = persona.values as Record<string, unknown> | null;
-    const timeZone = readString(values?.['time_zone']) || null;
+    const timeZone = normalizeTimeZone(readString(values?.['time_zone']));
     const hour = localHour(new Date(now), timeZone);
     const sleeping = hour >= 0 && hour < 7;
 
@@ -376,6 +384,7 @@ function toRecord(state: PersonaState): PersonaStateRecord {
     attention: state.attention,
     currentActivity: state.currentActivity,
     activitySince: state.activitySince?.toISOString() ?? null,
+    activityCheckedAt: state.activityCheckedAt?.toISOString() ?? null,
     location: state.location,
     sleepDebt: state.sleepDebt,
     health: state.health,

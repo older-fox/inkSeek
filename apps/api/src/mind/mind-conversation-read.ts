@@ -55,6 +55,130 @@ const ACK_RE =
 const SETTLED_RE =
   /(说好了|就这么定|扯平|一言为定|成交|定了|好啦|行啦|算啦|先这样|以后再说|下次再说|不说了|不提了|到此为止|翻篇)/u;
 
+/** Self-repetition read: which everyday topics the persona keeps bringing up. */
+export interface RepetitionRead {
+  topics: { text: string; count: number }[];
+}
+
+const REPETITION_STOP_CHARS = new Set([
+  ...'的了呢吗吧啊呀哦嗯我你他她它们这那什么怎样个一有是在不没和与或而且但因为所以如果时候现在已经还是就是不要会能要想说看给对很太又再才只来去上下里外到得地着过',
+]);
+const REPETITION_STOP_BIGRAMS = new Set([
+  '今天',
+  '明天',
+  '昨天',
+  '现在',
+  '刚刚',
+  '刚才',
+  '然后',
+  '就是',
+  '不是',
+  '这个',
+  '那个',
+  '什么',
+  '怎么',
+  '可以',
+  '觉得',
+  '知道',
+  '没有',
+  '我们',
+  '你们',
+  '他们',
+  '自己',
+  '时候',
+  '东西',
+  '地方',
+  '感觉',
+  '可能',
+  '应该',
+  '一下',
+  '一直',
+  '有点',
+  '很多',
+  '这些',
+  '那些',
+  '起来',
+  '出来',
+  '过去',
+  '回来',
+  '真的',
+  '其实',
+  '因为',
+  '所以',
+  '如果',
+  '还是',
+  '但是',
+  '已经',
+  '一个',
+  '不会',
+  '不要',
+  '没事',
+  '有些',
+  '这样',
+  '那样',
+  '哈哈',
+  '嘿嘿',
+  '好的',
+  '好吧',
+  '行了',
+  '算了',
+  '对了',
+  '还有',
+  '只是',
+  '这么',
+  '那么',
+  '我觉',
+  '你觉',
+]);
+
+export function readRepetition(scene: MindScene): RepetitionRead | null {
+  const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-12);
+  if (selfMessages.length < 3) {
+    return null;
+  }
+  const ignored = new Set<string>();
+  for (const name of [scene.persona.name, ...scene.cast.map((member) => member.nickname)]) {
+    for (const bigram of chineseBigrams(name)) {
+      ignored.add(bigram);
+    }
+  }
+  const counts = new Map<string, number>();
+  for (const message of selfMessages) {
+    const seen = new Set<string>();
+    // Split at punctuation so "刷锅，炒饭" does not produce the fake "锅炒".
+    for (const clause of normalizeText(message.text).split(/[^\u3400-\u9fff]+/u)) {
+      for (const bigram of chineseBigrams(clause)) {
+        if (seen.has(bigram)) {
+          continue;
+        }
+        if ([...bigram].some((char) => REPETITION_STOP_CHARS.has(char))) {
+          continue;
+        }
+        if (REPETITION_STOP_BIGRAMS.has(bigram) || ignored.has(bigram)) {
+          continue;
+        }
+        seen.add(bigram);
+        counts.set(bigram, (counts.get(bigram) ?? 0) + 1);
+      }
+    }
+  }
+  const topics = [...counts.entries()]
+    .filter(([, count]) => count >= 3)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([text, count]) => ({ text, count }));
+  return topics.length > 0 ? { topics } : null;
+}
+
+function chineseBigrams(text: string): string[] {
+  const chars = [...text.replace(/[^\u3400-\u9fff]/gu, '')];
+  const bigrams: string[] = [];
+  for (let index = 0; index < chars.length - 1; index += 1) {
+    bigrams.push(`${chars[index]}${chars[index + 1]}`);
+  }
+  return bigrams;
+}
+
 const KIND_LABEL: Record<MessageKind, string> = {
   ending: '道别/结束语',
   question: '在问你',
@@ -72,8 +196,11 @@ const SELF_SOURCE_KEYS = ['core_values', 'long_term_motivation', 'current_goal']
 const INTEREST_MEMORY_KINDS = new Set(['PREFERENCE', 'REFLECTION']);
 
 export function classifyMessage(message: SceneMessage): MessageKind {
-  const text = normalizeText(message.text);
-  const hasMedia = message.images.length > 0;
+  return classifyText(message.text, message.images.length > 0);
+}
+
+export function classifyText(raw: string, hasMedia = false): MessageKind {
+  const text = normalizeText(raw);
   if (!text) {
     return hasMedia ? 'substantive' : 'silence';
   }

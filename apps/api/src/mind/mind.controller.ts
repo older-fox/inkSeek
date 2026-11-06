@@ -16,11 +16,13 @@ import {
   agentTodoCreateSchema,
   agentTodoUpdateSchema,
   mindChangeQuerySchema,
+  mindHeartbeatQuerySchema,
   mindJournalQuerySchema,
   mindLongEventQuerySchema,
   mindPromptLogQuerySchema,
   mindRunQuerySchema,
   mindSettingsUpdateSchema,
+  mindSimulationSchema,
   personaGroupStanceUpdateSchema,
   personaMemoryCreateSchema,
   personaMemoryQuerySchema,
@@ -31,11 +33,13 @@ import {
   type AgentTodoCreateInput,
   type AgentTodoUpdateInput,
   type MindChangeQueryInput,
+  type MindHeartbeatQueryInput,
   type MindJournalQueryInput,
   type MindLongEventQueryInput,
   type MindPromptLogQueryInput,
   type MindRunQueryInput,
   type MindSettingsUpdateInput,
+  type MindSimulationInput,
   type PersonaGroupStanceUpdateInput,
   type PersonaMemoryCreateInput,
   type PersonaMemoryQueryInput,
@@ -266,6 +270,27 @@ export class MindController {
   @ApiOperation({ summary: '手动唤醒人格心跳' })
   heartbeat(@Param('personaId') personaId: string) {
     return this.mind.triggerHeartbeat(personaId);
+  }
+
+  @Get('heartbeats/:personaId')
+  @ApiOperation({ summary: '读取心跳日志' })
+  heartbeats(
+    @Param('personaId') personaId: string,
+    @Query(new ZodValidationPipe(mindHeartbeatQuerySchema)) query: MindHeartbeatQueryInput,
+  ) {
+    return this.mind.listHeartbeats(personaId, query);
+  }
+
+  @Get('simulate/conversations/:personaId')
+  @ApiOperation({ summary: '读取试跑可选的会话' })
+  simulationConversations(@Param('personaId') personaId: string) {
+    return this.mind.listSimulationConversations(personaId);
+  }
+
+  @Post('simulate')
+  @ApiOperation({ summary: '用真实环境数据做一次只读对话试跑' })
+  simulate(@Body(new ZodValidationPipe(mindSimulationSchema)) input: MindSimulationInput) {
+    return this.mind.simulate(input);
   }
 
   @Get('stickers')

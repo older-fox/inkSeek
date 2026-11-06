@@ -4,6 +4,35 @@ import { PrismaService } from '../database/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import type { ChatMindSettings } from '../generated/prisma/client.js';
 
+const SETTINGS_DEFAULTS = {
+  mode: 'OFF',
+  heartbeatEnabled: true,
+  proactiveEnabled: false,
+  selfScheduleEnabled: true,
+  wakeIntervalMinutes: 45,
+  wakeMinMinutes: 10,
+  wakeMaxMinutes: 240,
+  quietIntervalMinutes: 90,
+  dailyMessageBudget: 30,
+  dailyProactiveBudget: 3,
+  proactiveWakeDailyLimit: 0,
+  proactiveWakeMinGapSeconds: 0,
+  maxBeats: 3,
+  minBeatDelayMs: 800,
+  maxBeatDelayMs: 4000,
+  replyAvoidSeconds: 180,
+  privateBurstSeconds: 0,
+  lifeEventChancePercent: 1,
+  lifeEventDailyLimit: 1,
+  curiosityChancePercent: 15,
+  curiosityDailyLimit: 0,
+  reflectionIntervalHours: 6,
+  imageDescriptionPrompt: '',
+  providerId: null,
+  model: null,
+  quietHours: null,
+} as const;
+
 @Injectable()
 export class MindSettingsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -16,6 +45,19 @@ export class MindSettingsService {
       update: {},
     });
     return toRecord(row);
+  }
+
+  /** Read-only variant for simulation: never creates the settings row. */
+  async peek(channelId: string): Promise<MindSettingsRecord> {
+    const row = await this.prisma.chatMindSettings.findUnique({ where: { channelId } });
+    if (row) {
+      return toRecord(row);
+    }
+    return {
+      channelId,
+      ...SETTINGS_DEFAULTS,
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   async update(channelId: string, input: MindSettingsUpdateInput): Promise<MindSettingsRecord> {
@@ -39,6 +81,12 @@ export class MindSettingsService {
     if (input.dailyMessageBudget !== undefined) data.dailyMessageBudget = input.dailyMessageBudget;
     if (input.dailyProactiveBudget !== undefined) {
       data.dailyProactiveBudget = input.dailyProactiveBudget;
+    }
+    if (input.proactiveWakeDailyLimit !== undefined) {
+      data.proactiveWakeDailyLimit = input.proactiveWakeDailyLimit;
+    }
+    if (input.proactiveWakeMinGapSeconds !== undefined) {
+      data.proactiveWakeMinGapSeconds = input.proactiveWakeMinGapSeconds;
     }
     if (input.maxBeats !== undefined) data.maxBeats = input.maxBeats;
     if (input.minBeatDelayMs !== undefined) data.minBeatDelayMs = input.minBeatDelayMs;
@@ -88,6 +136,8 @@ export class MindSettingsService {
         quietIntervalMinutes: input.quietIntervalMinutes ?? 90,
         dailyMessageBudget: input.dailyMessageBudget ?? 30,
         dailyProactiveBudget: input.dailyProactiveBudget ?? 3,
+        proactiveWakeDailyLimit: input.proactiveWakeDailyLimit ?? 0,
+        proactiveWakeMinGapSeconds: input.proactiveWakeMinGapSeconds ?? 0,
         maxBeats: input.maxBeats ?? 3,
         minBeatDelayMs: input.minBeatDelayMs ?? 800,
         maxBeatDelayMs: input.maxBeatDelayMs ?? 4000,
@@ -137,6 +187,8 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     quietIntervalMinutes: row.quietIntervalMinutes,
     dailyMessageBudget: row.dailyMessageBudget,
     dailyProactiveBudget: row.dailyProactiveBudget,
+    proactiveWakeDailyLimit: row.proactiveWakeDailyLimit,
+    proactiveWakeMinGapSeconds: row.proactiveWakeMinGapSeconds,
     maxBeats: row.maxBeats,
     minBeatDelayMs: row.minBeatDelayMs,
     maxBeatDelayMs: row.maxBeatDelayMs,

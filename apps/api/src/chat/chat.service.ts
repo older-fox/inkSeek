@@ -422,7 +422,7 @@ export class ChatService {
 
   async sendMessage(
     conversationId: string,
-    input: ChatSendMessageInput,
+    input: ChatSendMessageInput & { imageDescriptions?: string[] },
   ): Promise<ChatMessageSummary> {
     const conversation = await this.prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -456,6 +456,7 @@ export class ChatService {
       return await this.messages.send(conversation.channel, conversation, client, {
         text: input.text,
         images: input.images,
+        imageDescriptions: input.imageDescriptions,
       });
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {

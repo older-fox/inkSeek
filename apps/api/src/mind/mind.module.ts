@@ -6,6 +6,7 @@ import { RedisModule } from '../redis/redis.module.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindController } from './mind.controller.js';
 import { MindDriftService } from './mind-drift.service.js';
+import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
@@ -39,6 +40,7 @@ import { WebSearchService } from './web-search.service.js';
     MindDriftService,
     MindPlannerService,
     MindReplyLockService,
+    MindHeartbeatLogService,
     StickerService,
     WebSearchService,
     MindActionExecutor,

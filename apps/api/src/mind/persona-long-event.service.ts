@@ -8,6 +8,7 @@ import { criticalAdvisory } from './mind-fatigue.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import {
   localHour,
+  normalizeTimeZone,
   parseJsonObject,
   readNumber,
   readString,
@@ -254,7 +255,7 @@ export class PersonaLongEventService {
     values: Record<string, unknown> | null,
   ): Promise<MindSleepBrief> {
     const now = new Date();
-    const zone = readString(values?.['time_zone']).trim() || null;
+    const zone = normalizeTimeZone(readString(values?.['time_zone']));
     const sleepDepth = clampInt(readNumber(values?.['sleep_depth'], 2), 2, 0, 4);
     const last = await this.prisma.personaLongEvent.findFirst({
       where: {

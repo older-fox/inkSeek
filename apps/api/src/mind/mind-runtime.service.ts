@@ -1,20 +1,27 @@
 import { Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import type {
   AgentRunDetail,
+  AgentRunScene,
   AgentRunSummary,
   AgentStepRecord,
   ActionPlan,
   MindSettingsRecord,
   MindTurnResult,
+  MindHeartbeatStatus,
+  MindSimulationResult,
   PersonaMindMode,
   PersonaMemoryRecord,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
-import type { AgentStep, PersonaState } from '../generated/prisma/client.js';
+import type { AgentIntention, AgentStep, PersonaState } from '../generated/prisma/client.js';
 import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
-import { readConversation } from './mind-conversation-read.js';
+import { classifyText, readConversation } from './mind-conversation-read.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
+import {
+  MindHeartbeatLogService,
+  type MindHeartbeatLogInput,
+} from './mind-heartbeat-log.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
 import { MindSceneService } from './mind-scene.service.js';
@@ -26,15 +33,27 @@ import { PersonaMemoryService } from './persona-memory.service.js';
 import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
 import {
+  clamp,
   localDateKey,
   localHour,
   isQuietHour,
+  normalizeTimeZone,
   readString,
+  relationScoreOf,
+  type MindIntentionFeedback,
+  type MindPersona,
   type MindScene,
+  type MindSleepBrief,
   type MindWakeBrief,
 } from './mind.types.js';
 
 type Trigger = 'MESSAGE' | 'HEARTBEAT' | 'PROACTIVE' | 'MANUAL';
+
+/** Idle heartbeats revisit an activity once it is this old. */
+const ACTIVITY_REVIEW_AFTER_MINUTES = 90;
+/** Do not ask again for the same activity sooner than this. */
+const ACTIVITY_REVIEW_COOLDOWN_MINUTES = 60;
+const SLEEP_ACTIVITY_RE = /睡|休息|打盹|午休|小憩/u;
 
 @Injectable()
 export class MindRuntimeService implements OnModuleInit {
@@ -55,6 +74,7 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly drift: MindDriftService,
     private readonly executor: MindActionExecutor,
     private readonly replyLock: MindReplyLockService,
+    private readonly heartbeatLogs: MindHeartbeatLogService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -227,6 +247,17 @@ export class MindRuntimeService implements OnModuleInit {
       return skipped('渠道尚未绑定人格');
     }
 
+    await this.applyInboundFeedback(
+      scene.persona.id,
+      input.message.senderId,
+      input.message.text,
+    ).catch((error: unknown) => {
+      this.logger.warn(
+        `主动反馈写入失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    const intentionFeedback = await this.recentIntentionFeedback(scene.persona.id);
+
     const startedAt = new Date();
     const state = await this.states.ensure(scene.persona.id);
     const sleepBrief = await this.longEvents.sleepBrief(
@@ -327,6 +358,7 @@ export class MindRuntimeService implements OnModuleInit {
     let plannerResult;
     try {
       plannerResult = await this.planner.plan({
+        runId: run.id,
         scene,
         state,
         social: decision.read,
@@ -334,6 +366,7 @@ export class MindRuntimeService implements OnModuleInit {
         coreMemories: recall.core,
         memoryStats: recall.stats,
         conversationRead,
+        intentionFeedback,
         settings,
         mode,
         trigger: input.trigger ?? 'MESSAGE',
@@ -483,7 +516,23 @@ export class MindRuntimeService implements OnModuleInit {
   async heartbeat(personaId: string): Promise<MindTurnResult | null> {
     const persona = await this.states.persona(personaId);
     const settings = await this.settings.get(persona.channelId);
+    const log = (
+      status: MindHeartbeatStatus,
+      reason: string,
+      extra: Partial<
+        Omit<MindHeartbeatLogInput, 'personaId' | 'channelId' | 'status' | 'reason' | 'mode'>
+      > = {},
+    ) =>
+      this.heartbeatLogs.record({
+        personaId,
+        channelId: persona.channelId,
+        status,
+        reason,
+        mode: settings.mode,
+        ...extra,
+      });
     if (!settings.heartbeatEnabled || settings.mode === 'OFF') {
+      await log('DISABLED', '心跳关闭或心智模式为关闭');
       return null;
     }
     const proactiveUsed = await this.proactiveSendsToday(personaId);
@@ -493,7 +542,7 @@ export class MindRuntimeService implements OnModuleInit {
     let state = await this.states.ensure(personaId);
     const now = new Date();
     const values = persona.values as Record<string, unknown> | null;
-    const timeZone = readString(values?.['time_zone']) || null;
+    const timeZone = normalizeTimeZone(readString(values?.['time_zone']));
     const hour = localHour(now, timeZone);
     const quiet = isQuietHour(hour, settings.quietHours);
 
@@ -507,11 +556,23 @@ export class MindRuntimeService implements OnModuleInit {
           ? Math.max(1, Math.ceil((activeEvent.plannedEndAt.getTime() - now.getTime()) / 60_000))
           : effectiveWakeMinutes(settings, quiet);
         await this.reschedule(personaId, minutes, '长时事件进行中', { heartbeat: false });
+        await log('LONG_EVENT', `长时事件「${activeEvent.title || activeEvent.kind}」进行中`, {
+          quiet,
+          detail: {
+            wakeReason: state.wakeReason,
+            eventId: activeEvent.id,
+            kind: activeEvent.kind,
+            title: activeEvent.title,
+            plannedEndAt: activeEvent.plannedEndAt?.toISOString() ?? null,
+            minutes,
+          },
+        });
         return null;
       }
     }
 
     const sleepBrief = await this.longEvents.sleepBrief(personaId, state, values);
+    await this.sweepUnansweredIntentions(personaId);
 
     const dueTodos = await this.prisma.agentTodo.findMany({
       where: {
@@ -527,11 +588,17 @@ export class MindRuntimeService implements OnModuleInit {
     });
     const dueIntentions = proactiveAllowed
       ? await this.prisma.agentIntention.findMany({
-          where: { personaId, status: 'PENDING', earliestAt: { lte: now } },
+          where: {
+            personaId,
+            status: 'PENDING',
+            earliestAt: { lte: now },
+            OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
+          },
           orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }],
           take: 5,
         })
       : [];
+    const dueIntentionBriefs = await this.dueIntentionBriefs(personaId, dueIntentions);
     const unconsolidated = await this.memories.countUnconsolidated(personaId);
 
     // Only idle beats roll for everyday events or curiosity, so busy days never
@@ -547,9 +614,44 @@ export class MindRuntimeService implements OnModuleInit {
       idle &&
       !quiet &&
       (await this.rollCuriosity(personaId, settings, timeZone));
+    const heartbeatBase = {
+      quiet,
+      dueTodos: dueTodos.length,
+      dueIntentions: dueIntentions.length,
+      unconsolidated,
+      lifeEvent,
+      curiosity,
+      reflection,
+    };
+
+    // A wake is an opportunity, not a duty. Layered budgets cap how many
+    // unsolicited model turns a day may spend, and how close together.
+    const proactiveWake = dueIntentions.length > 0 || lifeEvent || curiosity || Boolean(reflection);
+    if (proactiveWake && dueTodos.length === 0) {
+      const gate = await this.wakeGate(personaId, settings, timeZone);
+      if (!gate.allowed) {
+        await this.reviewStaleActivity(personaId, persona, state, sleepBrief, settings, timeZone);
+        await this.reschedule(personaId, gate.nextMinutes, gate.reason, { heartbeat: false });
+        await log('GATED', gate.reason, {
+          ...heartbeatBase,
+          detail: {
+            ...heartbeatBase,
+            wakeReason: state.wakeReason,
+            gate,
+            nextMinutes: gate.nextMinutes,
+          },
+        });
+        return null;
+      }
+    }
 
     if (!lifeEvent && !curiosity && !reflection && idle) {
+      await this.reviewStaleActivity(personaId, persona, state, sleepBrief, settings, timeZone);
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '无到期事项');
+      await log('IDLE', '空闲心跳：没有到期事项，也未触发生活小事、好奇或反思', {
+        ...heartbeatBase,
+        detail: { ...heartbeatBase, wakeReason: state.wakeReason },
+      });
       return null;
     }
 
@@ -558,6 +660,10 @@ export class MindRuntimeService implements OnModuleInit {
       (await this.mostRecentConversationId(personaId, persona.channelId));
     if (!conversationId) {
       await this.reschedule(personaId, settings.wakeIntervalMinutes, '没有可用的会话');
+      await log('NO_CONVERSATION', '没有可用的会话', {
+        ...heartbeatBase,
+        detail: { ...heartbeatBase, wakeReason: state.wakeReason },
+      });
       return null;
     }
     const conversationKind = await this.prisma.chatConversation.findUnique({
@@ -573,6 +679,10 @@ export class MindRuntimeService implements OnModuleInit {
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '回复回避窗口内', {
         heartbeat: false,
       });
+      await log('REPLY_LOCK', '回复回避窗口内，本轮不规划', {
+        ...heartbeatBase,
+        detail: { ...heartbeatBase, wakeReason: state.wakeReason, conversationId },
+      });
       return null;
     }
     const scene = await this.scenes.buildFromConversation(
@@ -583,6 +693,10 @@ export class MindRuntimeService implements OnModuleInit {
     );
     if (!scene) {
       await this.reschedule(personaId, settings.wakeIntervalMinutes, '会话没有消息');
+      await log('NO_CONVERSATION', '会话没有消息', {
+        ...heartbeatBase,
+        detail: { ...heartbeatBase, wakeReason: state.wakeReason, conversationId },
+      });
       return null;
     }
 
@@ -603,14 +717,7 @@ export class MindRuntimeService implements OnModuleInit {
         priority: todo.priority,
         dueAt: todo.dueAt?.toISOString() ?? null,
       })),
-      dueIntentions: dueIntentions.map((intent) => ({
-        id: intent.id,
-        targetType: intent.targetType,
-        targetId: intent.targetId,
-        reason: intent.reason,
-        seed: intent.seed,
-        urgency: intent.urgency,
-      })),
+      dueIntentions: dueIntentionBriefs,
       overnightMessages,
       unconsolidatedCount: unconsolidated,
     };
@@ -645,11 +752,12 @@ export class MindRuntimeService implements OnModuleInit {
     const query = [
       '我醒来后需要处理的待办、承诺和最近发生的事',
       ...dueTodos.map((todo) => todo.title),
-      ...dueIntentions.map((intent) => intent.reason || intent.seed),
+      ...dueIntentionBriefs.map((intent) => intent.reason || intent.seed),
     ].join('；');
     const recall = await this.memories.recallForScene(scene, query, 12);
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
+    const intentionFeedback = await this.recentIntentionFeedback(personaId);
     const startedAt = new Date();
     const run = await this.prisma.agentRun.create({
       data: {
@@ -702,12 +810,14 @@ export class MindRuntimeService implements OnModuleInit {
 
     try {
       const plannerResult = await this.planner.plan({
+        runId: run.id,
         scene,
         state,
         social: decision.read,
         memories: recall.relevant,
         coreMemories: recall.core,
         memoryStats: recall.stats,
+        intentionFeedback,
         settings,
         mode,
         trigger: 'HEARTBEAT',
@@ -770,6 +880,27 @@ export class MindRuntimeService implements OnModuleInit {
             plan,
           });
           await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '回复回避窗口内');
+          await log('RUN', '回复回避窗口内，取消本次回复', {
+            ...heartbeatBase,
+            runId: run.id,
+            detail: {
+              ...heartbeatBase,
+              wakeReason: state.wakeReason,
+              outcome: 'REPLY_LOCK',
+              conversationId,
+              plan: heartbeatPlanSummary(plan),
+              toolCalls: plannerResult.toolCalls.map((call) => ({
+                name: call.name,
+                error: call.error ?? null,
+                durationMs: call.durationMs,
+              })),
+              providerId: plannerResult.providerId,
+              model: plannerResult.model,
+              latencyMs: plannerResult.latencyMs,
+              promptTokens: plannerResult.promptTokens,
+              completionTokens: plannerResult.completionTokens,
+            },
+          });
           return skipped('回复回避窗口内，取消本次回复', {
             runId: run.id,
             socialRead: decision.read,
@@ -807,6 +938,37 @@ export class MindRuntimeService implements OnModuleInit {
         await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), plan.reason);
       }
       await this.consolidateIfNeeded(personaId, scene, state, run.id);
+      const outcome =
+        mode === 'SHADOW' ? 'SHADOW' : plan.engage && plan.beats.length > 0 ? 'SENT' : 'SILENT';
+      await log('RUN', plan.reason, {
+        ...heartbeatBase,
+        runId: run.id,
+        detail: {
+          ...heartbeatBase,
+          wakeReason: state.wakeReason,
+          outcome,
+          conversationId,
+          brief: {
+            dueTodos: dueTodos.map((todo) => ({
+              title: todo.title,
+              priority: todo.priority,
+              dueAt: todo.dueAt?.toISOString() ?? null,
+            })),
+            dueIntentions: dueIntentionBriefs,
+            unconsolidated,
+            overnightMessages: overnightMessages.length,
+            intentionFeedback,
+          },
+          plan: heartbeatPlanSummary(plan),
+          actions: heartbeatActionSummary(actions),
+          nextWakeAt: plan.nextWakeAt ?? null,
+          providerId: plannerResult.providerId,
+          model: plannerResult.model,
+          latencyMs: plannerResult.latencyMs,
+          promptTokens: plannerResult.promptTokens,
+          completionTokens: plannerResult.completionTokens,
+        },
+      });
       return {
         runId: run.id,
         engage: plan.engage,
@@ -827,8 +989,124 @@ export class MindRuntimeService implements OnModuleInit {
         error: message,
       });
       await this.reschedule(personaId, settings.wakeIntervalMinutes, `心跳失败：${message}`);
+      await log('FAILED', message, {
+        ...heartbeatBase,
+        runId: run.id,
+        detail: {
+          ...heartbeatBase,
+          wakeReason: state.wakeReason,
+          outcome: 'FAILED',
+          conversationId,
+          error: message,
+        },
+      });
       return null;
     }
+  }
+
+  /**
+   * Read-only conversation check: real persona, settings, state, memories and
+   * recent messages, plus one ephemeral test message. The model runs for real,
+   * but no run, memory, relationship, prompt log or message is persisted.
+   */
+  async simulate(input: {
+    personaId: string;
+    conversationId?: string;
+    text: string;
+    senderName?: string;
+    senderExternalId?: string;
+  }): Promise<MindSimulationResult> {
+    const persona = await this.prisma.chatChannelPersona.findUnique({
+      where: { id: input.personaId },
+    });
+    if (!persona) {
+      throw new NotFoundException({ code: 'PERSONA_NOT_FOUND', message: '人格不存在' });
+    }
+    const conversationId =
+      input.conversationId ?? (await this.mostRecentConversationId(persona.id, persona.channelId));
+    if (!conversationId) {
+      throw new NotFoundException({
+        code: 'MIND_SIMULATION_NO_CONVERSATION',
+        message: '这个渠道还没有会话，先收到一条消息再试跑',
+      });
+    }
+    const settings = await this.settings.peek(persona.channelId);
+    const notes: string[] = [];
+    let mode: PersonaMindMode = settings.mode;
+    if (mode === 'OFF') {
+      mode = 'SHADOW';
+      notes.push('渠道心智模式为关闭，试跑按 SHADOW 读取，不会发送。');
+    }
+    const scene = await this.scenes.buildSimulationScene(persona.id, conversationId, {
+      text: input.text,
+      senderName: input.senderName,
+      senderExternalId: input.senderExternalId,
+    });
+    if (!scene) {
+      throw new NotFoundException({
+        code: 'MIND_SIMULATION_NO_CONVERSATION',
+        message: '会话不存在或不属于这个渠道',
+      });
+    }
+    const storedState = await this.prisma.personaState.findUnique({
+      where: { personaId: persona.id },
+    });
+    if (!storedState) {
+      notes.push('人格还没有持久化状态，本次用默认状态试跑，没有写入状态行。');
+    }
+    const state = storedState ?? ephemeralState(persona);
+    const sleepBrief = await this.longEvents.sleepBrief(
+      persona.id,
+      state,
+      persona.values as Record<string, unknown> | null,
+    );
+    const intentionFeedback = await this.recentIntentionFeedback(persona.id);
+    const recall = await this.memories.recallForScene(scene, buildMemoryQuery(scene), 12, {
+      markRecalled: false,
+    });
+    const memories = [...recall.core, ...recall.relevant];
+    const decision = this.social.buildDecision({ scene, state, memories });
+    const conversationRead = readConversation({ scene, state, memories });
+    const plannerResult = await this.planner.plan({
+      scene,
+      state,
+      social: decision.read,
+      memories: recall.relevant,
+      coreMemories: recall.core,
+      memoryStats: recall.stats,
+      conversationRead,
+      intentionFeedback,
+      settings,
+      mode,
+      trigger: 'MANUAL',
+      sleepBrief,
+      dryRun: true,
+      capturePrompts: true,
+    });
+    notes.push(
+      '只读试跑：没有创建运行轨迹、没有写记忆/关系/待办，也没有留下提示词日志和测试消息。',
+    );
+    return {
+      personaId: persona.id,
+      channelId: persona.channelId,
+      conversationId: scene.conversation.id,
+      conversationName: scene.conversation.name,
+      mode,
+      scene: compactScene(scene),
+      state: simulationState(state),
+      decision: { engage: decision.engage, reason: decision.reason, read: decision.read },
+      conversationRead,
+      memories: { core: recall.core, relevant: recall.relevant, stats: recall.stats },
+      plan: plannerResult.plan,
+      toolCalls: plannerResult.toolCalls,
+      prompts: plannerResult.prompts,
+      providerId: plannerResult.providerId,
+      model: plannerResult.model,
+      latencyMs: plannerResult.latencyMs,
+      promptTokens: plannerResult.promptTokens,
+      completionTokens: plannerResult.completionTokens,
+      notes,
+    };
   }
 
   async latest(conversationId: string): Promise<AgentRunSummary | null> {
@@ -857,7 +1135,7 @@ export class MindRuntimeService implements OnModuleInit {
       decision: row.decision,
       socialRead: row.socialRead,
       plan: row.plan,
-      scene: row.scene,
+      scene: (row.scene as AgentRunScene | null) ?? null,
       error: row.error,
       steps: row.steps.map(toStepRecord),
       actions: row.actions.map((action) => ({
@@ -948,6 +1226,7 @@ export class MindRuntimeService implements OnModuleInit {
         },
       });
     }
+    await this.persistPlanIntentions(runId, scene, plan);
     if (plan.longEvent) {
       const result = await this.longEvents.applyDraft(scene.persona.id, plan.longEvent, {
         runId,
@@ -1257,6 +1536,61 @@ export class MindRuntimeService implements OnModuleInit {
     return this.memories.decay(personaId);
   }
 
+  /**
+   * Idle heartbeats used to return before any model turn, so a stale activity
+   * could survive for days. This focused call only revisits the activity.
+   */
+  private async reviewStaleActivity(
+    personaId: string,
+    persona: MindPersona,
+    state: PersonaState,
+    sleepBrief: MindSleepBrief,
+    settings: MindSettingsRecord,
+    timeZone: string | null,
+  ): Promise<void> {
+    const activity = state.currentActivity.trim();
+    if (!activity || SLEEP_ACTIVITY_RE.test(activity) || !state.activitySince) {
+      return;
+    }
+    const now = Date.now();
+    const ageMinutes = (now - state.activitySince.getTime()) / 60_000;
+    if (ageMinutes < ACTIVITY_REVIEW_AFTER_MINUTES) {
+      return;
+    }
+    const checkedAt = state.activityCheckedAt?.getTime() ?? 0;
+    if (checkedAt > 0 && now - checkedAt < ACTIVITY_REVIEW_COOLDOWN_MINUTES * 60_000) {
+      return;
+    }
+    const values = persona.values as Record<string, unknown> | null;
+    try {
+      const result = await this.planner.refreshActivity({
+        personaName: persona.name,
+        identity: persona.identity || readString(values?.['identity']),
+        state,
+        settings,
+        sleepBrief,
+        timeZone,
+      });
+      await this.states.markActivityChecked(personaId);
+      if (!result || result.activity === activity) {
+        return;
+      }
+      await this.states.update(
+        personaId,
+        {
+          currentActivity: result.activity,
+          ...(result.location ? { location: result.location } : {}),
+        },
+        { reason: `活动时效复核：${result.reason}`, source: 'AGENT' },
+      );
+    } catch (error) {
+      await this.states.markActivityChecked(personaId).catch(() => undefined);
+      this.logger.warn(
+        `活动时效复核失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   private async reschedule(
     personaId: string,
     minutes: number,
@@ -1298,6 +1632,286 @@ export class MindRuntimeService implements OnModuleInit {
         },
       });
     }
+  }
+
+  /**
+   * A proactive attempt is a hypothesis. When the other side answers, record
+   * how it landed so later heartbeats can revise confidence instead of
+   * repeating the same opening.
+   */
+  private async applyInboundFeedback(
+    personaId: string,
+    senderId: string,
+    text: string,
+  ): Promise<void> {
+    const since = new Date(Date.now() - 72 * 3600_000);
+    const intention = await this.prisma.agentIntention.findFirst({
+      where: {
+        personaId,
+        targetType: 'PERSON',
+        targetId: senderId,
+        status: 'SENT',
+        feedback: '',
+        lastAttemptAt: { gte: since },
+      },
+      orderBy: { lastAttemptAt: 'desc' },
+    });
+    if (!intention) {
+      return;
+    }
+    const kind = classifyText(text);
+    let feedback: string;
+    let delta = 0;
+    switch (kind) {
+      case 'question':
+        feedback = '对方接住了话题，还继续追问';
+        delta = 5;
+        break;
+      case 'request':
+        feedback = '对方顺着话题请你帮忙';
+        delta = 5;
+        break;
+      case 'substantive':
+        feedback = '对方认真接住了这个话题';
+        delta = 3;
+        break;
+      case 'ack':
+        feedback = '对方只简单应了一声';
+        break;
+      case 'ending':
+        feedback = '对方顺势收尾，没有接这个话题';
+        delta = -8;
+        break;
+      default:
+        feedback = '对方回了一条非文字消息';
+        delta = 2;
+        break;
+    }
+    await this.prisma.agentIntention.update({
+      where: { id: intention.id },
+      data: {
+        feedback,
+        feedbackAt: new Date(),
+        confidence: clamp(intention.confidence + delta, 0, 100),
+      },
+    });
+  }
+
+  /** Proactive attempts with no answer after 12h lose a little confidence. */
+  private async sweepUnansweredIntentions(personaId: string): Promise<void> {
+    const now = new Date();
+    await this.prisma.agentIntention.updateMany({
+      where: { personaId, status: 'PENDING', expiresAt: { lt: now } },
+      data: { status: 'EXPIRED' },
+    });
+    const cutoff = new Date(Date.now() - 12 * 3600_000);
+    const rows = await this.prisma.agentIntention.findMany({
+      where: {
+        personaId,
+        status: 'SENT',
+        feedback: '',
+        lastAttemptAt: { lte: cutoff },
+      },
+      take: 20,
+    });
+    for (const row of rows) {
+      await this.prisma.agentIntention.update({
+        where: { id: row.id },
+        data: {
+          feedback: '发出后 12 小时没有回应',
+          feedbackAt: new Date(),
+          confidence: clamp(row.confidence - 5, 0, 100),
+        },
+      });
+    }
+  }
+
+  private async recentIntentionFeedback(personaId: string): Promise<MindIntentionFeedback[]> {
+    const rows = await this.prisma.agentIntention.findMany({
+      where: {
+        personaId,
+        feedback: { not: '' },
+        feedbackAt: { gte: new Date(Date.now() - 7 * 86400_000) },
+      },
+      orderBy: { feedbackAt: 'desc' },
+      take: 3,
+    });
+    return rows.map((row) => ({
+      need: row.need,
+      seed: row.seed,
+      feedback: row.feedback,
+      status: row.status,
+      at: (row.feedbackAt ?? row.updatedAt).toISOString(),
+    }));
+  }
+
+  private async dueIntentionBriefs(
+    personaId: string,
+    rows: AgentIntention[],
+  ): Promise<MindWakeBrief['dueIntentions']> {
+    const targetIds = [...new Set(rows.map((row) => row.targetId).filter(Boolean))];
+    const relations =
+      targetIds.length > 0
+        ? await this.prisma.personaRelationship.findMany({
+            where: { personaId, contactId: { in: targetIds } },
+            select: {
+              contactId: true,
+              affinity: true,
+              intimacy: true,
+              trust: true,
+              obligation: true,
+            },
+          })
+        : [];
+    const relationById = new Map(relations.map((row) => [row.contactId, row]));
+    return rows
+      .map((row) => ({
+        id: row.id,
+        targetType: row.targetType,
+        targetId: row.targetId,
+        reason: row.reason,
+        seed: row.seed,
+        urgency: row.urgency,
+        need: row.need,
+        confidence: row.confidence,
+        risk: row.risk,
+        relationScore: relationScoreOf(relationById.get(row.targetId) ?? null),
+      }))
+      .sort((left, right) => intentionPriority(right) - intentionPriority(left));
+  }
+
+  /**
+   * Counts only unsolicited model turns. Message-triggered replies and
+   * due-todo obligations do not consume this budget.
+   */
+  private async wakeGate(
+    personaId: string,
+    settings: MindSettingsRecord,
+    timeZone: string | null,
+  ): Promise<{ allowed: boolean; nextMinutes: number; reason: string }> {
+    const limit = settings.proactiveWakeDailyLimit;
+    const gapSeconds = settings.proactiveWakeMinGapSeconds;
+    const fallback = settings.wakeIntervalMinutes;
+    if (limit <= 0 && gapSeconds <= 0) {
+      return { allowed: true, nextMinutes: fallback, reason: '' };
+    }
+    const now = new Date();
+    const runs = await this.prisma.agentRun.findMany({
+      where: {
+        personaId,
+        trigger: { in: ['HEARTBEAT', 'PROACTIVE'] },
+        status: { not: 'SKIPPED' },
+        startedAt: { gte: new Date(now.getTime() - 48 * 3600_000) },
+      },
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true },
+    });
+    const lastWake = runs[0];
+    if (gapSeconds > 0 && lastWake) {
+      const remainingMs = gapSeconds * 1000 - (now.getTime() - lastWake.startedAt.getTime());
+      if (remainingMs > 0) {
+        const minutes = Math.ceil(remainingMs / 60_000);
+        return {
+          allowed: false,
+          nextMinutes: Math.max(1, minutes),
+          reason: `自发唤醒间隔未到，还需 ${minutes} 分钟`,
+        };
+      }
+    }
+    if (limit > 0) {
+      const today = localDateKey(now, timeZone);
+      const used = runs.filter((run) => localDateKey(run.startedAt, timeZone) === today).length;
+      if (used >= limit) {
+        return {
+          allowed: false,
+          nextMinutes: minutesUntilLocalMidnight(now, timeZone),
+          reason: `今日自发唤醒次数已用完（${used}/${limit}）`,
+        };
+      }
+    }
+    return { allowed: true, nextMinutes: fallback, reason: '' };
+  }
+
+  /**
+   * Turns the plan's intentions into persisted goals, including the "we can
+   * pick this up later" point from an intentional close.
+   */
+  private async persistPlanIntentions(
+    runId: string,
+    scene: MindScene,
+    plan: ActionPlan,
+  ): Promise<void> {
+    const drafts = [...(plan.intentions ?? [])];
+    if (plan.dialogue?.close) {
+      await this.step(
+        runId,
+        'WRITEBACK',
+        '对话收尾',
+        { summary: plan.dialogue.summary ?? null, nextOpening: plan.dialogue.nextOpening ?? null },
+        { close: true },
+        0,
+      );
+      if (plan.dialogue.nextOpening) {
+        const target = conversationPartnerContactId(scene);
+        drafts.push({
+          need: 'followup',
+          ...(target ? { targetContactId: target } : {}),
+          reason: plan.dialogue.summary ?? '想以后再接着聊',
+          seed: plan.dialogue.nextOpening,
+          urgency: 40,
+          confidence: 55,
+          risk: 20,
+          earliestAt: new Date(Date.now() + 6 * 3600_000).toISOString(),
+          expiresAt: new Date(Date.now() + 14 * 86400_000).toISOString(),
+        });
+      }
+    }
+    if (drafts.length === 0) {
+      return;
+    }
+    const now = new Date();
+    const created: string[] = [];
+    let skipped = 0;
+    for (const draft of drafts) {
+      const seed = draft.seed.trim();
+      if (!seed) {
+        continue;
+      }
+      const existing = await this.prisma.agentIntention.findFirst({
+        where: { personaId: scene.persona.id, status: 'PENDING', seed },
+        select: { id: true },
+      });
+      if (existing) {
+        skipped += 1;
+        continue;
+      }
+      const earliest = draft.earliestAt ? new Date(draft.earliestAt) : now;
+      const row = await this.prisma.agentIntention.create({
+        data: {
+          personaId: scene.persona.id,
+          channelId: scene.persona.channelId,
+          targetType: draft.targetContactId ? 'PERSON' : 'SELF',
+          targetId: draft.targetContactId ?? '',
+          reason: draft.reason?.trim().slice(0, 2000) ?? '',
+          seed: seed.slice(0, 4000),
+          need: draft.need?.trim().slice(0, 40) ?? '',
+          urgency: clamp(draft.urgency ?? 50, 0, 100),
+          confidence: clamp(draft.confidence ?? 50, 0, 100),
+          risk: clamp(draft.risk ?? 20, 0, 100),
+          earliestAt: earliest.getTime() < now.getTime() ? now : earliest,
+          expiresAt: draft.expiresAt ? new Date(draft.expiresAt) : null,
+        },
+      });
+      created.push(row.id);
+    }
+    await this.step(
+      runId,
+      'WRITEBACK',
+      '待发意图',
+      { requested: drafts.length },
+      { created, skipped },
+      0,
+    );
   }
 
   /**
@@ -1353,7 +1967,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
     const persona = scene.persona;
     const values = persona.values as Record<string, unknown> | null;
-    const timeZone = readString(values?.['time_zone']) || null;
+    const timeZone = normalizeTimeZone(readString(values?.['time_zone']));
     const date = localDateKey(new Date(), timeZone);
     await this.prisma.personaJournal.upsert({
       where: { personaId_date: { personaId, date } },
@@ -1405,6 +2019,11 @@ function resolveSceneRefs(scene: MindScene, plan: ActionPlan): void {
       todo.relatedContactId = resolve(todo.relatedContactId);
     }
   }
+  for (const intention of plan.intentions ?? []) {
+    if (intention.targetContactId) {
+      intention.targetContactId = resolve(intention.targetContactId);
+    }
+  }
 }
 
 function skipped(
@@ -1452,6 +2071,8 @@ function compactMessageScene(message: ChatMessageSnapshot) {
         sender: message.senderName,
         isSelf: message.isSelf,
         text: message.text.slice(0, 300),
+        images: [],
+        imageCount: message.imageCount,
         sentAt: message.sentAt.toISOString(),
       },
     ],
@@ -1469,6 +2090,8 @@ function compactScene(scene: MindScene) {
       sender: message.senderName,
       isSelf: message.isSelf,
       text: message.text.slice(0, 300),
+      images: message.images.slice(0, 4).map((image) => image.slice(0, 300)),
+      imageCount: message.imageCount,
       sentAt: message.sentAt,
     })),
     cast: scene.cast.slice(0, 10).map((member) => ({
@@ -1481,6 +2104,59 @@ function compactScene(scene: MindScene) {
 
 function toPublicMemory(memory: PersonaMemoryRecord): PersonaMemoryRecord {
   return memory;
+}
+
+function ephemeralState(persona: MindPersona): PersonaState {
+  const now = new Date();
+  const values =
+    persona.values && typeof persona.values === 'object' && !Array.isArray(persona.values)
+      ? (persona.values as Record<string, unknown>)
+      : {};
+  const cardGrooming = Number(values['grooming']);
+  return {
+    id: `simulation-${persona.id}`,
+    personaId: persona.id,
+    moodValence: 0,
+    moodArousal: 50,
+    moodDominance: 0,
+    energy: 70,
+    stress: 20,
+    socialBattery: 70,
+    attention: 60,
+    currentActivity: '',
+    activitySince: null,
+    activityCheckedAt: null,
+    location: '',
+    sleepDebt: 0,
+    health: 80,
+    grooming: Number.isFinite(cardGrooming) ? clamp(Math.round(cardGrooming), 0, 100) : 70,
+    lastWakeAt: null,
+    nextWakeAt: null,
+    lastHeartbeatAt: null,
+    leaseUntil: null,
+    leaseOwner: null,
+    wakeReason: '',
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function simulationState(state: PersonaState): Record<string, unknown> {
+  return {
+    moodValence: state.moodValence,
+    moodArousal: state.moodArousal,
+    moodDominance: state.moodDominance,
+    energy: state.energy,
+    stress: state.stress,
+    socialBattery: state.socialBattery,
+    attention: state.attention,
+    currentActivity: state.currentActivity,
+    activitySince: state.activitySince?.toISOString() ?? null,
+    location: state.location,
+    sleepDebt: state.sleepDebt,
+    health: state.health,
+    grooming: state.grooming,
+  };
 }
 
 function toStepRecord(step: AgentStep): AgentStepRecord {
@@ -1496,12 +2172,51 @@ function toStepRecord(step: AgentStep): AgentStepRecord {
   };
 }
 
-function toRunSummary(
+function heartbeatPlanSummary(plan: ActionPlan) {
+  return {
+    engage: plan.engage,
+    reason: plan.reason,
+    stance: plan.stance,
+    felt: plan.felt ?? null,
+    shown: plan.shown ?? null,
+    beats: plan.beats.map((beat) =>
+      beat.kind === 'text' ? { kind: 'text', text: beat.text, delayMs: beat.delayMs } : { ...beat },
+    ),
+    memoryWrites: plan.memoryWrites.length,
+    relationshipSignals: plan.relationshipSignals.length,
+    todos: plan.todos.length,
+    intentions: plan.intentions?.length ?? 0,
+    dialogue: plan.dialogue ?? null,
+    longEvent: plan.longEvent ?? null,
+    nextWakeAt: plan.nextWakeAt ?? null,
+  };
+}
+
+function heartbeatActionSummary(
+  actions: readonly {
+    kind: string;
+    status: string;
+    payload: unknown;
+    sentMessageId: string | null;
+    error: string | null;
+  }[],
+) {
+  return actions.map((action) => ({
+    kind: action.kind,
+    status: action.status,
+    payload: action.payload,
+    sentMessageId: action.sentMessageId,
+    error: action.error,
+  }));
+}
+
+export function toRunSummary(
   row: {
     id: string;
     personaId: string;
     channelId: string;
     conversationId: string | null;
+    messageId: string | null;
     trigger: string;
     mode: string;
     status: string;
@@ -1512,6 +2227,7 @@ function toRunSummary(
     cost: number | null;
     latencyMs: number | null;
     decision: unknown;
+    scene: unknown;
     startedAt: Date;
     finishedAt: Date | null;
   },
@@ -1521,12 +2237,16 @@ function toRunSummary(
     row.decision && typeof row.decision === 'object' && !Array.isArray(row.decision)
       ? (row.decision as Record<string, unknown>)
       : null;
+  const preview = lastInboundPreview(row.scene);
   return {
     id: row.id,
     personaId: row.personaId,
     channelId: row.channelId,
     conversationId: row.conversationId,
     conversationName,
+    messageId: row.messageId,
+    messagePreview: preview?.text ?? null,
+    messageSender: preview?.sender ?? null,
     trigger: row.trigger as AgentRunSummary['trigger'],
     mode: row.mode as AgentRunSummary['mode'],
     status: row.status as AgentRunSummary['status'],
@@ -1541,6 +2261,54 @@ function toRunSummary(
     startedAt: row.startedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
   };
+}
+
+/** Prefer the latest inbound message, falling back to the raw last line. */
+function lastInboundPreview(scene: unknown): { text: string; sender: string } | null {
+  if (!scene || typeof scene !== 'object') {
+    return null;
+  }
+  const messages = (scene as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) {
+    return null;
+  }
+  let fallback: { text: string; sender: string } | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as {
+      text?: unknown;
+      sender?: unknown;
+      isSelf?: unknown;
+      images?: unknown;
+      imageCount?: unknown;
+    };
+    if (!message) {
+      continue;
+    }
+    const text = typeof message.text === 'string' ? message.text.trim() : '';
+    const images = Array.isArray(message.images)
+      ? message.images.filter(
+          (image): image is string => typeof image === 'string' && image.trim().length > 0,
+        )
+      : [];
+    const imageCount = typeof message.imageCount === 'number' ? message.imageCount : images.length;
+    if (!text && images.length === 0 && imageCount === 0) {
+      continue;
+    }
+    const preview = text
+      ? text.replace(/\s+/gu, ' ').slice(0, 160)
+      : images.length > 0
+        ? `［图片］${images[0]!.replace(/\s+/gu, ' ').slice(0, 140)}`
+        : `［图片 ×${imageCount}］`;
+    const item = {
+      text: preview,
+      sender: typeof message.sender === 'string' ? message.sender : '',
+    };
+    if (message.isSelf !== true) {
+      return item;
+    }
+    fallback ??= item;
+  }
+  return fallback;
 }
 
 function moodLabel(state: PersonaState): string {
@@ -1562,6 +2330,53 @@ function moodLabel(state: PersonaState): string {
 function effectiveWakeMinutes(settings: MindSettingsRecord, quiet: boolean): number {
   const base = quiet ? settings.quietIntervalMinutes : settings.wakeIntervalMinutes;
   return Math.min(settings.wakeMaxMinutes, Math.max(settings.wakeMinMinutes, base));
+}
+
+function intentionPriority(intent: {
+  urgency: number;
+  confidence: number;
+  risk: number;
+  relationScore: number;
+}): number {
+  const confidenceFactor = 0.5 + intent.confidence / 200;
+  const relationFactor = 1 + Math.max(-50, Math.min(50, intent.relationScore)) / 100;
+  const riskFactor = 1 - Math.min(0.4, Math.max(0, intent.risk) / 250);
+  return intent.urgency * confidenceFactor * relationFactor * riskFactor;
+}
+
+/** The person a private chat is with, or the last person who spoke in a group. */
+function conversationPartnerContactId(scene: MindScene): string | null {
+  if (scene.conversation.kind === 'PRIVATE') {
+    return scene.cast.find((member) => !member.isSelf)?.contactId ?? null;
+  }
+  for (let index = scene.messages.length - 1; index >= 0; index -= 1) {
+    const message = scene.messages[index];
+    if (message && !message.isSelf) {
+      return message.senderId;
+    }
+  }
+  return null;
+}
+
+function localMinute(date: Date, timeZone: string | null): number {
+  if (timeZone) {
+    try {
+      return Number(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone,
+          minute: 'numeric',
+          hour12: false,
+        }).format(date),
+      );
+    } catch {
+      // Fall back to the server local minute.
+    }
+  }
+  return date.getMinutes();
+}
+
+function minutesUntilLocalMidnight(now: Date, timeZone: string | null): number {
+  return Math.max(1, 24 * 60 - (localHour(now, timeZone) * 60 + localMinute(now, timeZone)));
 }
 
 function clampWakeAt(settings: MindSettingsRecord, requested: Date): Date {

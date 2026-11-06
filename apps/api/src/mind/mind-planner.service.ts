@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type {
   ActionPlan,
+  DialogueDecision,
   GroupStanceSignal,
+  IntentionDraft,
   LongEventDraft,
   MemoryDraft,
   MindEmotion,
@@ -24,7 +26,11 @@ import {
   stanceLines,
 } from './mind-behavior.js';
 import { checkTodoConsent } from './mind-consent.js';
-import type { ConversationRead, MessageKind } from './mind-conversation-read.js';
+import {
+  readRepetition,
+  type ConversationRead,
+  type MessageKind,
+} from './mind-conversation-read.js';
 import { MindToolsService, MIND_TOOL_MENU, type MindToolContext } from './mind-tools.service.js';
 import {
   clamp,
@@ -32,11 +38,15 @@ import {
   localDateKey,
   MIND_MAX_RELATIONSHIP_DELTA,
   MIND_MAX_TOOL_STEPS,
+  normalizeTimeZone,
   parseJsonObject,
   personaValueText,
   readNumber,
   readString,
   readStringArray,
+  relationScoreOf,
+  timePeriodLabel,
+  type MindIntentionFeedback,
   type MindMemoryStats,
   type MindScene,
   type MindSleepBrief,
@@ -45,6 +55,8 @@ import {
 } from './mind.types.js';
 
 export interface PlannerInput {
+  /** AgentRun that owns this plan; links LLM prompt logs back to the trace. */
+  runId?: string;
   scene: MindScene;
   state: PersonaState;
   social: SocialRead;
@@ -55,6 +67,8 @@ export interface PlannerInput {
   memoryStats?: MindMemoryStats;
   /** Advisory read of whether this exchange is still open or can naturally end. */
   conversationRead?: ConversationRead;
+  /** How recent proactive attempts were received, so the model can adjust. */
+  intentionFeedback?: MindIntentionFeedback[];
   settings: MindSettingsRecord;
   mode: string;
   trigger: 'MESSAGE' | 'HEARTBEAT' | 'PROACTIVE' | 'MANUAL';
@@ -76,6 +90,21 @@ export interface PlannerInput {
     }[];
     journal: string | null;
   };
+  /** Read-only simulation: skip prompt logs and block write tools. */
+  dryRun?: boolean;
+  /** Return the exact prompt/response pairs so the simulator can show them. */
+  capturePrompts?: boolean;
+}
+
+export interface PlannerPromptCapture {
+  system: string;
+  prompt: string;
+  response: string;
+  providerId: string | null;
+  model: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
 }
 
 export interface PlannerResult {
@@ -87,6 +116,22 @@ export interface PlannerResult {
   model: string | null;
   promptTokens: number;
   completionTokens: number;
+  prompts: PlannerPromptCapture[];
+}
+
+export interface ActivityRefreshInput {
+  personaName: string;
+  identity: string;
+  state: PersonaState;
+  settings: MindSettingsRecord;
+  sleepBrief?: MindSleepBrief;
+  timeZone?: string | null;
+}
+
+export interface ActivityRefreshResult {
+  activity: string;
+  location: string | null;
+  reason: string;
 }
 
 const MAX_SCENE_MESSAGE = 160;
@@ -108,13 +153,16 @@ export class MindPlannerService {
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
     const basePrompt = this.buildPrompt(input);
+    const system = this.systemPrompt(input);
     const context: MindToolContext = {
       scene: input.scene,
       state: input.state,
       settings: input.settings,
       mode: input.mode,
+      dryRun: input.dryRun,
     };
     const toolCalls: ToolExecution[] = [];
+    const prompts: PlannerPromptCapture[] = [];
     let prompt = basePrompt;
     let raw = '';
     let providerId: string | null = null;
@@ -125,13 +173,27 @@ export class MindPlannerService {
     for (let step = 0; step < MIND_MAX_TOOL_STEPS; step += 1) {
       const completion = await this.llm.complete({
         prompt,
-        system: this.systemPrompt(input),
+        system,
         providerId: input.settings.providerId,
         model: input.settings.model,
         temperature: 0.7,
         maxTokens: PLANNER_MAX_TOKENS,
         source: 'mind.planner',
+        runId: input.runId,
+        log: input.dryRun ? false : undefined,
       });
+      if (input.capturePrompts) {
+        prompts.push({
+          system,
+          prompt,
+          response: completion.text,
+          providerId: completion.providerId,
+          model: completion.model,
+          promptTokens: completion.promptTokens ?? 0,
+          completionTokens: completion.completionTokens ?? 0,
+          latencyMs: completion.latencyMs,
+        });
+      }
       raw = completion.text;
       providerId = completion.providerId;
       model = completion.model;
@@ -157,6 +219,7 @@ export class MindPlannerService {
           model,
           promptTokens,
           completionTokens,
+          prompts,
         };
       }
 
@@ -185,6 +248,70 @@ export class MindPlannerService {
       model,
       promptTokens,
       completionTokens,
+      prompts,
+    };
+  }
+
+  /**
+   * Small focused call used when a heartbeat would otherwise skip. It only
+   * revisits a stale `currentActivity`; it cannot send messages or write memories.
+   */
+  async refreshActivity(input: ActivityRefreshInput): Promise<ActivityRefreshResult | null> {
+    const now = new Date();
+    const since = input.state.activitySince;
+    const minutes = since
+      ? Math.max(1, Math.round((now.getTime() - since.getTime()) / 60_000))
+      : null;
+    const sleep = input.sleepBrief;
+    const sleepLine = sleep
+      ? [
+          sleep.awakeMinutes !== null ? `已清醒 ${formatDuration(sleep.awakeMinutes)}` : '',
+          sleep.suggestion.action === 'NONE'
+            ? '作息上没有必须去睡的压力'
+            : `作息参考：建议${sleep.suggestion.action === 'SLEEP' ? '睡觉' : '小睡'}${
+                sleep.suggestion.minutes ? ` ${sleep.suggestion.minutes} 分钟` : ''
+              }`,
+        ]
+          .filter(Boolean)
+          .join('；')
+      : '';
+    const prompt = [
+      `现在：${formatNowLabel(now, input.timeZone ?? null)}`,
+      `你从 ${since ? formatClockTime(since.toISOString(), input.timeZone ?? undefined) : '之前'} 开始「${input.state.currentActivity}」${
+        minutes !== null ? `，已经 ${formatDuration(minutes)}` : ''
+      }。`,
+      `身体参考：精力 ${input.state.energy}、健康 ${input.state.health}、压力 ${input.state.stress}、睡眠债 ${input.state.sleepDebt}。`,
+      sleepLine,
+      '你可能一直在忙，也可能早就做完了。根据现在的时间、你的作息和身体状态，判断你此刻真正在做什么、在哪里。',
+      '只输出 JSON：{"activity":"正在做的事","location":"地点","reason":"一句话理由"}。',
+      '- activity 要具体但不离奇；如果原来的活动仍然合理，就原样返回。',
+      '- 不要发消息，不要写记忆，不要解释。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const completion = await this.llm.complete({
+      prompt,
+      system: `你就是「${input.personaName}」${
+        input.identity ? `（${input.identity}）` : ''
+      }，不是助手。只输出一个 JSON 对象，不要 Markdown。`,
+      providerId: input.settings.providerId,
+      model: input.settings.model,
+      temperature: 0.6,
+      maxTokens: 200,
+      source: 'mind.activity',
+    });
+    const parsed = parseJsonObject(completion.text);
+    if (!parsed) {
+      return null;
+    }
+    const activity = readString(parsed['activity']).trim().slice(0, 80);
+    if (!activity) {
+      return null;
+    }
+    return {
+      activity,
+      location: readString(parsed['location']).trim().slice(0, 60) || null,
+      reason: trim(readString(parsed['reason'], '活动时效复核'), 120),
     };
   }
 
@@ -194,23 +321,33 @@ export class MindPlannerService {
       '你看消息、权衡关系、决定回不回、怎么回。内心感受可以和外在表现不同：可以忍着、冷淡、假装、口是心非，但不越底线。',
       '对话只能依据最近的对话、记忆和当前处境推算。背景故事、世界观、说话风格只决定语气，不要主动讲设定、背简历或复述过去。',
       '沉默是合理选择。不要为了回复而回复；不确定时宁可不发。只能通过给定工具获取信息，不能编造工具结果。',
+      '醒来只是给你一个机会，不是任务：醒来不等于要说话，说话是一个明确的动作。没有值得说的事就什么也不发，这不扣分。',
       '- 【对话节奏】是参考不是命令：对方明确提问/求助时先回答，别用沉默逃开；对方只是附和、话题已经收尾、或来回已经很疲时，可以不接；兴趣高时可以主动接话或追问，兴趣低又没有新信息时不必硬接。收尾只是这一段先告一段落，不是关系结束；对方继续时照常判断。',
+      '- 默认只发 1 个气泡；只有补充、更正或情绪没说完才发第 2 个。不要为了显得热情把一句话拆成多条，也不要连续发问。一条回复最多问一个问句；对方没有明确要求列举时，不要连问好几个问题。',
+      '- 被骂、被嫌弃时：先短句顶回去或冷处理，不解释、不求饶、不反复自证。不要主动提 AI、模型、程序、机器人；有人问你是不是真人，只用一句自然的话带过，然后把话题拉回眼前的事。',
+      '- 不懂的领域直接说不懂；可以好奇、可以问外行问题，但不要编具体型号、参数或操作步骤来显得懂。',
+      '- 只写你说出口的话，不写动作或舞台旁白：不要用括号描述动作、表情或发送行为（如「（叹气）」「（发了个表情包）」）；表情和图片通过 beats 发送，不在文字里解说。',
+      '- 记忆里的旧生活细节不要每轮都当新事说；同一个梗、同一顿饭、同一个活动反复出现时，换一件别的事说。',
+      '- 【此刻】里的日期、时间和时段是准确的本地时间，直接使用；不要自己换算，也不要用“早上/中午/半夜”覆盖它。',
       '只输出一个 JSON 对象，不要 Markdown，不要解释。',
       '格式：{"thought":"80字内心判断","tool":"工具名或null","input":{},"final":null}',
       '或：{"thought":"...","tool":null,"input":{},"final":{...动作计划...}}',
-      '动作计划：{"engage":true|false,"reason":"100字内","stance":"姿态","felt":{"label":"情绪","intensity":0-100,"target":"对象"},"shown":"表现","beats":[{"kind":"text","text":"...","delayMs":1200},{"kind":"sticker","stickerId":"...","delayMs":800}],"memoryWrites":[{"kind":"FACT","scope":"RELATION","subjectType":"PERSON","subjectId":"联系人ID","subjectName":"昵称","content":"...","importance":60,"visibility":"SCENE"}],"relationshipSignals":[{"contactId":"联系人ID","affinity":2,"reason":"..."}],"self":{"activity":"正在做的事","traits":{"confidence":1},"reason":"..."},"groupStance":{"comfort":1,"topic":"...","reason":"..."},"todos":[{"title":"...","consent":{"inviteMessageId":"...","acceptMessageId":"...","withContactId":"..."}}],"longEvent":{"action":"START|END","kind":"SLEEP","title":"...","plannedEndAt":"ISO?","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."},"nextWakeAt":"ISO?"}',
+      '动作计划：{"engage":true|false,"reason":"100字内","stance":"姿态","felt":{"label":"情绪","intensity":0-100,"target":"对象"},"shown":"表现","beats":[{"kind":"text","text":"...","delayMs":1200},{"kind":"sticker","stickerId":"...","delayMs":800}],"memoryWrites":[{"kind":"FACT","scope":"RELATION","subjectType":"PERSON","subjectId":"联系人ID","subjectName":"昵称","content":"...","importance":60,"visibility":"SCENE"}],"relationshipSignals":[{"contactId":"联系人ID","affinity":2,"reason":"..."}],"self":{"activity":"正在做的事","traits":{"confidence":1},"reason":"..."},"groupStance":{"comfort":1,"topic":"...","reason":"..."},"todos":[{"title":"...","consent":{"inviteMessageId":"...","acceptMessageId":"...","withContactId":"..."}}],"intentions":[{"need":"care|connect|share|followup|play|learn","targetContactId":"联系人ID","reason":"为什么想留到以后说","seed":"到时候想说的核心意思","urgency":50,"confidence":50,"risk":20,"earliestAt":"ISO?"}],"dialogue":{"close":true,"summary":"这一段聊了什么","nextOpening":"以后想接着说的点"},"longEvent":{"action":"START|END","kind":"SLEEP","title":"...","plannedEndAt":"ISO?","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."},"nextWakeAt":"ISO?"}',
       '规则：',
       '- engage=false 时 beats 必须为空数组。',
+      '- 想主动联系谁由你按关系和亲密程度决定：好感、亲密、信任、亏欠越高的人越值得找；没有谁特别值得找就不找。这里没有固定的“主人”或唯一对象，也不需要为了维持某个人而说话。',
+      '- 有想留到以后说的事就写 intentions：关心（care）、想联系（connect）、分享（share）、跟进（followup）、邀约一起玩（play）、想学/想了解（learn）。seed 是到时候真正想说的核心意思，不是占位符；urgency 是这件事拖久了会变差的程度；confidence 是你对“值得说”的把握；risk 是冒昧开口的风险（隐私、时机、被拒绝），越高越要谨慎。earliestAt 可选，表示最早什么时候适合提。系统会按这些值排期叫醒你；不是每个念头都要马上说，也可以永远不说。',
+      '- 这一段自然聊到收尾、你自己也想先告一段落时，可以 engage=false 并写 dialogue：{"close":true,"summary":"...","nextOpening":"..."}。nextOpening 要具体；有它会变成以后的待发意图。收尾只是这一段停一下，不是关系结束。',
       `- 最多 ${input.settings.maxBeats} 个气泡；每条 text 不超过 300 字；像真人聊天，不要长篇独白。`,
       '- 消息里的 [戳了戳我] 表示对方戳了你，可以回应也可以忽略；[戳一戳] 是别人之间的互动。被 @ 提到时文字里会出现 @你的名字，优先注意。',
-      '- 你可以发表情：表情会作为独立图片气泡发出去，可以直接只发表情，也可以夹在文字气泡之间。想发表情时先用 sticker.search 搜「表情」，beats 里写 {"kind":"sticker","stickerId":"搜索结果里的 id","delayMs":800}。一次回复最多 1 个表情。',
+      '- 你可以发表情：表情会作为独立图片气泡发出去，可以直接只发表情，也可以夹在文字气泡之间。想发表情时先用 sticker.search 搜「表情」，beats 里写 {"kind":"sticker","stickerId":"搜索结果里的 id","delayMs":800}。一次回复最多 1 个表情。表情是语气，不是话题：不要在文字里点破或解说它，不要写「这张图/这个表情/图里/我发个表情」，也不要说「这图就是你/像你」；正文只写你真正想说的话，没有别的正文就只发表情。找不到合适表情就不发，不要用文字描述或模仿表情包。',
       '- 想重新看某张表情（描述不准、想确认它的内容、文字或适用场景）时，用 sticker.describe 传 stickerId（可带 focus）；它会重新识别并把新描述写回表情库。',
       '- 【可用工具】列着全部工具，可以直接按名字调用；参数不确定时先 tools.search（query 写你想做的事）查详细参数。不要臆造工具，也不要因为没把握就放弃查证。',
       '- 动手前先过一遍：这轮有没有不确定、需要接续或需要核实的东西？涉及过去的事、对方说过的话、关系细节、承诺、群里的旧话题、当前时间或自身状态，都值得先查。记忆先用 memory.search，聊天记录用 history.search，关系用 relationship.get；一次没查到就换关键词，或用 aroundMessageId 往回翻，一轮可以连续调用多个工具。查证是为了心里有数，不一定要把查到的都说出来。',
       '- 需要关系细节（称呼、可公开范围、公开面具、边界、承诺、共同经历、对象档案）时，用 relationship.get 读；它返回 37 项 attributes（含空值），可把其中任意 key 放进 relationship.update 的 attributes 写回。',
       '- 需要补充人设细节时，用 self.attributes.list 查键、self.attributes.get 读值；不要凭空编造未写明的设定。',
       '- 已经通过工具调整过的关系，不要再在 relationshipSignals 里重复写同一维度。',
-      '- 记忆不设条数限制：只要出现可长期复用的新信息（对方的偏好、习惯、经历、近况、约定、边界、重要事件，或 TA 对你/对某事的明确态度），就写进 memoryWrites；宁可多记一条具体的小事，也不要只写“聊过天”。同一件事已经记过就不要重复写，纯寒暄不写。你的记忆库会一直累积，拿不准以前记没记过就先 memory.search。',
+      '- 记忆不设条数限制：只要出现可长期复用的新信息（对方的偏好、习惯、经历、近况、约定、边界、重要事件，或 TA 对你/对某事的明确态度），就写进 memoryWrites；宁可多记一条具体的小事，也不要只写“聊过天”。同一件事已经记过就不要重复写，纯寒暄不写；做饭、吃饭、刷锅这类日常尤其不要每次对话都记一条。你的记忆库会一直累积，拿不准以前记没记过就先 memory.search。',
       '- 想立刻留下某条记忆时可以直接调用 memory.create（不必等到 final）；final 的 memoryWrites 适合这一轮结束前统一写。两者写的是同一个记忆库，已经记过的事不要重复写。',
       '- 聊到真正让你来劲的话题，或发现自己确实不喜欢某类事时，把它写成 kind=PREFERENCE、subjectType=TOPIC 的记忆（subjectName 写话题名）；兴趣判断以后会参考它。只是礼貌附和、没有真实好恶的不要写。',
       '- 上下文断了就查，不要猜：消息里出现“那个/上次/之前说的”、话题突然对不上、或对方说的和你记得的不一致时，先 memory.search 找长期记忆，再用 history.search 翻聊天记录（可带关键词、发送者、since/before，或用 aroundMessageId 看某条消息前后）。查到后用一两句自然接上，不要逐条复述记录，也不要让回忆打断现在的聊天节奏。',
@@ -239,7 +376,7 @@ export class MindPlannerService {
   private buildPrompt(input: PlannerInput): string {
     const { scene, state, social, memories, coreMemories = [] } = input;
     const values = scene.persona.values as Record<string, unknown> | null;
-    const timeZone = readString(values?.['time_zone']) || null;
+    const timeZone = normalizeTimeZone(readString(values?.['time_zone']));
     const target =
       scene.cast.find((member) => member.contactId === scene.anchor.senderId) ??
       scene.cast.find((member) => member.contactId === scene.messages.at(-1)?.senderId) ??
@@ -255,6 +392,7 @@ export class MindPlannerService {
       .join('｜');
     const voice = trim(personaValueText(values, 'language_style'), 80);
     const banned = readStringArray(values?.['banned_words']).slice(0, 8).join('、');
+    const styleSection = buildStyleSection(values);
 
     const traitLines = selfTraitLines(values, 5);
     const stateLine = describeState(state);
@@ -289,9 +427,10 @@ export class MindPlannerService {
           )} 开始，已经 ${formatDuration(activityMinutes)}）`
         : `正在做：${activity}`;
     const staleActivity =
-      activityMinutes !== null && activityMinutes >= 4 * 60
-        ? `当前活动已经持续 ${formatDuration(activityMinutes)}。除非它本来就会这么久，否则该换一件事了；别让状态停在上一次对话里。`
+      activityMinutes !== null && activityMinutes >= 2 * 60
+        ? `当前活动已经持续 ${formatDuration(activityMinutes)}。如果这不是你现在真正在做的事，先用 self.attributes.update 改 current_activity，再回复；不要把旧活动当成永久设定。`
         : '';
+    const repetition = readRepetition(scene);
 
     const targetSection = target
       ? [
@@ -380,6 +519,15 @@ export class MindPlannerService {
       ? formatConversationRead(input.conversationRead)
       : '';
 
+    const repetitionSection = repetition
+      ? [
+          `最近你自己反复提到：${repetition.topics
+            .map((topic) => `${topic.text}（${topic.count} 次）`)
+            .join('、')}。`,
+          '如果这轮没有关于它们的新信息，就换一件别的事说，或先别提；不要把这些生活细节当成每轮都要延续的设定。',
+        ].join('\n')
+      : '';
+
     const sceneSection = formatSceneForPrompt(
       scene.messages.slice(-MAX_PROMPT_MESSAGES).map((message) => ({
         ...message,
@@ -402,12 +550,56 @@ export class MindPlannerService {
           .join('\n')
       : '';
 
+    const dueIntentionSection = input.wakeBrief?.dueIntentions.length
+      ? input.wakeBrief.dueIntentions
+          .map((intent) => {
+            const name =
+              scene.cast.find((member) => member.contactId === intent.targetId)?.nickname ||
+              (intent.targetId ? `联系人 ${intent.targetId}` : '没有指定对象');
+            const parts = [
+              `对${name}`,
+              intent.need ? `需要：${intent.need}` : '',
+              intent.reason ? `理由：${trim(intent.reason, 80)}` : '',
+              `想说的：${trim(intent.seed, 120)}`,
+              `紧迫 ${intent.urgency}｜把握 ${intent.confidence}｜风险 ${intent.risk}｜关系分 ${intent.relationScore}`,
+            ].filter(Boolean);
+            return `- ${parts.join('；')}`;
+          })
+          .join('\n')
+      : '无';
+
+    const reachable = scene.cast
+      .filter((member) => !member.isSelf && member.relationship)
+      .sort(
+        (left, right) => relationScoreOf(right.relationship) - relationScoreOf(left.relationship),
+      )
+      .slice(0, 5)
+      .map((member) => {
+        const relation = member.relationship!;
+        return `- ${member.nickname}（${member.contactId}）：好感 ${relation.affinity}、亲密 ${relation.intimacy}、信任 ${relation.trust}、亏欠 ${relation.obligation}｜关系分 ${relationScoreOf(relation)}`;
+      })
+      .join('\n');
+
     const wakeSection = input.wakeBrief
       ? [
           `到期待办：${input.wakeBrief.dueTodos.map((todo) => todo.title).join('；') || '无'}`,
-          `待发意图：${input.wakeBrief.dueIntentions.map((intent) => intent.reason || intent.seed).join('；') || '无'}`,
+          `待发意图：\n${dueIntentionSection}`,
+          reachable ? `可以找的人（按关系分排序）：\n${reachable}` : '',
           overnightSection ? `夜间消息：\n${overnightSection}` : '夜间消息：无',
-        ].join('\n')
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
+    const feedbackSection = input.intentionFeedback?.length
+      ? input.intentionFeedback
+          .map(
+            (item) =>
+              `- [${formatLocalDay(item.at, timeZone)}]${item.need ? `[${item.need}]` : ''} 想说的：${trim(item.seed, 80)} → ${trim(item.feedback, 100)}${
+                item.status === 'CANCELLED' ? '（已放弃）' : ''
+              }`,
+          )
+          .join('\n')
       : '';
 
     const lifeEventSection = input.lifeEvent
@@ -463,6 +655,7 @@ export class MindPlannerService {
       voice || banned
         ? `【表达】\n${voice}${banned ? `${voice ? '；' : ''}禁用语：${banned}` : ''}`
         : '',
+      styleSection ? `【说话习惯】\n${styleSection}` : '',
       `【此刻】\n${nowLine}\n${stateLine}\n${activityLine}${
         sinceLastMessage ? `\n距上一条消息 ${sinceLastMessage}` : ''
       }${conversationGapLine ? `\n${conversationGapLine}` : ''}${
@@ -474,9 +667,11 @@ export class MindPlannerService {
       `【这个群】\n${groupSection}`,
       `【我的判断】\n${socialSection}`,
       conversationSection ? `【对话节奏】\n${conversationSection}` : '',
+      repetitionSection ? `【重复自检】\n${repetitionSection}` : '',
       coreSection ? `【长期底色】\n${coreSection}` : '',
       `【最近经历】\n${memoryHeader ? `${memoryHeader}\n` : ''}${memorySection || '没有相关记忆'}`,
       wakeSection ? `【唤醒】\n${wakeSection}` : '',
+      feedbackSection ? `【主动反馈】\n${feedbackSection}` : '',
       lifeEventSection ? `【生活小事】\n${lifeEventSection}` : '',
       curiositySection ? `【好奇时间】\n${curiositySection}` : '',
       reflectionSection ? `【自我反思】\n${reflectionSection}` : '',
@@ -521,6 +716,8 @@ export class MindPlannerService {
     const self = parseSelf(record['self']);
     const groupStance = parseGroupStance(record['groupStance']);
     const longEvent = parseLongEvent(record['longEvent']);
+    const intentions = parseIntentions(record['intentions']);
+    const dialogue = parseDialogue(record['dialogue']);
     const nextWakeAt = parseIso(record['nextWakeAt']);
 
     if (engage && beats.length === 0) {
@@ -532,6 +729,8 @@ export class MindPlannerService {
         memoryWrites,
         relationshipSignals,
         todos,
+        ...(intentions.length > 0 ? { intentions } : {}),
+        ...(dialogue ? { dialogue } : {}),
         felt,
         shown,
         ...(self ? { self } : {}),
@@ -549,6 +748,8 @@ export class MindPlannerService {
       memoryWrites,
       relationshipSignals,
       todos,
+      ...(intentions.length > 0 ? { intentions } : {}),
+      ...(dialogue ? { dialogue } : {}),
       felt,
       shown,
       ...(self ? { self } : {}),
@@ -790,6 +991,54 @@ function parseGroupStance(value: unknown): GroupStanceSignal | undefined {
   return Object.keys(signal).length > 0 ? signal : undefined;
 }
 
+function parseIntentions(value: unknown): IntentionDraft[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const drafts: IntentionDraft[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const seed = trim(readString(record['seed']), 500);
+    if (!seed) {
+      continue;
+    }
+    const earliestAt = parseIso(record['earliestAt']);
+    const expiresAt = parseIso(record['expiresAt']);
+    drafts.push({
+      need: trim(readString(record['need']), 40),
+      targetContactId: readString(record['targetContactId']).trim() || undefined,
+      reason: trim(readString(record['reason']), 300),
+      seed,
+      urgency: clamp(readNumber(record['urgency'], 50), 0, 100),
+      confidence: clamp(readNumber(record['confidence'], 50), 0, 100),
+      risk: clamp(readNumber(record['risk'], 20), 0, 100),
+      ...(earliestAt ? { earliestAt } : {}),
+      ...(expiresAt ? { expiresAt } : {}),
+    });
+  }
+  return drafts.slice(0, 3);
+}
+
+function parseDialogue(value: unknown): DialogueDecision | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record['close'] !== true) {
+    return undefined;
+  }
+  const summary = trim(readString(record['summary']), 300);
+  const nextOpening = trim(readString(record['nextOpening']), 300);
+  return {
+    close: true,
+    ...(summary ? { summary } : {}),
+    ...(nextOpening ? { nextOpening } : {}),
+  };
+}
+
 function parseConsent(value: unknown): TodoConsent | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -978,6 +1227,53 @@ function formatDuration(minutes: number): string {
   return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
 }
 
+function buildStyleSection(values: Record<string, unknown> | null): string {
+  if (!values) {
+    return '';
+  }
+  const emojiLevel = readNumber(values['emoji_level'], -1);
+  const typoLevel = readNumber(values['typo_level'], -1);
+  const selfControl = personaValueText(values, 'self_control');
+  const conflictStyle = personaValueText(values, 'conflict_style');
+  const lines = [
+    personaValueText(values, 'sentence_length')
+      ? `句子：${trim(personaValueText(values, 'sentence_length'), 30)}`
+      : '',
+    personaValueText(values, 'punctuation')
+      ? `标点：${trim(personaValueText(values, 'punctuation'), 120)}`
+      : '',
+    readStringArray(values['particles']).length > 0
+      ? `语气词：${readStringArray(values['particles']).slice(0, 6).join('、')}`
+      : '',
+    emojiLevel >= 0 ? `表情：${emojiStyle(emojiLevel)}` : '',
+    typoLevel >= 0 ? `错别字：${typoStyle(typoLevel)}` : '',
+    conflictStyle
+      ? `被冒犯时：${trim(conflictStyle, 40)}${selfControl ? `（自控 ${selfControl}）` : ''}`
+      : '',
+    personaValueText(values, 'knowledge_boundary')
+      ? `知识边界：${trim(personaValueText(values, 'knowledge_boundary'), 160)}`
+      : '',
+    personaValueText(values, 'in_character_principle')
+      ? `出戏防线：${trim(personaValueText(values, 'in_character_principle'), 120)}`
+      : '',
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
+function emojiStyle(level: number): string {
+  if (level <= 0) return '不用 emoji';
+  if (level <= 2) return '很少用，最多偶尔一个';
+  if (level <= 3) return '偶尔用一个，不要每句都带';
+  return '可以常用，但不要整段都是 emoji';
+}
+
+function typoStyle(level: number): string {
+  if (level <= 0) return '不写错别字';
+  if (level <= 2) return '偶尔一个手滑错字，不要刻意';
+  if (level <= 4) return '可以有一点口语化错字或缩写';
+  return '错字较多，但不要影响理解';
+}
+
 function formatNowLabel(date: Date, timeZone: string | null): string {
   try {
     const formatted = new Intl.DateTimeFormat('zh-CN', {
@@ -990,9 +1286,9 @@ function formatNowLabel(date: Date, timeZone: string | null): string {
       minute: '2-digit',
       hour12: false,
     }).format(date);
-    return `${formatted}${timeZone ? `（${timeZone}）` : ''}`;
+    return `${formatted}（${timePeriodLabel(date, timeZone)}${timeZone ? `，${timeZone}` : ''}）`;
   } catch {
-    return date.toLocaleString('zh-CN', {
+    return `${date.toLocaleString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -1000,7 +1296,7 @@ function formatNowLabel(date: Date, timeZone: string | null): string {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-    });
+    })}（${timePeriodLabel(date, null)}）`;
   }
 }
 

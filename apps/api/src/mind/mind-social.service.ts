@@ -5,6 +5,7 @@ import {
   clamp,
   isQuietHour,
   localHour,
+  normalizeTimeZone,
   readString,
   readStringArray,
   type MindScene,
@@ -39,7 +40,7 @@ export class MindSocialService {
       : null;
     const targetRelationship = target?.relationship ?? null;
     const personas = scene.persona.values as Record<string, unknown> | null;
-    const timeZone = readString(personas?.['time_zone']) || null;
+    const timeZone = normalizeTimeZone(readString(personas?.['time_zone']));
     const hour = localHour(new Date(), timeZone);
     const quiet = isQuietHour(hour, null);
     const mentioned = isMentioned(scene, personas);

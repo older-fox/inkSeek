@@ -132,6 +132,103 @@ export class MindSceneService {
     return this.buildFromMessage(anchor, imageDescriptionPrompt);
   }
 
+  /**
+   * Read-only scene for the conversation simulator: real recent messages plus
+   * one ephemeral test message. Never writes image descriptions or stances.
+   */
+  async buildSimulationScene(
+    personaId: string,
+    conversationId: string,
+    input: { text: string; senderName?: string; senderExternalId?: string },
+  ): Promise<MindScene | null> {
+    const persona = await this.prisma.chatChannelPersona.findUnique({
+      where: { id: personaId },
+    });
+    if (!persona) {
+      return null;
+    }
+    const conversation = await this.prisma.chatConversation.findFirst({
+      where: { id: conversationId, channelId: persona.channelId },
+    });
+    if (!conversation) {
+      return null;
+    }
+    const channel = await this.prisma.chatChannel.findUnique({
+      where: { id: persona.channelId },
+      select: { accountId: true },
+    });
+    const accountId = channel?.accountId ?? '';
+    const rows = await this.prisma.chatMessageRecord.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { sentAt: 'desc' },
+      take: SCENE_MESSAGE_LIMIT,
+      include: {
+        images: {
+          orderBy: { position: 'asc' },
+          include: { media: { select: { description: true } } },
+        },
+        voices: { orderBy: { position: 'asc' }, select: { description: true } },
+        sender: { select: { id: true, nickname: true, externalId: true, isSelf: true } },
+      },
+    });
+    const messages = rows.reverse().map((row) => toSceneMessage(row, accountId));
+    const lastInbound = [...messages].reverse().find((message) => !message.isSelf);
+    const contact = input.senderExternalId
+      ? await this.prisma.chatContact.findUnique({
+          where: {
+            channelId_externalId: {
+              channelId: persona.channelId,
+              externalId: input.senderExternalId,
+            },
+          },
+        })
+      : null;
+    const senderId = contact?.id ?? lastInbound?.senderId ?? '';
+    const senderName =
+      input.senderName?.trim() || contact?.nickname || lastInbound?.senderName || '对方';
+    const now = new Date();
+    const anchor: ChatMessageSnapshot = {
+      messageId: '',
+      channelId: persona.channelId,
+      conversationId: conversation.id,
+      conversationKind: conversation.kind,
+      conversationExternalId: conversation.externalId,
+      externalId: null,
+      isSelf: false,
+      senderId,
+      senderName,
+      text: input.text,
+      kind: 'TEXT',
+      quote: null,
+      images: [],
+      imageCount: 0,
+      voices: [],
+      voiceCount: 0,
+      sentAt: now,
+    };
+    messages.push({
+      id: `simulation-${now.getTime()}`,
+      senderId,
+      senderName,
+      isSelf: false,
+      kind: 'TEXT',
+      text: input.text,
+      sentAt: now.toISOString(),
+      images: [],
+      imageCount: 0,
+      mentionedSelf: false,
+    });
+    const cast = await this.loadCast(conversation, persona);
+    const stance =
+      conversation.kind === 'GROUP'
+        ? await this.prisma.personaGroupStance.findUnique({
+            where: { personaId_conversationId: { personaId, conversationId } },
+            include: { conversation: true },
+          })
+        : null;
+    return { persona, conversation, anchor, messages, cast, stance, startedAt: now };
+  }
+
   async recentMessages(
     conversationId: string,
     limit: number,
@@ -428,6 +525,7 @@ function toSceneMessage(row: MessageWithAssets, accountId: string): SceneMessage
     text,
     sentAt: row.sentAt.toISOString(),
     images,
+    imageCount: row.images.length,
     mentionedSelf: accountId.length > 0 && mentionsAccount(row.segments, accountId),
   };
 }

@@ -89,7 +89,7 @@ Scene {
 | `PersonaChangeLog`    | 统一变动账本  | personaId、scope（STATE/SELF/RELATION/GROUP）、targetId、field、beforeValue、afterValue、delta、reason、source、runId；状态/自身/关系/群四类历史与漂移配额共用这一张表                                                                                                 |
 | `PersonaMemory`       | 统一记忆      | scope、kind、subject、content、structured、importance、confidence、emotion、visibility、status、occurredAt、sourceIds、embedding                                                                                                                                       |
 | `AgentTodo`           | 待办/唤醒     | title、detail、priority、dueAt、wakeCondition、recurrence、status、source                                                                                                                                                                                              |
-| `AgentIntention`      | 主动意图      | targetType、targetId、reason、seed、urgency、earliestAt、expiresAt、status、attempts                                                                                                                                                                                   |
+| `AgentIntention`      | 主动意图      | targetType、targetId、need、reason、seed、urgency、confidence、risk、feedback/feedbackAt、earliestAt、expiresAt、status、attempts                                                                                                                                      |
 | `AgentRun`            | 一次心智运行  | trigger、persona、scene、model、tokens、cost、decision、plan、status、latency                                                                                                                                                                                          |
 | `AgentStep`           | 思维/工具步骤 | runId、type、input、output、durationMs、error                                                                                                                                                                                                                          |
 | `AgentAction`         | 动作日志      | runId、kind、payload、status、idempotencyKey、sentMessageId、error                                                                                                                                                                                                     |
@@ -190,7 +190,7 @@ interface SocialRead {
 我（名字/身份/年龄/性别）
 性格（从 9 个心理数值里挑最极端的 5 项，每项带行为含义）
 表达（最多一句话说话风格 + 禁用语）
-此刻（现在：本地日期/星期/时区；心情/精力/压力/社交电量/注意力，均带低高区间行为提示；当前活动从几点开始、已持续多久；距上一条消息多久；活动超过 4 小时给一句提醒）+ 正在做的事
+此刻（现在：本地日期/星期/时区；心情/精力/压力/社交电量/注意力，均带低高区间行为提示；当前活动从几点开始、已持续多久；距上一条消息多久；活动超过 2 小时给一句提醒）+ 正在做的事
 对话对象（与其最显著的 4 个关系维度，带行为含义）
 在场（其余成员只给 3 个关系数字）
 这个群（最显著的 3 个群态度，带行为含义 + 群规 + 话题）
@@ -214,6 +214,19 @@ interface SocialRead {
 - **结论**：`continue`（还在聊）、`linger`（先缓一缓，通常不用补）、`close`（可以收尾），连同理由和建议写进【对话节奏】和 AgentRun 的「注意力与社交判断」步骤。
 
 私聊同样适用，但没有群聊「半小时没人接」的硬收尾规则。兴趣高时允许主动接话或追问；兴趣低又没有新信息时，模型可以自然地读而不回。没有新增设置或表；兴趣来源随人格卡与记忆自然变化，收尾只是这一段告一段落，对方继续时重新判断。
+
+### 6.3 说话习惯与重复自检
+
+角色卡里的 `sentence_length`、`punctuation`、`particles`、`emoji_level`、`typo_level`、`conflict_style`、`self_control`、`knowledge_boundary`、`in_character_principle` 以前只存在卡里，不进入生成。现在它们会收成一小段【说话习惯】：
+
+- 句子长短、标点习惯、常用语气词按卡面描述直接给出行为提示，不暴露数字。
+- `emoji_level`/`typo_level` 转成「不用 / 偶尔一个 / 可以常用」这类程度，不要求模型精确计数。
+- `conflict_style` 与自控值合并成一句「被冒犯时倾向 …」，配合全局规则「先短句顶回去或冷处理，不解释、不求饶」。
+- `knowledge_boundary` 转成「不懂就说不懂，不编型号和参数」的边界；`in_character_principle` 只截前 120 字，防止模型用 AI/程序自证的方式破面。
+- 全局规则另外限制：默认 1 个气泡、一条回复最多一个问句、不主动提 AI/模型/程序。
+- 只写说出口的话：不用括号写动作、表情或发送旁白；表情包是语气不是话题，文字里不点破或解说「这张图/这个表情/图里」，也不说「这图就是你/像你」；没有别的正文就只发表情。`sticker.search/describe` 返回的描述只用于挑选和确认，不进入回复。
+
+重复自检是纯函数 `readRepetition`：取最近 12 条自己发出的消息，按中文二元组统计反复出现的生活词（去掉常用词、人名），出现 ≥3 次时在【重复自检】里列出「炒饭（6 次）」这类事实，并建议「没有新信息就换一件事」。它只提供可见性，不禁用话题；活动提示的陈旧阈值也从 4 小时降到 2 小时，要求模型先改 `current_activity` 再回复。
 
 ## 7. Agent 工具与动作
 
@@ -297,6 +310,18 @@ type OutgoingBeat =
 
 - `dailyMessageBudget`：每天最多发送的文本/表情气泡数（跨私聊与群聊合计，默认 30；0 表示不限制）。
 - `dailyProactiveBudget`：每天最多主动开启几次话题（按发出消息的心跳/主动 run 计，默认 3；0 表示只回应、不主动，负数表示不限制）。达到上限后心跳降级为 `SHADOW` 且不再领取主动意图，次日恢复。
+- `proactiveWakeDailyLimit`：每天最多几次自发唤醒会真正调用模型（默认 0 表示不限制）。有到期待办时不占这个额度，避免为了省预算漏掉承诺。
+- `proactiveWakeMinGapSeconds`：两次自发唤醒之间至少隔多久（默认 0 关闭）。被间隔挡住时只顺延 `nextWakeAt`，不写运行记录；到期待办同样不受限。
+
+唤醒是机会，不是任务：心跳只把场景、到期待办/意图和反馈交给模型；真正发消息仍是 `engage + beats` 的显式动作，醒来后沉默不扣分。
+
+主动意图是模型写下的目标假设，不是后台排好的固定台词：
+
+- 规划器可输出 `intentions[]`：`need`（care/connect/share/followup/play/learn 等自由分类）、`targetContactId`、`reason`、`seed`、`urgency`、`confidence`、`risk`、`earliestAt`、`expiresAt`。运行时按 `seed` 去重后落库，到 `earliestAt` 才进入 `WakeBrief`。
+- 选人没有“主人”或唯一对象：唤醒简报按 `affinity×0.4 + intimacy×0.3 + trust×0.2 + obligation×0.1` 给关系分，列出【可以找的人】，由模型自己决定找谁或不找。
+- 到期意图按 `urgency × 把握 × 关系分 ×（1 - 风险）` 排序，只决定先看哪条，不替模型发送。
+- 意图发出后，对方的下一条消息会用 `classifyText` 粗略反馈（追问/帮忙/认真接话/只应一声/顺势收尾），写回 `feedback` / `feedbackAt` 并按方向微调 `confidence`；12 小时没有回应则记“没有回应”并降一点把握。最近 7 天最多 3 条反馈会进提示词，避免重复同样的开场。
+- 对话自然收尾时模型可写 `dialogue.close`；其中的 `nextOpening` 会变成 6 小时后最早可提、14 天过期的 followup 意图。收尾只结束这一段，不是关系结束。
 
 - `selfScheduleEnabled`：是否允许人格在计划里写 `nextWakeAt` 自主安排下次醒来。
 - `wakeIntervalMinutes`：没有到期事项时的常规间隔。
@@ -308,6 +333,8 @@ type OutgoingBeat =
 计划任务同意规则：人格不能凭单方面愿望建待办。`todos[].consent` 必须同时给出邀请消息 ID 与答应消息 ID；答应必须发生在邀请之后、间隔不超过 40 条消息与 12 小时，两段消息要来自双方、包含明确邀约与明确同意，且答应不能是否定、反问或含糊拖延；群聊里的邀请还必须点名或 @ 人格本人。`todo.create` 工具走同一校验，未通过直接报错。
 
 睡眠：按人格时区与在线策略；睡眠期间默认不主动，@、亲密求助、紧急承诺可突破；醒来补消息；睡眠时做深度整理与日记。
+
+活动时效复核：空闲心跳本来会在没有待办、意图、生活小事、好奇或反思时直接跳过，导致活动可能长期停在「刷锅」。现在这条早退路径会先检查 `activitySince`：活动超过 90 分钟、且不是睡觉/休息类活动时，调用一次独立的轻量模型（`source=mind.activity`，只输出 `{activity, location, reason}`）判断此刻真正在做什么。只有模型给出不同活动时才写入 `PersonaState`（来源 `AGENT`，自动更新 `activitySince`）；结果相同则保持原样。`activityCheckedAt` 记录复核时间，同一活动 60 分钟内不重复询问，避免每 30 分钟心跳都烧 token。复核失败或返回空也不改值，只写标记稍后再试。消息轮与有正事的计划仍由【此刻】的时长提醒自行决定，不额外调用。
 
 ## 9. 消息接入与模式
 
@@ -413,7 +440,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 
 - 顶部只保留渠道选择、渠道配置入口、立即唤醒与自动刷新（10 秒 / 30 秒 / 1 分钟 / 5 分钟，默认 30 秒，存 localStorage）。
 - 人格简报：实时状态 10 项、位置、下次唤醒、当前长时事件（叫醒难度、已收到点名、结束按钮与最近结算原因）。
-- 页签：`runs`（运行轨迹 + 提示词日志 + 待审动作）、`changes`（统一变动历史，按 scope 过滤）、`relations`、`groups`、`memories`、`plans`（待办 / 主动意图）、`journal`、`stickers`。
+- 页签：`runs`（运行轨迹 + 提示词日志 + 心跳日志 + 对话试跑 + 待审动作）、`changes`（统一变动历史，按 scope 过滤）、`relations`、`groups`、`memories`、`plans`（待办 / 主动意图）、`journal`、`stickers`。
 - 长列表按批懒渲染；页签内容在固定高度容器内滚动，后台刷新不清空页面。
 - 心智配置（模式、每日消息/主动额度、唤醒节奏、回复回避、连发合并、图片描述提示词等）并入互联中心的渠道人格面板「心智」页签，与变动历史放在一起。
 
@@ -474,6 +501,13 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 时间感知与活动时效（2026-11-05）：`PersonaState` 新增 `activitySince`，所有写 `currentActivity` 的路径（手动/工具、漂移、长时事件）都会更新时间；迁移按最近一次 `currentActivity` 变更日志回填。规划提示词的【此刻】改为先给出本地日期、星期、时区、距上一条消息多久、当前活动从几点开始和已持续多久；活动超过 4 小时追加一句「除非本来就这样，否则该换一件事」的提醒。聊天时间戳从 UTC ISO 改为人格本地时间，跨 30 分钟标注间隔、跨天带日期。`time.now` 也返回本地时间与活动时长。提示词新增规则：时间不会停在上一次对话，活动超时或与时段不符时先用 `self.attributes.update` 改 `current_activity`；自我反思时顺手校正活动。
 - 记忆感知与工具调用（2026-11-05）：【可用工具】改为常驻全部工具名与一句话用途，模型可直接调用，参数不确定时才用 `tools.search`；系统提示词加入动手前查证清单（过去/旧话/关系/承诺/时间/自身状态先查），允许一轮连续调用多个工具，并明确「查证不必说出口」。工具循环上限 6→10 步，连续 8 次调用后才提示收敛；相关记忆 8→12 条，recall 上限同步 12。每轮提示词新增记忆库规模（总量、近 7 天新增、最近一条日期），明确告知只展开了最相关的部分；`memory.create` 可在轮中立即写记忆，与 final 的 `memoryWrites` 共用同一记忆库。
 - 对话节奏与兴趣（2026-11-06）：新增纯函数 `readConversation`，把对方最后一句分为道别/提问/求助/附和/有内容，计算 ownIntent、theirIntent、话题闭环、疲劳、未答提问、明确道别与直接点名，输出 continue/linger/close 及建议；未答提问只阻止收尾，不强制其他行为。兴趣从人格目标/价值观、当前活动与位置、`PREFERENCE`/`TOPIC` 记忆拆句匹配，按字符重合 + 本地向量算 0–100 并并入 ownIntent。结论写入【对话节奏】和 AgentRun 的注意力步骤；没有新增设置或表，私聊不再默认每条都值得回，但仍由模型决定。
+- 活动时效复核（2026-11-06）：`PersonaState` 新增 `activityCheckedAt`（迁移 `20261106064000_persona_activity_checked`）。空闲心跳早退前，若活动已持续 ≥90 分钟且不是睡觉/休息类，调用一次轻量模型（`mind.activity`，最多 200 token，只输出 activity/location/reason）；仅当活动变化时写回 `PersonaState`，60 分钟内不重复复核。修复「刷锅六小时」这类活动长期不更新的问题，同时避免心跳每轮都调用模型。
+- 主动意图、唤醒预算与反馈（2026-11-06）：`AgentIntention` 新增 `need`、`confidence`、`risk`、`feedback`、`feedbackAt`（迁移 `20261106070000_mind_proactive_goals_budget`）；`ChatMindSettings` 新增 `proactiveWakeDailyLimit`、`proactiveWakeMinGapSeconds` 并在面板可改。规划器可一次输出多条 `intentions`（关心/联系/分享/跟进/邀约/学习），按 seed 去重落库，到 `earliestAt` 才进入唤醒简报；到期意图按 `urgency × 把握 × 关系分 ×（1-风险）` 排序，关系分由好感/亲密/信任/亏欠加权，不引入“主人”角色。对话 `dialogue.close` 的 `nextOpening` 自动变成 6 小时后、14 天过期的 followup 意图。对方回应会按追问/帮忙/认真接话/只应一声/顺势收尾写回反馈并微调把握，12 小时无回应也会记一条；最近 7 天最多 3 条反馈进提示词。唤醒只提供机会，发消息仍必须 `engage + beats`；自发唤醒受每日上限与最小间隔约束，有到期待办时不占额度。
+- 时间、说话习惯与重复自检（2026-11-06）：`time_zone` 先用 `normalizeTimeZone` 归一（`UTC+8（东八区）`/`GMT+8`/`北京时间` → `Asia/Shanghai`），再交给 `Intl`；【此刻】直接附带凌晨/清晨/上午/中午/下午/傍晚/晚上/深夜，避免模型自己把 16:56 说成半夜。角色卡的句子长短、标点、语气词、emoji/错别字等级、冲突风格、知识边界和出戏防线收进【说话习惯】；全局规则限制默认 1 个气泡、一条回复最多一个问句、被骂时短句顶回或冷处理、不主动提 AI/模型/程序、不懂就说不懂。新增纯函数 `readRepetition`，从最近 12 条自己的消息里统计反复出现的生活词（≥3 次）并在【重复自检】中提示换话题；活动提示阈值 4 小时→2 小时，空闲复核 2 小时→90 分钟。记忆去重增加“同 subject、跨 kind、相似度 ≥0.92”的合并，只对 FACT/PROMISE/PREFERENCE/BOUNDARY 生效，避免饭团/炒饭这类同一件事被写成多条。
+- 运行轨迹实时与详情（2026-11-06）：`AgentRunSummary` 增加触发消息预览（`messagePreview`/`messageSender`）；`LlmPromptLog` 增加 `runId`（迁移 `20261106080000_llm_prompt_run_id`），规划器调用把所属 run 写进提示词日志。运行列表首屏常驻 3 秒轮询（后台也拉取）并按 `startedAt` 合并排序，新运行自动出现在顶部；单条详情在 `RUNNING` 时每 2 秒刷新、结束后每 6 秒补拉迟到的写回步骤，提示词日志在运行中每 3 秒刷新。详情抽屉依次展示：触发消息、判断（社交读/对话节奏/底线）、生成的提示词（System/Prompt/Response）、工具调用（入参/结果/错误）、Agent 回应（气泡与情绪/姿态）、动作执行（状态/消息 ID/错误）、进入心智的完整对话、其余执行步骤与入参/产出。
+- 表情包描述式发言（2026-11-06）：提示词新增「只写说出口的话，不写动作/舞台旁白」，表情规则明确「表情是语气不是话题」，禁止在文字里点破或解说「这张图/这个表情/图里」、禁止「这图就是你/像你」，没有别的正文就只发表情；找不到合适表情不发、不用文字模拟。`sticker.search` / `sticker.describe` 的工具说明标注描述仅供挑选和确认，不得复述给用户。
+- 图片消息进入提示词与轨迹（2026-11-06）：图片消息不再渲染成 `[空消息] [图片：…]`，有描述时直接 `[图片：描述]`，没描述但有图时 `[图片]`，避免模型把表情当成空消息。`AgentRun.scene` 快照开始保存每条消息的图片描述与图片数量，运行轨迹的「收到的消息 / 进入心智的对话」会显示模型实际看到的内容；运行列表预览也会用图片描述兜底。人格发表情时把表情库描述一并写入聊天媒体对象（不覆盖已有视觉描述），因此自己发出的表情在后续上下文里同样可读。
+- 心跳日志与只读试跑（2026-11-06）：新增 `MindHeartbeatLog`（迁移 `20261106090000_mind_heartbeat_log`），每次心跳都留一条记录，包括没有进入模型的 `IDLE` / `GATED` / `LONG_EVENT` / `NO_CONVERSATION` / `REPLY_LOCK` / `DISABLED` / `FAILED`，最近 500 条/人格自动裁剪。`RUN` 记录 `outcome`、唤醒简报、计划摘要（姿态/情绪/气泡/记忆写入数/关系信号/待办/意图/长时事件/下次唤醒）、工具调用与动作执行；`GET /mind/heartbeats/:personaId` 支持 `limit`/`offset`。界面在「提示词日志」旁新增「心跳日志」，抽屉里可一键跳到对应运行轨迹。新增 `POST /mind/simulate` 只读试跑：读取真实人格、设置、状态、关系、记忆和最近 30 条聊天，临时追加一条测试消息后真实调用规划模型；跳过 `AgentRun`/记忆/关系/待办/状态/消息/提示词日志写入，写入类工具（`memory.create`、`relationship.update`、`sticker.describe`、`sticker.collect`、`todo.create`、`self.attributes.update`）在试跑中返回「已拦截」，`relationship.get`/`memory.search` 改走只读查询，召回不更新 `lastRecalledAt`。界面「对话试跑」页签选择会话、输入测试消息即可查看判断、回应、工具调用、提示词、召回记忆与进入模型的对话。
 
 - 属性单一真源（2026-11-04）：删除 `PersonaRelationship.baseValues`；把 `ChatPrivatePersona`/`ChatGroupPersona` 迁移进 `PersonaRelationship`/`PersonaGroupStance` 后删表；对话页人格面板改读这两张表；渠道人格面板改为服务端保存并写入 `ChatChannelPersona.history`；`PersonaState` 仍是唯一动态状态，渠道快照只做读时投影。
 - 计划同意与记忆节流（2026-11-04）：`todos` 需邀请/答应两条消息并通过时序、间隔、否定词、点名校验；普通情景记忆不再每轮写入，阈值与冷却时间见第 5 节。

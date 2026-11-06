@@ -20,6 +20,8 @@ export interface SceneMessage {
   text: string;
   sentAt: string;
   images: string[];
+  /** Images present even when no description was generated. */
+  imageCount: number;
   /** At-segment or poke targeting the persona's own account. */
   mentionedSelf: boolean;
 }
@@ -106,9 +108,22 @@ export interface MindWakeBrief {
     reason: string;
     seed: string;
     urgency: number;
+    need: string;
+    confidence: number;
+    risk: number;
+    relationScore: number;
   }[];
   overnightMessages: SceneMessage[];
   unconsolidatedCount: number;
+}
+
+/** How a previous proactive attempt landed, shown to the model as feedback. */
+export interface MindIntentionFeedback {
+  need: string;
+  seed: string;
+  feedback: string;
+  status: string;
+  at: string;
 }
 
 export interface ToolExecution {
@@ -144,6 +159,29 @@ export const MIND_MAX_RELATIONSHIP_DELTA = 5;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * One comparable number for "how close is this person": liking first,
+ * then intimacy, trust and a sense of owing. -100 .. 100.
+ */
+export function relationScoreOf(
+  relationship: {
+    affinity: number;
+    intimacy: number;
+    trust: number;
+    obligation: number;
+  } | null,
+): number {
+  if (!relationship) {
+    return 0;
+  }
+  return Math.round(
+    relationship.affinity * 0.4 +
+      relationship.intimacy * 0.3 +
+      relationship.trust * 0.2 +
+      relationship.obligation * 0.1,
+  );
 }
 
 export function readString(value: unknown, fallback = ''): string {
@@ -228,6 +266,71 @@ export function localDateKey(date: Date, timeZone?: string | null): string {
   return `${year}-${month}-${day}`;
 }
 
+const TIME_ZONE_ALIASES = new Map<string, string>([
+  ['utc+8', 'Asia/Shanghai'],
+  ['utc+08', 'Asia/Shanghai'],
+  ['utc+8:00', 'Asia/Shanghai'],
+  ['utc+08:00', 'Asia/Shanghai'],
+  ['gmt+8', 'Asia/Shanghai'],
+  ['gmt+08:00', 'Asia/Shanghai'],
+  ['+8', 'Asia/Shanghai'],
+  ['+08:00', 'Asia/Shanghai'],
+  ['东八区', 'Asia/Shanghai'],
+  ['北京时间', 'Asia/Shanghai'],
+  ['中国标准时间', 'Asia/Shanghai'],
+  ['beijing time', 'Asia/Shanghai'],
+  ['china standard time', 'Asia/Shanghai'],
+  ['asia/shanghai', 'Asia/Shanghai'],
+  ['utc', 'UTC'],
+  ['gmt', 'UTC'],
+]);
+
+/**
+ * Persona cards often store "UTC+8（东八区）" instead of an IANA zone.
+ * Intl silently falls back to server time on an invalid zone, which breaks
+ * as soon as the server is not in that offset, so normalize before use.
+ */
+export function normalizeTimeZone(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim();
+  if (!value) {
+    return null;
+  }
+  if (isValidTimeZone(value)) {
+    return value;
+  }
+  const compact = value
+    .replace(/（[^）]*）/gu, '')
+    .replace(/\([^)]*\)/gu, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  const alias = TIME_ZONE_ALIASES.get(compact);
+  if (alias) {
+    return alias;
+  }
+  return isValidTimeZone(compact) ? compact : null;
+}
+
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function timePeriodLabel(date: Date, timeZone?: string | null): string {
+  const hour = localHour(date, timeZone);
+  if (hour < 5) return '凌晨';
+  if (hour < 8) return '清晨';
+  if (hour < 11) return '上午';
+  if (hour < 13) return '中午';
+  if (hour < 18) return '下午';
+  if (hour < 19) return '傍晚';
+  if (hour < 23) return '晚上';
+  return '深夜';
+}
+
 export function localHour(date: Date, timeZone?: string | null): number {
   try {
     if (timeZone) {
@@ -278,9 +381,18 @@ export function formatSceneForPrompt(
         previousAt = at.getTime();
       }
       const sender = message.isSelf ? '我' : message.senderName;
-      const images = message.images.length > 0 ? ` [图片：${message.images.join('；')}]` : '';
-      const text = message.text.trim() || (message.kind === 'FACE' ? '[表情]' : '[空消息]');
-      return `[${label}${gapLabel}] ${sender}：${text}${images}`;
+      const images =
+        message.images.length > 0
+          ? `[图片：${message.images.join('；')}]`
+          : message.imageCount > 0
+            ? '[图片]'
+            : '';
+      const text = message.text.trim();
+      // Image-only messages are not empty; avoid prefixing them with [空消息].
+      const body =
+        [text, images].filter(Boolean).join(' ') ||
+        (message.kind === 'FACE' ? '[表情]' : '[空消息]');
+      return `[${label}${gapLabel}] ${sender}：${body}`;
     })
     .join('\n');
 }

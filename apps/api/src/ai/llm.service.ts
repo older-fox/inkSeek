@@ -32,6 +32,10 @@ export interface LlmCompletionInput {
   timeoutMs?: number;
   /** Caller label shown in the prompt log, e.g. `mind.planner`. */
   source?: string;
+  /** Mind run that owns this call; lets the run detail show its prompts. */
+  runId?: string | null;
+  /** Simulation calls run for real but must not leave prompt logs behind. */
+  log?: boolean;
 }
 
 export interface LlmCompletion {
@@ -93,36 +97,42 @@ export class LlmService {
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
       };
-      await this.promptLogs.record({
-        source: input.source?.trim() || 'llm',
-        providerId: provider.id,
-        providerName: provider.name,
-        model,
-        system: input.system ?? '',
-        prompt: input.prompt,
-        response: result.text,
-        imageCount: input.images?.length ?? 0,
-        promptTokens: result.promptTokens ?? null,
-        completionTokens: result.completionTokens ?? null,
-        latencyMs,
-        error: null,
-      });
+      if (input.log !== false) {
+        await this.promptLogs.record({
+          runId: input.runId ?? null,
+          source: input.source?.trim() || 'llm',
+          providerId: provider.id,
+          providerName: provider.name,
+          model,
+          system: input.system ?? '',
+          prompt: input.prompt,
+          response: result.text,
+          imageCount: input.images?.length ?? 0,
+          promptTokens: result.promptTokens ?? null,
+          completionTokens: result.completionTokens ?? null,
+          latencyMs,
+          error: null,
+        });
+      }
       return completion;
     } catch (error) {
-      await this.promptLogs.record({
-        source: input.source?.trim() || 'llm',
-        providerId: provider?.id ?? null,
-        providerName: provider?.name ?? null,
-        model,
-        system: input.system ?? '',
-        prompt: input.prompt,
-        response: '',
-        imageCount: input.images?.length ?? 0,
-        promptTokens: null,
-        completionTokens: null,
-        latencyMs: Math.round(performance.now() - startedAt),
-        error: error instanceof Error ? error.message : String(error),
-      });
+      if (input.log !== false) {
+        await this.promptLogs.record({
+          runId: input.runId ?? null,
+          source: input.source?.trim() || 'llm',
+          providerId: provider?.id ?? null,
+          providerName: provider?.name ?? null,
+          model,
+          system: input.system ?? '',
+          prompt: input.prompt,
+          response: '',
+          imageCount: input.images?.length ?? 0,
+          promptTokens: null,
+          completionTokens: null,
+          latencyMs: Math.round(performance.now() - startedAt),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
   }

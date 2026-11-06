@@ -298,13 +298,13 @@ export class ChatMediaService implements OnModuleInit {
     return dataUrl;
   }
 
-  async saveDataUrl(dataUrl: string): Promise<StoredMedia | null> {
+  async saveDataUrl(dataUrl: string, description?: string): Promise<StoredMedia | null> {
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
     if (!match || !match[1] || !match[2]) {
       return null;
     }
 
-    return this.storeImage(Buffer.from(match[2], 'base64'), match[1], null);
+    return this.storeImage(Buffer.from(match[2], 'base64'), match[1], null, description);
   }
 
   private async saveRemoteImage(remoteUrl: string): Promise<StoredMedia | null> {
@@ -343,6 +343,7 @@ export class ChatMediaService implements OnModuleInit {
     buffer: Buffer,
     mimeTypeHint: string | null,
     remoteUrl: string | null,
+    description: string | null = null,
   ): Promise<StoredMedia | null> {
     if (buffer.byteLength === 0 || buffer.byteLength > MAX_MEDIA_BYTES) {
       return null;
@@ -375,6 +376,7 @@ export class ChatMediaService implements OnModuleInit {
       byteSize: buffer.byteLength,
       width: size?.width ?? null,
       height: size?.height ?? null,
+      description: description?.trim() || null,
     });
 
     return {
@@ -420,6 +422,7 @@ export class ChatMediaService implements OnModuleInit {
     byteSize: number;
     width: number | null;
     height: number | null;
+    description?: string | null;
   }): Promise<string | null> {
     try {
       const row = await this.prisma.chatMediaObject.upsert({
@@ -428,6 +431,16 @@ export class ChatMediaService implements OnModuleInit {
         create: input,
         select: { id: true },
       });
+      if (input.description) {
+        // Never overwrite an existing vision description with a sticker caption.
+        await this.prisma.chatMediaObject.updateMany({
+          where: {
+            sha256: input.sha256,
+            OR: [{ description: null }, { description: '' }],
+          },
+          data: { description: input.description },
+        });
+      }
       return row.id;
     } catch (error) {
       if (isUniqueViolation(error)) {

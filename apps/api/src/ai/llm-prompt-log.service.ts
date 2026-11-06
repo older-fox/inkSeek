@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 
 export interface LlmPromptLogInput {
+  /** Authored by a mind run; omitted for standalone calls. */
+  runId?: string | null;
   source: string;
   providerId: string | null;
   providerName: string | null;
@@ -27,7 +29,9 @@ export class LlmPromptLogService {
 
   async record(input: LlmPromptLogInput): Promise<void> {
     try {
-      await this.prisma.llmPromptLog.create({ data: input });
+      await this.prisma.llmPromptLog.create({
+        data: { ...input, runId: input.runId ?? null },
+      });
       const stale = await this.prisma.llmPromptLog.findMany({
         select: { id: true },
         orderBy: { createdAt: 'desc' },

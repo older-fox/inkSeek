@@ -406,7 +406,7 @@ export class ChatMessagesService {
     channel: ChatChannel,
     conversation: ChatConversation,
     client: OneBotRequester,
-    input: { text: string; images: string[] },
+    input: { text: string; images: string[]; imageDescriptions?: string[] },
   ): Promise<ChatMessageSummary> {
     const segments: OneBotSegment[] = [];
     const pendingImages: { dataUrl: string; position: number }[] = [];
@@ -470,8 +470,8 @@ export class ChatMessagesService {
     });
     const imageAssets = (
       await Promise.all(
-        pendingImages.map(async ({ dataUrl, position }) => {
-          const asset = await this.media.saveDataUrl(dataUrl);
+        pendingImages.map(async ({ dataUrl, position }, index) => {
+          const asset = await this.media.saveDataUrl(dataUrl, input.imageDescriptions?.[index]);
           return asset ? { ...asset, position } : null;
         }),
       )

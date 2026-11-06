@@ -29,6 +29,7 @@ import { WebSearchService } from './web-search.service.js';
 import {
   clamp,
   localHour,
+  normalizeTimeZone,
   readNumber,
   readString,
   readStringArray,
@@ -41,7 +42,18 @@ export interface MindToolContext {
   state: PersonaState;
   settings: MindSettingsRecord;
   mode: string;
+  /** Simulation: read-tools work, write-tools are blocked and nothing is persisted. */
+  dryRun?: boolean;
 }
+
+const DRY_RUN_BLOCKED_TOOLS = new Set([
+  'memory.create',
+  'relationship.update',
+  'sticker.describe',
+  'sticker.collect',
+  'todo.create',
+  'self.attributes.update',
+]);
 
 const RELATION_NUMERIC_FIELDS = [
   'affinity',
@@ -215,13 +227,13 @@ export const MIND_TOOL_CATALOG = [
   {
     name: 'sticker.search',
     description:
-      '按情绪或使用场景检索自己的表情库。返回每张表情的 id、描述和标签；这个 id 可以直接放进 beats 的 stickerId 用来发表情。',
+      '按情绪或使用场景检索自己的表情库。返回每张表情的 id、描述和标签；这个 id 可以直接放进 beats 的 stickerId 用来发表情。description 只用于挑选，不要复述、引用或写进回复文字。',
     input: { query: 'string? 情绪或场景，默认自然', limit: 'number? 1-5' },
   },
   {
     name: 'sticker.describe',
     description:
-      '重新识别表情库里的一张表情：读取原图、生成新描述并更新数据库。描述不准，或想确认表情的内容、文字、情绪、适用场景时使用；stickerId 从 sticker.search 获取。',
+      '重新识别表情库里的一张表情：读取原图、生成新描述并更新数据库。描述不准，或想确认表情的内容、文字、情绪、适用场景时使用；stickerId 从 sticker.search 获取。描述只用于你自己确认，不要对用户复述图片内容。',
     input: {
       stickerId: 'string',
       focus: 'string? 想重点确认的内容，如情绪、文字、适用场景',
@@ -320,6 +332,13 @@ export class MindToolsService {
     args: Record<string, unknown>,
     context: MindToolContext,
   ): Promise<unknown> {
+    if (context.dryRun && DRY_RUN_BLOCKED_TOOLS.has(name)) {
+      return {
+        dryRun: true,
+        blocked: true,
+        note: '试跑模式不写数据库：这次调用的写入被跳过，可以当作已经完成来继续规划。',
+      };
+    }
     switch (name) {
       case 'tools.search':
         return this.toolsSearch(args);
@@ -470,7 +489,9 @@ export class MindToolsService {
   private async memorySearch(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim() || '最近发生的事';
     const limit = Math.max(1, Math.min(12, readNumber(args['limit'], 8)));
-    const recall = await this.memories.recallForScene(context.scene, query, limit);
+    const recall = await this.memories.recallForScene(context.scene, query, limit, {
+      markRecalled: !context.dryRun,
+    });
     return [
       ...recall.core.map((memory) => ({ ...compactMemory(memory), core: true })),
       ...recall.relevant.map((memory) => ({ ...compactMemory(memory), core: false })),
@@ -720,7 +741,16 @@ export class MindToolsService {
     if (!contactId) {
       throw new Error('contactId 不能为空');
     }
-    const relationship = await this.relationships.get(context.scene.persona.id, contactId);
+    const relationship = context.dryRun
+      ? await this.relationships.find(context.scene.persona.id, contactId)
+      : await this.relationships.get(context.scene.persona.id, contactId);
+    if (!relationship) {
+      return {
+        contactId,
+        relationship: null,
+        note: '试跑模式下这个联系人还没有关系记录，按初次接触处理。',
+      };
+    }
     return {
       attributes: relationshipAttributes(relationship),
       id: relationship.id,
@@ -1168,7 +1198,7 @@ function formatHistoryValue(value: unknown): string {
 
 function timeNow(context: MindToolContext) {
   const values = context.scene.persona.values as Record<string, unknown> | null;
-  const timeZone = readString(values?.['time_zone']) || undefined;
+  const timeZone = normalizeTimeZone(readString(values?.['time_zone'])) ?? undefined;
   const now = new Date();
   const since = context.state.activitySince;
   const local = (() => {

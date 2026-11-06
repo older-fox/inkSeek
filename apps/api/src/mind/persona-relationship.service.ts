@@ -71,6 +71,15 @@ export class PersonaRelationshipService {
     return this.get(personaId, contact.id);
   }
 
+  /** Read-only lookup for simulations: never creates a relationship row. */
+  async find(personaId: string, contactId: string): Promise<PersonaRelationshipRecord | null> {
+    const withContact = await this.prisma.personaRelationship.findUnique({
+      where: { personaId_contactId: { personaId, contactId } },
+      include: { contact: true },
+    });
+    return withContact ? toRecord(withContact) : null;
+  }
+
   async get(personaId: string, contactId: string): Promise<PersonaRelationshipRecord> {
     const row = await this.ensureForContact(personaId, contactId);
     const withContact = await this.prisma.personaRelationship.findUniqueOrThrow({

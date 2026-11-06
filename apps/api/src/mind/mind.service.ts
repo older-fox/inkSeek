@@ -9,9 +9,14 @@ import type {
   AgentTodoRecord,
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
+  MindHeartbeatLogRecord,
+  MindHeartbeatQueryInput,
+  MindConversationOption,
   MindPromptLogQueryInput,
   MindSettingsRecord,
   MindSettingsUpdateInput,
+  MindSimulationInput,
+  MindSimulationResult,
   PersonaChangeRecord,
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
@@ -31,8 +36,9 @@ import type {
   PersonaJournal,
 } from '../generated/prisma/client.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
+import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
-import { MindRuntimeService } from './mind-runtime.service.js';
+import { MindRuntimeService, toRunSummary } from './mind-runtime.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
 import {
@@ -57,6 +63,7 @@ export class MindService {
     private readonly runtime: MindRuntimeService,
     private readonly executor: MindActionExecutor,
     private readonly heartbeat: MindHeartbeatService,
+    private readonly heartbeatLogs: MindHeartbeatLogService,
     private readonly stickers: StickerService,
   ) {}
 
@@ -229,7 +236,12 @@ export class MindService {
         targetId: input.targetId ?? '',
         reason: input.reason ?? '',
         seed: input.seed ?? '',
+        need: input.need ?? '',
         urgency: input.urgency ?? 50,
+        confidence: input.confidence ?? 50,
+        risk: input.risk ?? 20,
+        feedback: input.feedback ?? '',
+        feedbackAt: input.feedbackAt ? new Date(input.feedbackAt) : null,
         earliestAt: input.earliestAt ? new Date(input.earliestAt) : new Date(),
         expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
       },
@@ -250,7 +262,10 @@ export class MindService {
   listPromptLogs(input: MindPromptLogQueryInput): Promise<LlmPromptLogRecord[]> {
     return this.prisma.llmPromptLog
       .findMany({
-        where: input.source ? { source: input.source } : {},
+        where: {
+          ...(input.source ? { source: input.source } : {}),
+          ...(input.runId ? { runId: input.runId } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: Math.max(1, Math.min(200, input.limit)),
       })
@@ -272,13 +287,67 @@ export class MindService {
         orderBy: { startedAt: 'desc' },
         take: Math.max(1, Math.min(100, limit)),
         skip: Math.max(0, offset),
-        include: { conversation: { select: { name: true } } },
+        // The head page is polled every few seconds; skip plan/socialRead blobs.
+        select: {
+          id: true,
+          personaId: true,
+          channelId: true,
+          conversationId: true,
+          messageId: true,
+          trigger: true,
+          mode: true,
+          status: true,
+          providerId: true,
+          model: true,
+          promptTokens: true,
+          completionTokens: true,
+          cost: true,
+          latencyMs: true,
+          decision: true,
+          scene: true,
+          startedAt: true,
+          finishedAt: true,
+          conversation: { select: { name: true } },
+        },
       })
       .then((rows) => rows.map((run) => toRunSummary(run, run.conversation?.name ?? null)));
   }
 
   runDetail(id: string): Promise<AgentRunDetail> {
     return this.runtime.runDetail(id);
+  }
+
+  listHeartbeats(
+    personaId: string,
+    input: MindHeartbeatQueryInput,
+  ): Promise<MindHeartbeatLogRecord[]> {
+    return this.heartbeatLogs.list(personaId, input.limit, input.offset);
+  }
+
+  simulate(input: MindSimulationInput): Promise<MindSimulationResult> {
+    return this.runtime.simulate(input);
+  }
+
+  async listSimulationConversations(personaId: string): Promise<MindConversationOption[]> {
+    const persona = await this.prisma.chatChannelPersona.findUnique({
+      where: { id: personaId },
+      select: { channelId: true },
+    });
+    if (!persona) {
+      throw new NotFoundException({ code: 'PERSONA_NOT_FOUND', message: '人格不存在' });
+    }
+    const rows = await this.prisma.chatConversation.findMany({
+      where: { channelId: persona.channelId },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 30,
+      select: { id: true, name: true, kind: true, lastMessageAt: true },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+    }));
   }
 
   listJournal(personaId: string, limit = 30): Promise<PersonaJournalRecord[]> {
@@ -347,7 +416,12 @@ function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
     targetId: row.targetId,
     reason: row.reason,
     seed: row.seed,
+    need: row.need,
     urgency: row.urgency,
+    confidence: row.confidence,
+    risk: row.risk,
+    feedback: row.feedback,
+    feedbackAt: row.feedbackAt?.toISOString() ?? null,
     earliestAt: row.earliestAt.toISOString(),
     expiresAt: row.expiresAt?.toISOString() ?? null,
     status: row.status,
@@ -361,6 +435,7 @@ function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
 function toPromptLogRecord(row: LlmPromptLog): LlmPromptLogRecord {
   return {
     id: row.id,
+    runId: row.runId,
     source: row.source,
     providerId: row.providerId,
     providerName: row.providerName,
@@ -387,52 +462,5 @@ function toJournalRecord(row: PersonaJournal): PersonaJournalRecord {
     mood: row.mood,
     consolidatedMemoryIds: row.consolidatedMemoryIds,
     createdAt: row.createdAt.toISOString(),
-  };
-}
-
-function toRunSummary(
-  row: {
-    id: string;
-    personaId: string;
-    channelId: string;
-    conversationId: string | null;
-    trigger: string;
-    mode: string;
-    status: string;
-    providerId: string | null;
-    model: string | null;
-    promptTokens: number | null;
-    completionTokens: number | null;
-    cost: number | null;
-    latencyMs: number | null;
-    decision: unknown;
-    startedAt: Date;
-    finishedAt: Date | null;
-  },
-  conversationName: string | null,
-): AgentRunSummary {
-  const decision =
-    row.decision && typeof row.decision === 'object' && !Array.isArray(row.decision)
-      ? (row.decision as Record<string, unknown>)
-      : null;
-  return {
-    id: row.id,
-    personaId: row.personaId,
-    channelId: row.channelId,
-    conversationId: row.conversationId,
-    conversationName,
-    trigger: row.trigger as AgentRunSummary['trigger'],
-    mode: row.mode as AgentRunSummary['mode'],
-    status: row.status as AgentRunSummary['status'],
-    providerId: row.providerId,
-    model: row.model,
-    promptTokens: row.promptTokens,
-    completionTokens: row.completionTokens,
-    cost: row.cost,
-    latencyMs: row.latencyMs,
-    engage: typeof decision?.['engage'] === 'boolean' ? decision['engage'] : null,
-    reason: typeof decision?.['reason'] === 'string' ? decision['reason'] : null,
-    startedAt: row.startedAt.toISOString(),
-    finishedAt: row.finishedAt?.toISOString() ?? null,
   };
 }

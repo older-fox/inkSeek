@@ -186,10 +186,14 @@ export class MindActionExecutor {
       return summary.id;
     }
     if (beat.kind === 'sticker') {
-      const dataUrl = await this.stickers.toDataUrl(beat.stickerId);
+      const [dataUrl, description] = await Promise.all([
+        this.stickers.toDataUrl(beat.stickerId),
+        this.stickers.descriptionOf(beat.stickerId),
+      ]);
       const summary = await chat.sendMessage(scene.conversation.id, {
         text: '',
         images: [dataUrl],
+        imageDescriptions: description ? [description] : undefined,
       });
       await this.stickers.recordUsage(beat.stickerId);
       return summary.id;
@@ -205,7 +209,10 @@ export class MindActionExecutor {
       where: { id: action.personaId },
     });
     if (!scene || !persona) {
-      throw new NotFoundException({ code: 'ACTION_CONTEXT_MISSING', message: '动作缺少会话上下文' });
+      throw new NotFoundException({
+        code: 'ACTION_CONTEXT_MISSING',
+        message: '动作缺少会话上下文',
+      });
     }
     return {
       persona,

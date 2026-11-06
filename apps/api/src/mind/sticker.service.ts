@@ -208,6 +208,15 @@ export class StickerService implements OnModuleInit {
     return `data:${row.mimeType ?? 'image/png'};base64,${buffer.toString('base64')}`;
   }
 
+  /** Keeps the sent sticker meaningful in later chat context. */
+  async descriptionOf(id: string): Promise<string> {
+    const row = await this.prisma.stickerAsset.findUnique({
+      where: { id },
+      select: { description: true },
+    });
+    return row?.description.trim() ?? '';
+  }
+
   async recordUsage(id: string): Promise<void> {
     await this.prisma.stickerAsset.updateMany({
       where: { id },

@@ -17,6 +17,7 @@ import { embedText, cosineSimilarity, keywordOverlap } from './mind-vector.js';
 import {
   clamp,
   formatSceneForPrompt,
+  normalizeTimeZone,
   parseJsonArray,
   readNumber,
   readString,
@@ -43,6 +44,18 @@ const CORE_KINDS: readonly PersonaMemoryKind[] = [
   'REFLECTION',
 ];
 const DEDUPE_THRESHOLD = 0.94;
+/**
+ * The same event often gets written once as FACT and once as PROMISE.
+ * Only merge across kinds for long-term relation facts, and only when the
+ * text is nearly identical; episodes and procedures keep their own rows.
+ */
+const CROSS_KIND_DEDUPE_THRESHOLD = 0.92;
+const CROSS_KIND_DEDUPE_KINDS = new Set<PersonaMemoryKind>([
+  'FACT',
+  'PROMISE',
+  'PREFERENCE',
+  'BOUNDARY',
+]);
 /**
  * Scenes are not a chat log. Ordinary conversation is only recorded after a
  * cooldown; notable moments are coalesced. Long-term facts, preferences,
@@ -224,6 +237,7 @@ export class PersonaMemoryService {
     scene: MindScene,
     query: string,
     limit = 10,
+    options: { markRecalled?: boolean } = {},
   ): Promise<{
     core: PersonaMemoryRecord[];
     relevant: PersonaMemoryRecord[];
@@ -264,9 +278,11 @@ export class PersonaMemoryService {
       .map((row) => ({ row, score: scoreMemory(row, queryEmbedding, query) }))
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
-    await this.markRecalled(
-      [...coreRows, ...relevant.map((entry) => entry.row)].map((row) => row.id),
-    );
+    if (options.markRecalled !== false) {
+      await this.markRecalled(
+        [...coreRows, ...relevant.map((entry) => entry.row)].map((row) => row.id),
+      );
+    }
     return {
       core: coreRows.map(toRecord),
       relevant: relevant.map((entry) => ({
@@ -398,9 +414,9 @@ export class PersonaMemoryService {
     if (last && Date.now() - last.occurredAt.getTime() < gap) {
       return null;
     }
-    const timeZone =
-      readString((input.scene.persona.values as Record<string, unknown> | null)?.['time_zone']) ||
-      null;
+    const timeZone = normalizeTimeZone(
+      readString((input.scene.persona.values as Record<string, unknown> | null)?.['time_zone']),
+    );
     const transcript = formatSceneForPrompt(
       input.scene.messages.slice(-8).map((message) => ({
         ...message,
@@ -657,19 +673,24 @@ export class PersonaMemoryService {
     const candidates = await this.prisma.personaMemory.findMany({
       where: {
         personaId,
-        kind,
         subjectType,
         subjectId,
         status: 'ACTIVE',
       },
       orderBy: { updatedAt: 'desc' },
-      take: 200,
+      take: 300,
     });
     let best: PersonaMemory | null = null;
-    let bestScore = DEDUPE_THRESHOLD;
+    let bestScore = 0;
     for (const candidate of candidates) {
+      const threshold =
+        candidate.kind === kind
+          ? DEDUPE_THRESHOLD
+          : CROSS_KIND_DEDUPE_KINDS.has(kind) && CROSS_KIND_DEDUPE_KINDS.has(candidate.kind)
+            ? CROSS_KIND_DEDUPE_THRESHOLD
+            : Number.POSITIVE_INFINITY;
       const score = cosineSimilarity(embedding, candidate.embedding);
-      if (score > bestScore) {
+      if (score >= threshold && score > bestScore) {
         best = candidate;
         bestScore = score;
       }

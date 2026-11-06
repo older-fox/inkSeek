@@ -79,6 +79,10 @@ export interface MindSettingsRecord {
   quietIntervalMinutes: number;
   dailyMessageBudget: number;
   dailyProactiveBudget: number;
+  /** Model turns spent on proactive/heartbeat wakes per day; 0 = unlimited. */
+  proactiveWakeDailyLimit: number;
+  /** Minimum seconds between proactive/heartbeat wakes; 0 = off. */
+  proactiveWakeMinGapSeconds: number;
   maxBeats: number;
   minBeatDelayMs: number;
   maxBeatDelayMs: number;
@@ -112,6 +116,7 @@ export interface PersonaStateRecord {
   attention: number;
   currentActivity: string;
   activitySince: string | null;
+  activityCheckedAt: string | null;
   location: string;
   sleepDebt: number;
   health: number;
@@ -247,7 +252,12 @@ export interface AgentIntentionRecord {
   targetId: string;
   reason: string;
   seed: string;
+  need: string;
   urgency: number;
+  confidence: number;
+  risk: number;
+  feedback: string;
+  feedbackAt: string | null;
   earliestAt: string;
   expiresAt: string | null;
   status: AgentIntentionStatus;
@@ -286,6 +296,11 @@ export interface AgentRunSummary {
   channelId: string;
   conversationId: string | null;
   conversationName: string | null;
+  /** The inbound message that triggered this run, when there was one. */
+  messageId: string | null;
+  /** Last inbound message text captured in the run scene, for list previews. */
+  messagePreview: string | null;
+  messageSender: string | null;
   trigger: AgentRunTrigger;
   mode: PersonaMindMode;
   status: AgentRunStatus;
@@ -301,14 +316,118 @@ export interface AgentRunSummary {
   finishedAt: string | null;
 }
 
+export interface AgentRunSceneMessage {
+  id: string;
+  sender: string;
+  isSelf: boolean;
+  text: string;
+  sentAt: string;
+  /** Image descriptions that reached the planner; skipped runs may only know the count. */
+  images?: string[];
+  imageCount?: number;
+}
+
+export interface AgentRunScene {
+  conversationId: string;
+  conversationName: string | null;
+  kind: string;
+  messages: AgentRunSceneMessage[];
+  cast?: unknown[];
+}
+
 export interface AgentRunDetail extends AgentRunSummary {
   decision: unknown;
   socialRead: unknown;
   plan: unknown;
-  scene: unknown;
+  scene: AgentRunScene | null;
   error: string | null;
   steps: AgentStepRecord[];
   actions: AgentActionRecord[];
+}
+
+export const mindHeartbeatStatuses = [
+  'RUN',
+  'IDLE',
+  'GATED',
+  'LONG_EVENT',
+  'NO_CONVERSATION',
+  'REPLY_LOCK',
+  'DISABLED',
+  'FAILED',
+] as const;
+
+export type MindHeartbeatStatus = (typeof mindHeartbeatStatuses)[number];
+
+export interface MindHeartbeatLogRecord {
+  id: string;
+  personaId: string;
+  channelId: string;
+  status: MindHeartbeatStatus;
+  reason: string;
+  mode: PersonaMindMode;
+  quiet: boolean;
+  dueTodos: number;
+  dueIntentions: number;
+  unconsolidated: number;
+  lifeEvent: boolean;
+  curiosity: boolean;
+  reflection: boolean;
+  runId: string | null;
+  detail: unknown;
+  createdAt: string;
+}
+
+/** Conversation choices for the simulator, scoped to the persona's channel. */
+export interface MindConversationOption {
+  id: string;
+  name: string;
+  kind: string;
+  lastMessageAt: string | null;
+}
+
+/** One real model call made by a read-only conversation simulation. */
+export interface MindSimulationPrompt {
+  system: string;
+  prompt: string;
+  response: string;
+  providerId: string | null;
+  model: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+}
+
+export interface MindSimulationResult {
+  personaId: string;
+  channelId: string;
+  conversationId: string;
+  conversationName: string;
+  mode: PersonaMindMode;
+  scene: AgentRunScene;
+  state: Record<string, unknown>;
+  decision: { engage: boolean; reason: string; read: SocialRead };
+  conversationRead: unknown;
+  memories: {
+    core: PersonaMemoryRecord[];
+    relevant: PersonaMemoryRecord[];
+    stats: { total: number; recent7d: number; lastAt: string | null };
+  };
+  plan: ActionPlan;
+  toolCalls: {
+    name: string;
+    input: unknown;
+    output: unknown;
+    error?: string;
+    durationMs: number;
+  }[];
+  prompts: MindSimulationPrompt[];
+  providerId: string | null;
+  model: string | null;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  /** Warnings such as "mode was OFF, ran as SHADOW". */
+  notes: string[];
 }
 
 export interface PersonaJournalRecord {
@@ -342,6 +461,8 @@ export interface StickerRecord {
 
 export interface LlmPromptLogRecord {
   id: string;
+  /** Present for logs produced by a mind run, so the run trace can group them. */
+  runId: string | null;
   source: string;
   providerId: string | null;
   providerName: string | null;
@@ -524,6 +645,24 @@ export interface LongEventDraft {
   reason?: string;
 }
 
+export interface IntentionDraft {
+  need?: string;
+  targetContactId?: string;
+  reason?: string;
+  seed: string;
+  urgency?: number;
+  confidence?: number;
+  risk?: number;
+  earliestAt?: string;
+  expiresAt?: string;
+}
+
+export interface DialogueDecision {
+  close: boolean;
+  summary?: string;
+  nextOpening?: string;
+}
+
 export interface ActionPlan {
   engage: boolean;
   reason: string;
@@ -532,6 +671,8 @@ export interface ActionPlan {
   memoryWrites: MemoryDraft[];
   relationshipSignals: RelationshipSignal[];
   todos: TodoDraft[];
+  intentions?: IntentionDraft[];
+  dialogue?: DialogueDecision;
   self?: SelfDriftSignal;
   groupStance?: GroupStanceSignal;
   nextWakeAt?: string;
@@ -569,6 +710,8 @@ export const mindSettingsUpdateSchema = z.object({
   quietIntervalMinutes: z.number().int().min(1).max(1440).optional(),
   dailyMessageBudget: z.number().int().min(0).max(500).optional(),
   dailyProactiveBudget: z.number().int().min(-9999).max(50).optional(),
+  proactiveWakeDailyLimit: z.number().int().min(0).max(500).optional(),
+  proactiveWakeMinGapSeconds: z.number().int().min(0).max(86400).optional(),
   maxBeats: z.number().int().min(1).max(8).optional(),
   minBeatDelayMs: z.number().int().min(0).max(30_000).optional(),
   maxBeatDelayMs: z.number().int().min(0).max(60_000).optional(),
@@ -748,7 +891,12 @@ export const agentIntentionCreateSchema = z.object({
   targetId: z.string().max(64).optional(),
   reason: z.string().max(2000).optional(),
   seed: z.string().max(4000).optional(),
+  need: z.string().max(40).optional(),
   urgency: z.number().int().min(0).max(100).optional(),
+  confidence: z.number().int().min(0).max(100).optional(),
+  risk: z.number().int().min(0).max(100).optional(),
+  feedback: z.string().max(2000).optional(),
+  feedbackAt: z.string().datetime().nullable().optional(),
   earliestAt: z.string().datetime().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
 });
@@ -786,8 +934,26 @@ export const mindJournalQuerySchema = z.object({
 
 export type MindJournalQueryInput = z.infer<typeof mindJournalQuerySchema>;
 
+export const mindHeartbeatQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(60),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export type MindHeartbeatQueryInput = z.infer<typeof mindHeartbeatQuerySchema>;
+
+export const mindSimulationSchema = z.object({
+  personaId: z.string().min(1).max(64),
+  conversationId: z.string().max(64).optional(),
+  text: z.string().trim().min(1).max(2000),
+  senderName: z.string().max(80).optional(),
+  senderExternalId: z.string().max(120).optional(),
+});
+
+export type MindSimulationInput = z.infer<typeof mindSimulationSchema>;
+
 export const mindPromptLogQuerySchema = z.object({
   source: z.string().max(80).optional(),
+  runId: z.string().max(64).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 

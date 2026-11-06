@@ -314,6 +314,15 @@ function sourceHost(url: string): string {
   }
 }
 
+const INTENTION_NEED_LABELS: Record<string, string> = {
+  care: '关心',
+  connect: '想联系',
+  share: '分享',
+  followup: '跟进',
+  play: '邀约',
+  learn: '想了解',
+};
+
 export function MindPlansTab({
   personaId,
   proactiveEnabled,
@@ -428,8 +437,17 @@ export function MindPlansTab({
                 </div>
                 <p className="mt-0.5 text-[0.66rem] leading-4 text-mist-500">{intention.seed}</p>
                 <p className="mt-1 font-mono text-[0.62rem] text-mist-600">
-                  紧急度 {intention.urgency} · 尝试 {intention.attempts}
+                  {intention.need
+                    ? `${INTENTION_NEED_LABELS[intention.need] ?? intention.need} · `
+                    : ''}
+                  紧急 {intention.urgency} · 把握 {intention.confidence} · 风险 {intention.risk} ·
+                  尝试 {intention.attempts}
                 </p>
+                {intention.feedback ? (
+                  <p className="mt-1 text-[0.62rem] leading-4 text-jade-300/80">
+                    反馈：{intention.feedback}
+                  </p>
+                ) : null}
               </div>
             ))
           )}

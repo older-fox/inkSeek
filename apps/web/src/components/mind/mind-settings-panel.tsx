@@ -29,6 +29,8 @@ export function MindSettingsPanel({
   const [maxBeats, setMaxBeats] = useState(3);
   const [messageBudget, setMessageBudget] = useState(30);
   const [proactiveBudget, setProactiveBudget] = useState(3);
+  const [proactiveWakeLimit, setProactiveWakeLimit] = useState(0);
+  const [proactiveWakeGap, setProactiveWakeGap] = useState(0);
   const [selfSchedule, setSelfSchedule] = useState(true);
   const [wakeInterval, setWakeInterval] = useState(45);
   const [wakeMin, setWakeMin] = useState(10);
@@ -54,6 +56,8 @@ export function MindSettingsPanel({
     setMaxBeats(settings.maxBeats);
     setMessageBudget(settings.dailyMessageBudget);
     setProactiveBudget(settings.dailyProactiveBudget);
+    setProactiveWakeLimit(settings.proactiveWakeDailyLimit);
+    setProactiveWakeGap(settings.proactiveWakeMinGapSeconds);
     setSelfSchedule(settings.selfScheduleEnabled);
     setWakeInterval(settings.wakeIntervalMinutes);
     setWakeMin(settings.wakeMinMinutes);
@@ -97,6 +101,8 @@ export function MindSettingsPanel({
     settings.maxBeats !== maxBeats ||
     settings.dailyMessageBudget !== messageBudget ||
     settings.dailyProactiveBudget !== proactiveBudget ||
+    settings.proactiveWakeDailyLimit !== proactiveWakeLimit ||
+    settings.proactiveWakeMinGapSeconds !== proactiveWakeGap ||
     settings.selfScheduleEnabled !== selfSchedule ||
     settings.wakeIntervalMinutes !== wakeInterval ||
     settings.wakeMinMinutes !== wakeMin ||
@@ -180,6 +186,22 @@ export function MindSettingsPanel({
           min={-1}
           max={50}
           onChange={setProactiveBudget}
+        />
+        <NumberField
+          label="每日自发唤醒上限"
+          hint="心跳和自主唤醒每天最多消耗几次模型轮次；0 表示不限制；有到期待办时不受限"
+          value={proactiveWakeLimit}
+          min={0}
+          max={500}
+          onChange={setProactiveWakeLimit}
+        />
+        <NumberField
+          label="自发唤醒最小间隔（秒）"
+          hint="两次自发唤醒之间至少隔这么久；0 关闭；有到期待办时不受限"
+          value={proactiveWakeGap}
+          min={0}
+          max={86400}
+          onChange={setProactiveWakeGap}
         />
         <NumberField
           label="回复回避窗口（秒）"
@@ -341,6 +363,8 @@ export function MindSettingsPanel({
             maxBeats,
             dailyMessageBudget: messageBudget,
             dailyProactiveBudget: proactiveBudget,
+            proactiveWakeDailyLimit: proactiveWakeLimit,
+            proactiveWakeMinGapSeconds: proactiveWakeGap,
             selfScheduleEnabled: selfSchedule,
             wakeIntervalMinutes: wakeInterval,
             wakeMinMinutes: Math.min(wakeMin, wakeMax),

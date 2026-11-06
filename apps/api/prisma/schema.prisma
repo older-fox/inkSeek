@@ -571,81 +571,89 @@ enum AgentActionStatus {
 
 /// Per-channel switch and safety budget for the mind runtime.
 model ChatMindSettings {
-  id                      String          @id @default(cuid())
-  channelId               String          @unique
-  channel                 ChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  mode                    PersonaMindMode @default(OFF)
-  heartbeatEnabled        Boolean         @default(true)
-  proactiveEnabled        Boolean         @default(false)
-  selfScheduleEnabled     Boolean         @default(true)
-  wakeIntervalMinutes     Int             @default(45)
-  wakeMinMinutes          Int             @default(10)
-  wakeMaxMinutes          Int             @default(240)
-  quietIntervalMinutes    Int             @default(90)
-  dailyMessageBudget      Int             @default(30)
-  dailyProactiveBudget    Int             @default(3)
-  maxBeats                Int             @default(3)
-  minBeatDelayMs          Int             @default(800)
-  maxBeatDelayMs          Int             @default(4000)
+  id                         String          @id @default(cuid())
+  channelId                  String          @unique
+  channel                    ChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  mode                       PersonaMindMode @default(OFF)
+  heartbeatEnabled           Boolean         @default(true)
+  proactiveEnabled           Boolean         @default(false)
+  selfScheduleEnabled        Boolean         @default(true)
+  wakeIntervalMinutes        Int             @default(45)
+  wakeMinMinutes             Int             @default(10)
+  wakeMaxMinutes             Int             @default(240)
+  quietIntervalMinutes       Int             @default(90)
+  dailyMessageBudget         Int             @default(30)
+  dailyProactiveBudget       Int             @default(3)
+  /// Model turns spent on proactive/heartbeat wakes per day. 0 means unlimited;
+  /// message-triggered replies do not consume this budget.
+  proactiveWakeDailyLimit    Int             @default(0)
+  /// Minimum seconds between two proactive/heartbeat wakes. 0 disables the gap.
+  proactiveWakeMinGapSeconds Int             @default(0)
+  maxBeats                   Int             @default(3)
+  minBeatDelayMs             Int             @default(800)
+  maxBeatDelayMs             Int             @default(4000)
   /// After the model decides to reply, other reply tasks in the same
   /// conversation are suppressed for this many seconds. 0 disables the lock.
-  replyAvoidSeconds       Int             @default(180)
+  replyAvoidSeconds          Int             @default(180)
   /// Private-chat burst merging: wait this many seconds of quiet before one
   /// reply. 0 disables merging.
-  privateBurstSeconds     Int             @default(0)
+  privateBurstSeconds        Int             @default(0)
   /// Chance in percent, rolled only on idle heartbeats, that the model gets to
   /// consider a small everyday event. 0 disables life events.
-  lifeEventChancePercent  Int             @default(1)
+  lifeEventChancePercent     Int             @default(1)
   /// Hard cap on life events per persona-local day so idle days stay quiet.
-  lifeEventDailyLimit     Int             @default(1)
+  lifeEventDailyLimit        Int             @default(1)
   /// Chance in percent, rolled only on idle heartbeats, that the persona gets
   /// to spend the beat reading about something it cares about. 0 disables it.
-  curiosityChancePercent  Int             @default(15)
+  curiosityChancePercent     Int             @default(15)
   /// Optional cap per persona-local day; 0 means unlimited.
-  curiosityDailyLimit     Int             @default(0)
+  curiosityDailyLimit        Int             @default(0)
   /// Minimum hours between self-reflection passes. 0 disables reflection.
-  reflectionIntervalHours Int             @default(6)
+  reflectionIntervalHours    Int             @default(6)
   /// Empty means use the built-in mind image-description prompt.
-  imageDescriptionPrompt  String          @default("")
-  quietHours              Json?
-  providerId              String?
-  model                   String?
-  createdAt               DateTime        @default(now())
-  updatedAt               DateTime        @updatedAt
+  imageDescriptionPrompt     String          @default("")
+  quietHours                 Json?
+  providerId                 String?
+  model                      String?
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
 }
 
 /// Live self-state. One row per channel persona instance.
 model PersonaState {
-  id              String             @id @default(cuid())
-  personaId       String             @unique
-  persona         ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
-  moodValence     Int                @default(0)
-  moodArousal     Int                @default(50)
-  moodDominance   Int                @default(0)
-  energy          Int                @default(70)
-  stress          Int                @default(20)
-  socialBattery   Int                @default(70)
-  attention       Int                @default(60)
-  currentActivity String             @default("")
+  id                String             @id @default(cuid())
+  personaId         String             @unique
+  persona           ChatChannelPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  moodValence       Int                @default(0)
+  moodArousal       Int                @default(50)
+  moodDominance     Int                @default(0)
+  energy            Int                @default(70)
+  stress            Int                @default(20)
+  socialBattery     Int                @default(70)
+  attention         Int                @default(60)
+  currentActivity   String             @default("")
   /// When `currentActivity` last changed; lets the model see that an activity
   /// has gone stale instead of repeating "正在做饭" for a whole day.
-  activitySince   DateTime?
-  location        String             @default("")
-  sleepDebt       Int                @default(0)
+  activitySince     DateTime?
+  /// Last time a stale activity was reconsidered, so heartbeats do not retry
+  /// the same review every tick when the model keeps the activity unchanged.
+  activityCheckedAt DateTime?
+  location          String             @default("")
+  sleepDebt         Int                @default(0)
   /// Body health. Long sleep events and rough wake-ups move this.
-  health          Int                @default(80)
-  grooming        Int                @default(70)
-  lastWakeAt      DateTime?
+  health            Int                @default(80)
+  grooming          Int                @default(70)
+  lastWakeAt        DateTime?
   /// Next heartbeat wake; survives the lease so state and scheduler share one row.
-  nextWakeAt      DateTime?
-  lastHeartbeatAt DateTime?
+  nextWakeAt        DateTime?
+  lastHeartbeatAt   DateTime?
   /// Heartbeat worker lease. Null when no worker owns the wake.
-  leaseUntil      DateTime?
-  leaseOwner      String?
+  leaseUntil        DateTime?
+  leaseOwner        String?
   /// Why the next wake was scheduled (manual, heartbeat safety net, plan...).
-  wakeReason      String             @default("")
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  wakeReason        String             @default("")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([nextWakeAt])
 }
@@ -858,7 +866,16 @@ model AgentIntention {
   targetId      String               @default("")
   reason        String               @default("")
   seed          String               @default("")
+  /// care / connect / share / followup / play / learn ... free-form, model-chosen.
+  need          String               @default("")
   urgency       Int                  @default(50)
+  /// How sure the persona is that this is worth bringing up later (0-100).
+  confidence    Int                  @default(50)
+  /// How risky it is to bring up unprompted: privacy, timing, rejection (0-100).
+  risk          Int                  @default(20)
+  /// What the other side actually did after the proactive attempt.
+  feedback      String               @default("")
+  feedbackAt    DateTime?
   earliestAt    DateTime             @default(now())
   expiresAt     DateTime?
   status        AgentIntentionStatus @default(PENDING)
@@ -902,6 +919,33 @@ model AgentRun {
   @@index([personaId, startedAt])
   @@index([conversationId, startedAt])
   @@index([status, startedAt])
+}
+
+/// One heartbeat attempt, including beats that never reached the planner.
+/// Plain ids (no relations) so the log survives persona/channel cleanup.
+model MindHeartbeatLog {
+  id             String   @id @default(cuid())
+  personaId      String
+  channelId      String
+  /// RUN | IDLE | GATED | LONG_EVENT | NO_CONVERSATION | REPLY_LOCK | DISABLED | FAILED
+  status         String
+  reason         String
+  mode           String
+  quiet          Boolean  @default(false)
+  dueTodos       Int      @default(0)
+  dueIntentions  Int      @default(0)
+  unconsolidated Int      @default(0)
+  lifeEvent      Boolean  @default(false)
+  curiosity      Boolean  @default(false)
+  reflection     Boolean  @default(false)
+  /// AgentRun created by this heartbeat, when the model actually ran.
+  runId          String?
+  detail         Json?
+  createdAt      DateTime @default(now())
+
+  @@index([personaId, createdAt])
+  @@index([channelId, createdAt])
+  @@index([runId])
 }
 
 model AgentStep {
@@ -972,6 +1016,8 @@ model StickerAsset {
 /// are retained; older rows are pruned after each insert.
 model LlmPromptLog {
   id               String   @id @default(cuid())
+  /// The mind run that produced this call, so the trace can show its prompts.
+  runId            String?
   source           String   @default("llm")
   providerId       String?
   providerName     String?
@@ -988,6 +1034,7 @@ model LlmPromptLog {
 
   @@index([createdAt])
   @@index([source, createdAt])
+  @@index([runId, createdAt])
 }
 
 /// First-person journal entry produced by deep consolidation.

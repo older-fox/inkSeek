@@ -19,8 +19,11 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   LoginInput,
+  MindConversationOption,
+  MindHeartbeatLogRecord,
   MindSettingsRecord,
   MindSettingsUpdateInput,
+  MindSimulationResult,
   ModelProviderInput,
   PersonaChangeRecord,
   PersonaGroupStanceRecord,
@@ -276,6 +279,26 @@ export const api = {
     if (conversationId) params.set('conversationId', conversationId);
     return request<AgentRunSummary[]>(`/mind/runs?${params.toString()}`);
   },
+  mindHeartbeats: (personaId: string, limit = 60, offset = 0) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return request<MindHeartbeatLogRecord[]>(
+      `/mind/heartbeats/${encodeURIComponent(personaId)}?${params.toString()}`,
+    );
+  },
+  mindSimulationConversations: (personaId: string) =>
+    request<MindConversationOption[]>(
+      `/mind/simulate/conversations/${encodeURIComponent(personaId)}`,
+    ),
+  simulateMind: (input: {
+    personaId: string;
+    conversationId?: string;
+    text: string;
+    senderName?: string;
+  }) =>
+    request<MindSimulationResult>('/mind/simulate', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   endMindLongEvent: (personaId: string) =>
     request<unknown>(`/mind/long-events/${encodeURIComponent(personaId)}/end`, {
       method: 'POST',
@@ -287,9 +310,10 @@ export const api = {
   },
   deleteMindJournal: (id: string) =>
     request<void>(`/mind/journal/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  mindPromptLogs: (input: { source?: string; limit?: number } = {}) => {
+  mindPromptLogs: (input: { source?: string; runId?: string; limit?: number } = {}) => {
     const params = new URLSearchParams({ limit: String(input.limit ?? 100) });
     if (input.source) params.set('source', input.source);
+    if (input.runId) params.set('runId', input.runId);
     return request<LlmPromptLogRecord[]>(`/mind/prompts?${params.toString()}`);
   },
   mindPendingActions: (personaId: string) =>
