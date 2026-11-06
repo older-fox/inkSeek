@@ -58,6 +58,23 @@ export class MindReplyLockService {
   }
 
   /**
+   * Frees the window when the run that took it was superseded by a newer
+   * message from the same sender, so the replacement turn can answer.
+   */
+  async release(conversationId: string, runId: string): Promise<void> {
+    if (!conversationId) {
+      return;
+    }
+    const key = KEY_PREFIX + conversationId;
+    const current = await this.cache.get(key);
+    if (current !== null && current !== runId) {
+      return;
+    }
+    this.fallback.delete(conversationId);
+    await this.cache.delete(key);
+  }
+
+  /**
    * Restarts the window after a directed mention was allowed to reply through
    * an active lock, so the next unaddressed message waits the full window.
    */

@@ -11,6 +11,24 @@ export type MindState = PersonaState;
 export type MindGroupStance = PersonaGroupStance & { conversation: ChatConversation };
 export type MindConversation = ChatConversation;
 
+/** A newer message from the same sender in the same conversation replaced this turn. */
+export class MindTurnInterruptedError extends Error {
+  constructor() {
+    super('同一个人发来更新的消息，这一轮改为重新规划');
+    this.name = 'MindTurnInterruptedError';
+  }
+}
+
+export function isMindTurnInterrupted(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
+  return (
+    error instanceof MindTurnInterruptedError ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
+}
+
 export interface SceneMessage {
   id: string;
   senderId: string;

@@ -34,6 +34,7 @@ import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
 import {
   clamp,
+  isMindTurnInterrupted,
   localDateKey,
   localHour,
   isQuietHour,
@@ -54,11 +55,20 @@ const ACTIVITY_REVIEW_AFTER_MINUTES = 90;
 /** Do not ask again for the same activity sooner than this. */
 const ACTIVITY_REVIEW_COOLDOWN_MINUTES = 60;
 const SLEEP_ACTIVITY_RE = /睡|休息|打盹|午休|小憩/u;
+const INTERRUPTED_REASON = '同一个人发来更新的消息，这一轮改为重新规划';
 
 @Injectable()
 export class MindRuntimeService implements OnModuleInit {
   private readonly logger = new Logger(MindRuntimeService.name);
   private readonly consolidating = new Set<string>();
+  /** conversationId:senderId -> in-flight turn controller. */
+  private readonly activeTurns = new Map<
+    string,
+    { controller: AbortController; messageId: string }
+  >();
+  /** Serialises turns per sender; superseded waiters release without running. */
+  private readonly turnGates = new Map<string, Promise<void>>();
+  private readonly turnGenerations = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -96,6 +106,11 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /**
+   * Message turns for the same sender in the same conversation are serialised:
+   * a newer message aborts the in-flight model call and re-plans from the
+   * latest scene, while middle messages that were already superseded drop out.
+   */
   async turn(input: {
     message: ChatMessageSnapshot;
     mode?: PersonaMindMode;
@@ -103,6 +118,70 @@ export class MindRuntimeService implements OnModuleInit {
   }): Promise<MindTurnResult> {
     if (input.message.isSelf) {
       return skipped('自己发出的消息不触发心智');
+    }
+    const trigger = input.trigger ?? 'MESSAGE';
+    if (trigger !== 'MESSAGE') {
+      return this.executeTurn(input, undefined, false);
+    }
+
+    const key = `${input.message.conversationId}:${input.message.senderId}`;
+    const generation = (this.turnGenerations.get(key) ?? 0) + 1;
+    this.turnGenerations.set(key, generation);
+    const superseded = this.activeTurns.get(key);
+    superseded?.controller.abort();
+
+    const prior = this.turnGates.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prior.then(() => gate);
+    this.turnGates.set(key, tail);
+    await prior;
+
+    if (this.turnGenerations.get(key) !== generation) {
+      release();
+      if (this.turnGates.get(key) === tail) {
+        this.turnGates.delete(key);
+      }
+      return skipped(INTERRUPTED_REASON);
+    }
+
+    const controller = new AbortController();
+    this.activeTurns.set(key, {
+      controller,
+      messageId: input.message.messageId,
+    });
+    try {
+      return await this.executeTurn(input, controller.signal, Boolean(superseded));
+    } finally {
+      if (this.activeTurns.get(key)?.controller === controller) {
+        this.activeTurns.delete(key);
+      }
+      release();
+      if (this.turnGates.get(key) === tail) {
+        this.turnGates.delete(key);
+      }
+      if (!this.turnGates.has(key)) {
+        this.turnGenerations.delete(key);
+      }
+    }
+  }
+
+  private async executeTurn(
+    input: {
+      message: ChatMessageSnapshot;
+      mode?: PersonaMindMode;
+      trigger?: Trigger;
+    },
+    signal?: AbortSignal,
+    interruptedPredecessor = false,
+  ): Promise<MindTurnResult> {
+    if (input.message.isSelf) {
+      return skipped('自己发出的消息不触发心智');
+    }
+    if (signal?.aborted) {
+      return skipped(INTERRUPTED_REASON);
     }
     const settings = await this.settings.get(input.message.channelId);
     const mode = input.mode ?? settings.mode;
@@ -218,7 +297,10 @@ export class MindRuntimeService implements OnModuleInit {
         return skipped(reason, { runId, suppressed: true });
       }
     }
-    const locked = avoidWindow && (await this.replyLock.active(input.message.conversationId));
+    const locked =
+      avoidWindow &&
+      !interruptedPredecessor &&
+      (await this.replyLock.active(input.message.conversationId));
     if (boundPersona && locked && !(await isDirected())) {
       const preview = input.message.text.trim().replace(/\s+/gu, ' ').slice(0, 30);
       const reason = preview
@@ -251,6 +333,9 @@ export class MindRuntimeService implements OnModuleInit {
     if (!scene) {
       return skipped('渠道尚未绑定人格');
     }
+    if (signal?.aborted) {
+      return skipped(INTERRUPTED_REASON);
+    }
 
     await this.applyInboundFeedback(
       scene.persona.id,
@@ -275,6 +360,9 @@ export class MindRuntimeService implements OnModuleInit {
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const conversationRead = readConversation({ scene, state, memories });
+    if (signal?.aborted) {
+      return skipped(INTERRUPTED_REASON);
+    }
     const run = await this.prisma.agentRun.create({
       data: {
         personaId: scene.persona.id,
@@ -287,6 +375,36 @@ export class MindRuntimeService implements OnModuleInit {
         scene: compactScene(scene),
       },
     });
+    const finishInterruptedTurn = async (
+      stage: string,
+      plan?: ActionPlan,
+    ): Promise<MindTurnResult> => {
+      await this.step(run.id, 'EXPRESSION', '被更新的消息打断', { stage }, { aborted: true }, 0);
+      await this.finishRun(run.id, 'SKIPPED', {
+        startedAt,
+        decision: {
+          engage: false,
+          reason: INTERRUPTED_REASON,
+          stance: decision.read.suggestedStance,
+          felt: decision.read.felt,
+          shown: decision.read.suggestedStance,
+        },
+        socialRead: decision.read,
+        plan,
+        error: INTERRUPTED_REASON,
+      });
+      return {
+        runId: run.id,
+        engage: false,
+        reason: INTERRUPTED_REASON,
+        plan: plan ?? null,
+        socialRead: decision.read,
+        felt: decision.read.felt,
+        shown: decision.read.suggestedStance,
+        memories: memories.map(toPublicMemory),
+        suppressed: true,
+      };
+    };
     if (eventWake) {
       await this.step(
         run.id,
@@ -376,8 +494,12 @@ export class MindRuntimeService implements OnModuleInit {
         mode,
         trigger: input.trigger ?? 'MESSAGE',
         sleepBrief,
+        signal,
       });
     } catch (error) {
+      if (isMindTurnInterrupted(error, signal)) {
+        return finishInterruptedTurn('规划模型');
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`心智规划失败：${message}`);
       await this.finishRun(run.id, 'FAILED', {
@@ -424,12 +546,17 @@ export class MindRuntimeService implements OnModuleInit {
     }
 
     const plan = plannerResult.plan;
+    if (signal?.aborted) {
+      return finishInterruptedTurn('规划完成', plan);
+    }
+    let lockAcquired = false;
     if (plan.engage && plan.beats.length > 0 && mode !== 'SHADOW' && avoidWindow) {
       const acquired = await this.replyLock.acquire({
         conversationId: scene.conversation.id,
         runId: run.id,
         windowSeconds: settings.replyAvoidSeconds,
       });
+      lockAcquired = acquired;
       if (!acquired && (await isDirected())) {
         await this.replyLock.extend({
           conversationId: scene.conversation.id,
@@ -479,6 +606,12 @@ export class MindRuntimeService implements OnModuleInit {
         });
       }
     }
+    if (signal?.aborted) {
+      if (lockAcquired) {
+        await this.replyLock.release(scene.conversation.id, run.id);
+      }
+      return finishInterruptedTurn('表达前', plan);
+    }
     await this.writeBack(run.id, scene, plan, decision.read, state, settings);
     void this.consolidateIfNeeded(scene.persona.id, scene, state);
     await this.executor.execute({
@@ -487,7 +620,14 @@ export class MindRuntimeService implements OnModuleInit {
       settings,
       mode,
       runId: run.id,
+      signal,
     });
+    if (signal?.aborted) {
+      if (lockAcquired) {
+        await this.replyLock.release(scene.conversation.id, run.id);
+      }
+      return finishInterruptedTurn('表达中', plan);
+    }
     await this.finishRun(run.id, 'SUCCEEDED', {
       startedAt,
       decision: {

@@ -36,6 +36,8 @@ export interface LlmCompletionInput {
   runId?: string | null;
   /** Simulation calls run for real but must not leave prompt logs behind. */
   log?: boolean;
+  /** Aborts the HTTP request when the owning turn is superseded. */
+  signal?: AbortSignal;
 }
 
 export interface LlmCompletion {
@@ -224,6 +226,7 @@ export class LlmService {
           messages: [{ role: 'user', content }],
         },
         timeoutMs,
+        input.signal,
       );
 
       const usage = asRecord(asRecord(payload).usage);
@@ -260,6 +263,7 @@ export class LlmService {
           generationConfig: { temperature, maxOutputTokens: maxTokens },
         },
         timeoutMs,
+        input.signal,
       );
 
       const candidate = asRecord((asRecord(payload).candidates as unknown[] | undefined)?.[0]);
@@ -301,6 +305,7 @@ export class LlmService {
         ],
       },
       timeoutMs,
+      input.signal,
     );
 
     const choice = asRecord((asRecord(payload).choices as unknown[] | undefined)?.[0]);
@@ -318,6 +323,7 @@ export class LlmService {
     headers: Record<string, string>,
     body: unknown,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     let response: Response;
 
@@ -327,7 +333,9 @@ export class LlmService {
         headers: { accept: 'application/json', ...headers },
         body: JSON.stringify(body),
         cache: 'no-store',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';

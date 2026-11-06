@@ -38,6 +38,7 @@ import {
   localDateKey,
   MIND_MAX_RELATIONSHIP_DELTA,
   MIND_MAX_TOOL_STEPS,
+  MindTurnInterruptedError,
   normalizeTimeZone,
   parseJsonObject,
   personaValueText,
@@ -92,6 +93,8 @@ export interface PlannerInput {
   };
   /** Read-only simulation: skip prompt logs and block write tools. */
   dryRun?: boolean;
+  /** Cancels the model call when a newer message from the same sender arrives. */
+  signal?: AbortSignal;
   /** Return the exact prompt/response pairs so the simulator can show them. */
   capturePrompts?: boolean;
 }
@@ -171,6 +174,9 @@ export class MindPlannerService {
     let completionTokens = 0;
 
     for (let step = 0; step < MIND_MAX_TOOL_STEPS; step += 1) {
+      if (input.signal?.aborted) {
+        throw new MindTurnInterruptedError();
+      }
       const completion = await this.llm.complete({
         prompt,
         system,
@@ -181,6 +187,7 @@ export class MindPlannerService {
         source: 'mind.planner',
         runId: input.runId,
         log: input.dryRun ? false : undefined,
+        signal: input.signal,
       });
       if (input.capturePrompts) {
         prompts.push({
@@ -229,6 +236,9 @@ export class MindPlannerService {
       }
       const execution = await this.tools.execute(toolName, parsed['input'], context);
       toolCalls.push(execution);
+      if (input.signal?.aborted) {
+        throw new MindTurnInterruptedError();
+      }
       prompt = `${prompt}\n\n工具 ${execution.name} 的结果：\n${truncate(
         JSON.stringify(execution.output ?? { error: execution.error }),
         MAX_TOOL_RESULT,

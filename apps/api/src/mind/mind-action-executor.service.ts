@@ -9,7 +9,7 @@ import type {
 import { PrismaService } from '../database/prisma.service.js';
 import type { AgentAction } from '../generated/prisma/client.js';
 import type { MindScene } from './mind.types.js';
-import { sleep } from './mind.types.js';
+import { isMindTurnInterrupted, MindTurnInterruptedError, sleep } from './mind.types.js';
 import { StickerService } from './sticker.service.js';
 
 export interface ExecutePlanInput {
@@ -18,6 +18,8 @@ export interface ExecutePlanInput {
   settings: MindSettingsRecord;
   mode: string;
   runId: string;
+  /** Set when a newer message from the same sender superseded this turn. */
+  signal?: AbortSignal;
 }
 
 @Injectable()
@@ -42,6 +44,9 @@ export class MindActionExecutor {
     for (let index = 0; index < input.plan.beats.length; index += 1) {
       const beat = input.plan.beats[index];
       if (!beat) continue;
+      if (input.signal?.aborted) {
+        break;
+      }
       const idempotencyKey = `${input.runId}:${index}`;
       const kind = beat.kind === 'sticker' ? 'STICKER' : beat.kind === 'face' ? 'FACE' : 'MESSAGE';
       let action: AgentAction;
@@ -95,7 +100,10 @@ export class MindActionExecutor {
       }
 
       try {
-        await sleep(Math.min(beat.delayMs, input.settings.maxBeatDelayMs));
+        await sleepUntilAborted(
+          Math.min(beat.delayMs, input.settings.maxBeatDelayMs),
+          input.signal,
+        );
         const sent = await this.sendBeat(input.scene, beat, action.id);
         budgetUsed += 1;
         await this.prisma.agentAction.update({
@@ -108,6 +116,13 @@ export class MindActionExecutor {
           },
         });
       } catch (error) {
+        if (isMindTurnInterrupted(error, input.signal)) {
+          await this.prisma.agentAction.update({
+            where: { id: action.id },
+            data: { status: 'SKIPPED', error: '同一个人发来更新的消息，停止剩余气泡' },
+          });
+          break;
+        }
         stopped = true;
         const message = error instanceof Error ? error.message : String(error);
         this.logger.warn(`心智动作发送失败：${message}`);
@@ -269,4 +284,31 @@ function toRecord(row: AgentAction): AgentActionRecord {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** Delays between beats must release immediately when the turn is superseded. */
+function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return sleep(ms);
+  }
+  if (signal.aborted) {
+    return Promise.reject(new MindTurnInterruptedError());
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      },
+      Math.max(0, ms),
+    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new MindTurnInterruptedError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+  });
 }

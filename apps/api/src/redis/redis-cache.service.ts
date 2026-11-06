@@ -67,16 +67,28 @@ export class RedisCacheService implements OnModuleDestroy {
 
     try {
       const ttl = Math.max(1, Math.round(ttlSeconds));
-      const result = await withTimeout(
-        client.set(key, value, 'EX', ttl, 'NX'),
-        COMMAND_TIMEOUT_MS,
-      );
+      const result = await withTimeout(client.set(key, value, 'EX', ttl, 'NX'), COMMAND_TIMEOUT_MS);
       this.warned = false;
       return result === 'OK';
     } catch (error) {
       this.resetClient(client);
       this.warnOnce(error);
       return null;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    const client = await this.clientFor();
+    if (!client) {
+      return;
+    }
+
+    try {
+      await withTimeout(client.del(key), COMMAND_TIMEOUT_MS);
+      this.warned = false;
+    } catch (error) {
+      this.resetClient(client);
+      this.warnOnce(error);
     }
   }
 
