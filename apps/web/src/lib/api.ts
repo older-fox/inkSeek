@@ -1,5 +1,7 @@
 import type {
   ApiErrorBody,
+  BilibiliSettingsInput,
+  BilibiliSettingsResult,
   BootstrapInput,
   BootstrapResult,
   BootstrapStatus,
@@ -120,6 +122,11 @@ export const api = {
   settings: () => request<SettingsOverview>('/settings'),
   updateRedisSettings: (input: RedisSettingsInput) =>
     request<RedisSettingsResult>('/settings/redis', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateBilibiliSettings: (input: BilibiliSettingsInput) =>
+    request<BilibiliSettingsResult>('/settings/bilibili', {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
@@ -308,5 +315,5 @@ export const api = {
     }),
   mindHeartbeat: (personaId: string) =>
     request<boolean>(`/mind/heartbeat/${encodeURIComponent(personaId)}`, { method: 'POST' }),
-  mindStickers: () => request<StickerRecord[]>('/mind/stickers'),
+  mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
 };

@@ -524,10 +524,11 @@ export function MindJournalTab({ personaId }: { personaId: string }) {
   );
 }
 
-export function MindStickersTab() {
+export function MindStickersTab({ channelId }: { channelId: string }) {
   const stickersQuery = useQuery({
-    queryKey: ['mind', 'stickers'],
-    queryFn: api.mindStickers,
+    queryKey: ['mind', 'stickers', channelId],
+    queryFn: () => api.mindStickers(channelId),
+    enabled: Boolean(channelId),
     staleTime: 30_000,
   });
   const stickers: StickerRecord[] = stickersQuery.data ?? [];

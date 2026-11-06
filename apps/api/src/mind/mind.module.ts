@@ -22,6 +22,7 @@ import { PersonaMemoryService } from './persona-memory.service.js';
 import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
 import { StickerService } from './sticker.service.js';
+import { VideoInsightService } from './video-insight.service.js';
 import { WebSearchService } from './web-search.service.js';
 
 @Module({
@@ -42,6 +43,7 @@ import { WebSearchService } from './web-search.service.js';
     MindReplyLockService,
     MindHeartbeatLogService,
     StickerService,
+    VideoInsightService,
     WebSearchService,
     MindActionExecutor,
     MindRuntimeService,

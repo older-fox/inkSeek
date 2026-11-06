@@ -60,7 +60,7 @@ const ACTIVITY_REVIEW_COOLDOWN_MINUTES = 60;
 const SLEEP_ACTIVITY_RE = /睡|休息|打盹|午休|小憩/u;
 const INTERRUPTED_REASON = '同一个人发来更新的消息，这一轮改为重新规划';
 const ACTIVE_INTENTION_TARGET_LIMIT = 8;
-const ACTIVE_INTENTION_SAMPLE_LIMIT = 3;
+const ACTIVE_INTENTION_SAMPLE_LIMIT = 5;
 /** "Say this later" thoughts go stale; no intention should live forever by default. */
 const DEFAULT_INTENTION_TTL_DAYS = 14;
 const LEGACY_INTENTION_TTL_DAYS = 30;
@@ -379,7 +379,7 @@ export class MindRuntimeService implements OnModuleInit {
     const recall = await this.memories.recallForScene(scene, query, 12);
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
-    const conversationRead = readConversation({ scene, state, memories });
+    const conversationRead = readConversation({ scene, memories });
     if (signal?.aborted) {
       return skipped(INTERRUPTED_REASON);
     }
@@ -1262,7 +1262,7 @@ export class MindRuntimeService implements OnModuleInit {
     });
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
-    const conversationRead = readConversation({ scene, state, memories });
+    const conversationRead = readConversation({ scene, memories });
     const plannerResult = await this.planner.plan({
       scene,
       state,
@@ -2282,7 +2282,7 @@ export class MindRuntimeService implements OnModuleInit {
         const nextOpening = plan.dialogue.nextOpening.trim();
         // The model often writes both an explicit intention and the same point
         // as nextOpening. Do not turn one thought into two scheduled wakes.
-        const covered = drafts.some((draft) => seedSimilarity(draft.seed, nextOpening) >= 0.45);
+        const covered = drafts.some((draft) => isSeedDuplicate(draft.seed, nextOpening));
         if (!covered) {
           const target = conversationPartnerContactId(scene);
           drafts.push({
@@ -2341,7 +2341,7 @@ export class MindRuntimeService implements OnModuleInit {
         (row) =>
           row.targetType === targetType &&
           row.targetId === targetId &&
-          (row.seed === seed || seedSimilarity(row.seed, seed) >= 0.55),
+          isSeedDuplicate(row.seed, seed),
       );
       if (duplicate) {
         merged += 1;
@@ -2370,7 +2370,7 @@ export class MindRuntimeService implements OnModuleInit {
           (row) =>
             row.targetType === targetType &&
             row.targetId === targetId &&
-            seedSimilarity(row.seed, seed) >= 0.55,
+            isSeedDuplicate(row.seed, seed),
         )
       ) {
         skipped += 1;
@@ -2886,6 +2886,30 @@ function seedSimilarity(left: string, right: string): number {
     }
   }
   return overlap / (leftGrams.size + rightGrams.size - overlap);
+}
+
+/**
+ * Jaccard punishes paraphrases that add or drop clauses, which is exactly how
+ * the model rewrites "still owes me a kiss" into six near-duplicates. Containment
+ * asks whether the shorter seed is mostly present in the longer one.
+ */
+function seedContainment(left: string, right: string): number {
+  const a = seedBigrams(compactSeed(left));
+  const b = seedBigrams(compactSeed(right));
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  let overlap = 0;
+  for (const gram of a) {
+    if (b.has(gram)) {
+      overlap += 1;
+    }
+  }
+  return overlap / Math.min(a.size, b.size);
+}
+
+function isSeedDuplicate(left: string, right: string): boolean {
+  return seedSimilarity(left, right) >= 0.55 || seedContainment(left, right) >= 0.3;
 }
 
 function compactSeed(text: string): string {

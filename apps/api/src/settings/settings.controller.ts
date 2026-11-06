@@ -11,8 +11,11 @@ import {
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  bilibiliSettingsSchema,
   modelProviderSchema,
   redisSettingsSchema,
+  type BilibiliSettingsInput,
+  type BilibiliSettingsResult,
   type ModelProviderInput,
   type ModelProviderSaveResult,
   type RedisSettingsInput,
@@ -44,6 +47,15 @@ export class SettingsController {
     @Body(new ZodValidationPipe(redisSettingsSchema)) input: RedisSettingsInput,
   ): Promise<RedisSettingsResult> {
     return this.settings.updateRedis(input);
+  }
+
+  @Put('bilibili')
+  @HttpCode(200)
+  @ApiOperation({ summary: '校验并保存 B 站 SESSDATA，用于读取自动字幕（管理员）' })
+  updateBilibili(
+    @Body(new ZodValidationPipe(bilibiliSettingsSchema)) input: BilibiliSettingsInput,
+  ): Promise<BilibiliSettingsResult> {
+    return this.settings.updateBilibili(input);
   }
 
   @Post('providers')

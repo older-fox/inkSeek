@@ -44,14 +44,25 @@ export interface ModelProviderSummary {
   createdAt: string;
 }
 
+export interface BilibiliSettings {
+  hasCookie: boolean;
+  loginName: string;
+  updatedAt: string;
+}
+
 export interface SettingsOverview {
   redis: RedisSettings | null;
+  bilibili: BilibiliSettings | null;
   providers: ModelProviderSummary[];
 }
 
 export interface RedisSettingsResult {
   redis: RedisSettings;
   latencyMs: number;
+}
+
+export interface BilibiliSettingsResult {
+  bilibili: BilibiliSettings;
 }
 
 export interface ModelProviderSaveResult {

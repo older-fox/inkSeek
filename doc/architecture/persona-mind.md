@@ -93,7 +93,8 @@ Scene {
 | `AgentRun`            | 一次心智运行  | trigger、persona、scene、model、tokens、cost、decision、plan、status、latency                                                                                                                                                                                          |
 | `AgentStep`           | 思维/工具步骤 | runId、type、input、output、durationMs、error                                                                                                                                                                                                                          |
 | `AgentAction`         | 动作日志      | runId、kind、payload、status、idempotencyKey、sentMessageId、error                                                                                                                                                                                                     |
-| `StickerAsset`        | 本地表情      | mediaId、sha256、filePath、tags、description、embedding、usageCount                                                                                                                                                                                                    |
+| `StickerAsset`        | 本地表情      | channelId、sha256、filePath、tags、description、embedding、usageCount；渠道内按 `(channelId, sha256)` 唯一                                                                                                                                                             |
+| `VideoInsight`        | 视频理解缓存  | platform、videoId、url、标题/作者/时长/简介、stats、transcript、comments、summary、keyPoints、framesPath、frameCount、watchedAt、usageCount；按 `(platform, videoId)` 唯一，与渠道无关 |
 | `PersonaJournal`      | 日记/反思     | personaInstanceId、date、content、mood、consolidatedMemoryIds                                                                                                                                                                                                          |
 | `LlmPromptLog`        | 原始提示词    | source、provider、model、system、prompt、response、tokens、latency、error；仅保留最近 200 条                                                                                                                                                                           |
 
@@ -195,7 +196,7 @@ interface SocialRead {
 此刻（现在：本地日期/星期/时区；心情/精力/压力/社交电量/注意力，均带低高区间行为提示；当前活动从几点开始、已持续多久；距上一条消息多久；活动超过 2 小时给一句提醒）+ 正在做的事
 对话对象（与其最显著的 4 个关系维度，带行为含义）
 在场（其余成员只给 3 个关系数字）
-在场熟人（群聊里在别处认识的人：名字 + 记忆条数，不给内容，提示需要细节先查）
+在场熟人（群聊里在别处认识的人：名字 + 记忆条数，提示语气照常亲近、内容按可公开范围，不给内容）
 这个群（最显著的 3 个群态度，带行为含义 + 群规 + 话题）
 我的判断（社交计算摘要）
 对话节奏（兴趣分 + 双方最后一句类型 + 话题闭环/疲劳/未答提问 + 建议）
@@ -213,7 +214,7 @@ interface SocialRead {
 
 - **消息分类**：对方最后一句分成道别、提问、求助、纯附和、有实际内容五类；短句里含「什么/怎么/为什么」等疑问词也会按提问处理。
 - **节奏信号**：继续意愿 `ownIntent`/`theirIntent`、话题闭环、节奏疲劳、未答提问、明确道别、直接点名、最近 30 分钟轮次。对方明确提问/求助而没答时，建议永远是先回答，不能用收尾逃开。
-- **兴趣**：从人格的目标/价值观、当前活动与位置、高重要度 `PREFERENCE`/`TOPIC` 记忆里拆出短句，按字符重合 + 本地向量相似度算 0–100 兴趣，命中短句作为话题提示；兴趣并入 `ownIntent`。
+- **兴趣**：从人格的目标/价值观、高重要度 `PREFERENCE`/`TOPIC` 记忆里拆出短句，按字符重合 + 本地向量相似度算 0–100 兴趣，命中短句作为话题提示；自身的当前活动和位置只作处境，不参与兴趣匹配，避免把「我刚醒」当成对话话题。兴趣并入 `ownIntent`。
 - **结论**：`continue`（还在聊）、`linger`（先缓一缓，通常不用补）、`close`（可以收尾），连同理由和建议写进【对话节奏】和 AgentRun 的「注意力与社交判断」步骤。
 
 私聊同样适用，但没有群聊「半小时没人接」的硬收尾规则。兴趣高时允许主动接话或追问；兴趣低又没有新信息时，模型可以自然地读而不回。没有新增设置或表；兴趣来源随人格卡与记忆自然变化，收尾只是这一段告一段落，对方继续时重新判断。
@@ -237,11 +238,12 @@ interface SocialRead {
 
 - `history.search`：翻阅本会话聊天记录，支持关键词、发送者、`since`/`before` 时间窗和 `aroundMessageId`（看某条消息前后 45 分钟）；不传条件时返回最近消息，返回消息 `id`（`todo.create` 的邀请/答应 ID 来源）
 - `memory.search`：语义检索长期记忆，同时返回最多 3 条长期底色；`memory.create` 用于显式写入
-- `relationship.get`：返回 13 项数值和标签/称呼/边界/承诺/共同经历/公开范围/公开面具/拉黑/静默等全部字段，并附带数值的行为含义；另返回 `attributes` 清单（37 项，含 key、中文标签、分组、类型、当前值，空值也列出）
+- `relationship.get`：返回 13 项数值和标签/称呼/各场合称呼/边界/承诺/共同经历/公开范围/拉黑/静默等全部字段，并附带数值的行为含义；另返回 `attributes` 清单（37 项，含 key、中文标签、分组、类型、当前值，空值也列出）
 - `relationship.update`：按需调整全部关系字段；`attributes` 可直接写回 `relationship.get` 返回的任意属性键（37 项全覆盖，extras 合并写入），同名顶层参数仍可用；数值写入即生效（仅夹 -100..100），非数值字段直接写入
 - `group.get`：读取当前群的状态与规则；私聊返回会话名与类型
 - `web.search`
 - `web.read`：读取单个公开网页正文（去标签、限长、拒绝私网地址与重定向到内网）
+- `video.watch`：观看 B 站视频（链接/BV/av），拉标题、简介、字幕、热评并抽 9 帧拼图交给视觉模型，生成内容概述与要点；按 `(platform, videoId)` 缓存在 `VideoInsight`，重复调用直接返回，`focus` 可基于已存画面重看。B 站自动字幕只对登录用户开放，设置页填 SESSDATA 后走 WBI 签名的 `player/wbi/v2` 读取，未配置时退回普通 CC 字幕。分享卡片里的链接会从 JSON/XML 提取进消息文本。
 - `sticker.search`：返回表情 `id`、描述、标签与相似度；`id` 直接作为 `beats[].stickerId`
 - `sticker.describe`：重新识别一张表情（可带 `focus`），新描述与向量写回 `StickerAsset`
 - `sticker.collect`：把本会话收到的图片收进表情库，`image` 传 `[图片：描述]` 的描述原文
@@ -308,7 +310,7 @@ type OutgoingBeat =
 
 主动消息：由 `AgentIntention` 驱动，经时间、关系、近况、连发、群规门控；主动发送本身不设每日数量上限，是否开口仍由人格按 `engage + beats` 判断。
 
-表情：本地 `StickerAsset`，文件名/视觉描述/标签做本地向量；检索按情绪、意图、关系、场景；发送走现有媒体链路。人格想发表情时先 `sticker.search` 拿 `id`，在 `beats` 里写 `{"kind":"sticker","stickerId":"...","delayMs":800}`；表情作为独立图片气泡，可与文字气泡交替，一次回复最多一个。描述不准或想确认内容时可以 `sticker.describe` 带 `focus` 重新看图，新描述与向量写回数据库。人格可用 `sticker.collect` 把本会话收到的图片收进表情库（`image` 传 `[图片：描述]` 的描述原文）；心智页「表情库」只展示 TA 自己收藏的表情，不再展示渠道最近图片或本地目录扫描结果。
+表情：本地 `StickerAsset`，按渠道隔离（`channelId` + `(channelId, sha256)` 唯一），文件名/视觉描述/标签做本地向量；检索按情绪、意图、关系、场景，且只在本渠道内检索；发送走现有媒体链路。人格想发表情时先 `sticker.search` 拿 `id`，在 `beats` 里写 `{"kind":"sticker","stickerId":"...","delayMs":800}`；表情作为独立图片气泡，可与文字气泡交替，一次回复最多一个。描述不准或想确认内容时可以 `sticker.describe` 带 `focus` 重新看图，新描述与向量写回数据库。人格可用 `sticker.collect` 把本会话收到的图片收进表情库（`image` 传 `[图片：描述]` 的描述原文）；心智页「表情库」只展示当前渠道里 TA 自己收藏的表情，不再展示渠道最近图片或本地目录扫描结果。
 
 ## 8. 心跳与待办
 
@@ -510,7 +512,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 好奇与自我进化（2026-11-05）：新增 `curiosityChancePercent`（默认 15%）、`curiosityDailyLimit`（默认 0 = 不限制）、`reflectionIntervalHours`（默认 6 小时，0 关闭）三个设置。空闲心跳按概率进入【好奇时间】，模型自己选话题，经 `web.search` / 新增的 `web.read` 阅读公开网页；`web.read` 拒绝私网地址、非标准端口和重定向到内网，正文限 5000 字。带 `sourceUrl` 的记忆自动标记 `sourceType=WEB`，`structured.supersedesId` 可把旧记忆标记为 `SUPERSEDED`。反思到点后心跳优先执行，提示词带最近 20 条记忆与上一篇日记，模型自行决定写多少条反思、改几项性格。新增每日一次轻量记忆衰减（30 天未召回的事实/偏好/反思降重要度与置信度）。心智页新增「成长」页签。按要求取消模型可调整数量的上限：记忆写入、待办、关系信号、性格/群/关系维度都不再做条数截断，只保留数值范围与漂移限幅。
 - 时间感知与活动时效（2026-11-05）：`PersonaState` 新增 `activitySince`，所有写 `currentActivity` 的路径（手动/工具、漂移、长时事件）都会更新时间；迁移按最近一次 `currentActivity` 变更日志回填。规划提示词的【此刻】改为先给出本地日期、星期、时区、距上一条消息多久、当前活动从几点开始和已持续多久；活动超过 4 小时追加一句「除非本来就这样，否则该换一件事」的提醒。聊天时间戳从 UTC ISO 改为人格本地时间，跨 30 分钟标注间隔、跨天带日期。`time.now` 也返回本地时间与活动时长。提示词新增规则：时间不会停在上一次对话，活动超时或与时段不符时先用 `self.attributes.update` 改 `current_activity`；自我反思时顺手校正活动。
 - 记忆感知与工具调用（2026-11-05）：【可用工具】改为常驻全部工具名与一句话用途，模型可直接调用，参数不确定时才用 `tools.search`；系统提示词加入动手前查证清单（过去/旧话/关系/承诺/时间/自身状态先查），允许一轮连续调用多个工具，并明确「查证不必说出口」。工具循环上限 6→10 步，连续 8 次调用后才提示收敛；相关记忆 8→12 条，recall 上限同步 12。每轮提示词新增记忆库规模（总量、近 7 天新增、最近一条日期），明确告知只展开了最相关的部分；`memory.create` 可在轮中立即写记忆，与 final 的 `memoryWrites` 共用同一记忆库。
-- 对话节奏与兴趣（2026-11-06）：新增纯函数 `readConversation`，把对方最后一句分为道别/提问/求助/附和/有内容，计算 ownIntent、theirIntent、话题闭环、疲劳、未答提问、明确道别与直接点名，输出 continue/linger/close 及建议；未答提问只阻止收尾，不强制其他行为。兴趣从人格目标/价值观、当前活动与位置、`PREFERENCE`/`TOPIC` 记忆拆句匹配，按字符重合 + 本地向量算 0–100 并并入 ownIntent。结论写入【对话节奏】和 AgentRun 的注意力步骤；没有新增设置或表，私聊不再默认每条都值得回，但仍由模型决定。
+- 对话节奏与兴趣（2026-11-06）：新增纯函数 `readConversation`，把对方最后一句分为道别/提问/求助/附和/有内容，计算 ownIntent、theirIntent、话题闭环、疲劳、未答提问、明确道别与直接点名，输出 continue/linger/close 及建议；未答提问只阻止收尾，不强制其他行为。兴趣从人格目标/价值观、`PREFERENCE`/`TOPIC` 记忆拆句匹配，按字符重合 + 本地向量算 0–100 并并入 ownIntent（2026-11-07 起不再把自身当前活动/位置算作话题源）。结论写入【对话节奏】和 AgentRun 的注意力步骤；没有新增设置或表，私聊不再默认每条都值得回，但仍由模型决定。
 - 活动时效复核（2026-11-06）：`PersonaState` 新增 `activityCheckedAt`（迁移 `20261106064000_persona_activity_checked`）。空闲心跳早退前，若活动已持续 ≥90 分钟且不是睡觉/休息类，调用一次轻量模型（`mind.activity`，最多 200 token，只输出 activity/location/reason）；仅当活动变化时写回 `PersonaState`，60 分钟内不重复复核。修复「刷锅六小时」这类活动长期不更新的问题，同时避免心跳每轮都调用模型。
 - 主动意图、唤醒预算与反馈（2026-11-06）：`AgentIntention` 新增 `need`、`confidence`、`risk`、`feedback`、`feedbackAt`（迁移 `20261106070000_mind_proactive_goals_budget`）；`ChatMindSettings` 新增 `proactiveWakeDailyLimit`、`proactiveWakeMinGapSeconds` 并在面板可改。规划器可一次输出多条 `intentions`（关心/联系/分享/跟进/邀约/学习），按 seed 去重落库，到 `earliestAt` 才进入唤醒简报；到期意图按 `urgency × 把握 × 关系分 ×（1-风险）` 排序，关系分由好感/亲密/信任/亏欠加权，不引入“主人”角色。对话 `dialogue.close` 的 `nextOpening` 自动变成 6 小时后、14 天过期的 followup 意图。对方回应会按追问/帮忙/认真接话/只应一声/顺势收尾写回反馈并微调把握，12 小时无回应也会记一条；最近 7 天最多 3 条反馈进提示词。唤醒只提供机会，发消息仍必须 `engage + beats`；自发唤醒受每日上限与最小间隔约束，有到期待办时不占额度。
 - 时间、说话习惯与重复自检（2026-11-06）：`time_zone` 先用 `normalizeTimeZone` 归一（`UTC+8（东八区）`/`GMT+8`/`北京时间` → `Asia/Shanghai`），再交给 `Intl`；【此刻】直接附带凌晨/清晨/上午/中午/下午/傍晚/晚上/深夜，避免模型自己把 16:56 说成半夜。角色卡的句子长短、标点、语气词、emoji/错别字等级、冲突风格、知识边界和出戏防线收进【说话习惯】；全局规则限制默认 1 个气泡、一条回复最多一个问句、被骂时短句顶回或冷处理、不主动提 AI/模型/程序、不懂就说不懂。新增纯函数 `readRepetition`，从最近 12 条自己的消息里统计反复出现的生活词（≥3 次）并在【重复自检】中提示换话题；活动提示阈值 4 小时→2 小时，空闲复核 2 小时→90 分钟。记忆去重增加“同 subject、跨 kind、相似度 ≥0.92”的合并，只对 FACT/PROMISE/PREFERENCE/BOUNDARY 生效，避免饭团/炒饭这类同一件事被写成多条。
@@ -523,6 +525,11 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 群聊记忆隔离（2026-11-07）：审计发现群聊提示词会带入私聊记忆——召回只按 `channelId` 过滤，长期底色无条件注入，相关召回也没有最低阈值，导致 OpenBMCLAPI 群的提示词里 15 条记忆全部来自和 𝓞𝓵𝓭𝓮𝓻𝓕𝓸𝔁 的私聊。现在自动召回按会话收口：群聊只带本群记忆 + 稳定的自我/世界/话题记忆，其他会话的私聊/场景记忆不进入；私聊只额外带当前对象的跨会话关系记忆。长期底色同样要过最低文本相关度，相关召回不足时显示「没有相关记忆」而不是硬凑；记忆统计头改为当前场景可见数量。群聊新增【在场熟人】：列出在别的会话里认识、目前在场的成员及其记忆条数，只给提示不给内容，要求模型需要细节时先用 `memory.search` / `relationship.get`，不要在群里复述私聊。
 - 人格随时间改变（2026-11-07）：提示词明确人格不是冻结设定，性格、价值观、恐惧、长期目标、说话习惯、兴趣都会因经历变化。日常小波动仍走 `self.traits` 的漂移限幅；有明确触发的事件性变化用 `self.attributes.update` 一次改多项，幅度参考小感触 1-3 / 持续经历 3-8 / 重大事件 10-30 或反转，`reason` 必须写清触发。兴趣变化写新的 `PREFERENCE` 记忆说明变淡或反转，不删旧记录；名字、世界设定、绝对红线、全局硬限制作为身份锚点默认不动。`self.attributes.update` 写入卡片属性现在也写 `PersonaChangeLog`，可在「变动历史」看到。
 - 意图生命周期（2026-11-07）：审计发现未结意图堆积（单联系人 40 条近似 followup，67 条未结，15 条永不过期），根因是模型看不到存量、没有修改/取消工具，且一次唤醒把整批意图都标成 `SENT`。现在所有规划轮次注入【未结意图】摘要（按人/群归并、最急 3 条带 id），`WakeBrief` 的每条待发意图也带 id；新增 `intention.list` / `intention.update` / `intention.cancel` 三个工具，允许模型查全量、合并重复、改目标/时间/评分、取消过时念头。`ActionPlan` 新增 `handledIntentionIds`，只有模型声明用到的意图才标 `SENT`，其余按 2/4/6 小时退避 `DEFERRED`；旧协议缺 id 时只认最急的一条。新建意图默认 14 天过期，遗留无过期时间的未结意图超过 30 天自动过期。
+- 群聊语气与公开范围（2026-11-07）：群聊提示词把「语气」和「内容」拆开。好感、信任、亲密照常决定对每个人的态度，对恋人可以更软、更护短，对好朋友更随意，不因为人多就变生分；`disclosure_scope`（可公开范围）、对方隐私开关决定哪些私聊内容能当众说，`groupStance.audienceRisk` 只调整能说多深。群里称呼按 `how_i_address_here`（各场合称呼）选，没有公开称呼时才退到私下称呼并收着语气。【在场熟人】也改成「语气照常亲近、内容按公开范围」，不再要求按陌生人相处。这两条只注入群聊提示词。
+- 表情库渠道隔离（2026-11-07）：`StickerAsset` 增加 `channelId` 并绑定 `ChatChannel`，唯一键从全局 `sha256` 改为 `(channelId, sha256)`，删除从未被使用的 `scope` 字段（迁移 `20261107120000_sticker_channel_scope`，存量 14 条归到当前唯一渠道）。`StickerService` 的 list/search/review/toDataUrl/descriptionOf/recordUsage 全部按 `channelId` 过滤，跨渠道 `id` 一律 404；`GET /mind/stickers/:channelId`、心智页表情库与规划工具（`sticker.search` / `describe` / `collect`）、动作执行器发送表情都带当前渠道，不同渠道的 Agent 互不可见。文件仍按内容哈希共用，可见性由数据库归属控制。
+- 视频观看与缓存（2026-11-07）：新增 `video.watch` 与 `VideoInsight`（迁移 `20261107130000_video_insight`）。支持 bilibili.com/video/BV…、b23.tv 短链、BV 号与 av 号；读取 view 元数据、字幕、热门评论，12 分钟以内的视频走 playurl 720P MP4 + ffmpeg 均匀抽 9 帧拼成 3×3 图；更长的视频改用 `videoshot` 分镜图，避免下载整片。画面与文字一起交给视觉模型生成概述和要点，失败时退回纯文字总结。结果按 `(platform, videoId)` 缓存 14 天，重复调用直接返回，`focus` 只在已存画面上重看、不覆盖原概述；多 P 视频按 `BV…_pN` 分开缓存。QQ 分享卡片（json/xml 段）和视频段会从卡片内容里提取 B 站链接写进消息文本，人格看到链接后自行决定是否调用。试跑模式不下载、不写缓存。B 站 AI/自动字幕需要登录态：设置页保存 SESSDATA（存 `SystemConfig` 的 `video.bilibili`，标记 secret，保存前用 nav 接口校验 isLogin），观看时用 WBI 签名的 `player/wbi/v2` 优先取中文 CC，其次 `ai-zh` 自动字幕，未配置或失效时退回免登录的 `player/v2`。当前不做音频/歌词理解，字幕缺失时只能依赖画面与评论。
+- 客服腔收口（2026-11-07）：真实私聊出现「复述对方的话 + 关心式追问 + 自我状态播报」三连（「你怎么这个点还醒着呀」「你才睡几个小时呀」「我这边还迷迷糊糊的 脑子没开机」）。提示词补三条：不要换个语气复述对方的话再抛回去；对方只是报告状态时不必追问，说自己的判断/反应/正在想的事；状态只影响语气和长度，不要当话术播报，顺从、怕冷落不等于照顾对话。第二条气泡必须是补充/更正/情绪没说完且有新信息，不能重复同一层意思或补状态。兴趣匹配移除「正在做」「在：」两个来源，自己的活动/位置只作处境，不再让「刚醒」被算成相关话题并诱导自我播报。试跑确认反问消失、回复变成有内容的短句。
+- 意图去重与偏执（2026-11-07）：真实数据出现 8 条同一对象、同一 need、10 分钟内创建的「天亮看照片 / 欠一个亲」意图，模型每轮都把同一件事换个说法再建一条。旧去重只在 seed 二元组 Jaccard ≥0.55 时合并，中文改写句全部漏过。现在增加 containment（短 seed 是否大部分出现在长 seed 里）≥0.3 也视为重复，合并后保留更长的 seed；【未结意图】每个目标展开数从 3 提到 5，超出时提示「另有 N 条未展开」。提示词明确意图不是提醒/待办，同一件事、同一个梗只留一条，新细节用 `intention.update` 并进原条，已经说出口的玩笑让它过去。实测 8 条真实 seed 单遍合并后只剩 1 条，互不相关的话题不合并。
 
 - 属性单一真源（2026-11-04）：删除 `PersonaRelationship.baseValues`；把 `ChatPrivatePersona`/`ChatGroupPersona` 迁移进 `PersonaRelationship`/`PersonaGroupStance` 后删表；对话页人格面板改读这两张表；渠道人格面板改为服务端保存并写入 `ChatChannelPersona.history`；`PersonaState` 仍是唯一动态状态，渠道快照只做读时投影。
 - 计划同意与记忆节流（2026-11-04）：`todos` 需邀请/答应两条消息并通过时序、间隔、否定词、点名校验；普通情景记忆不再每轮写入，阈值与冷却时间见第 5 节。

@@ -155,6 +155,7 @@ model ChatChannel {
   agentRuns     AgentRun[]
   agentActions  AgentAction[]
   journal       PersonaJournal[]
+  stickers      StickerAsset[]
 
   @@unique([platform, accountId])
 }
@@ -992,7 +993,9 @@ model AgentAction {
 /// description and embedding used for mood/scene retrieval.
 model StickerAsset {
   id          String    @id @default(cuid())
-  sha256      String    @unique
+  channelId   String
+  channel     ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sha256      String
   filePath    String
   mimeType    String?
   byteSize    Int       @default(0)
@@ -1001,14 +1004,44 @@ model StickerAsset {
   tags        String[]  @default([])
   description String    @default("")
   embedding   Float[]   @default([])
-  scope       String    @default("GLOBAL")
   enabled     Boolean   @default(true)
   usageCount  Int       @default(0)
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([enabled, lastUsedAt])
+  @@unique([channelId, sha256])
+  @@index([channelId, enabled, lastUsedAt])
+}
+
+/// Cached understanding of a public video, keyed by platform video id so the
+/// persona can recall it without downloading the same video twice.
+model VideoInsight {
+  id           String    @id @default(cuid())
+  platform     String    @default("bilibili")
+  videoId      String
+  url          String    @default("")
+  title        String    @default("")
+  author       String    @default("")
+  durationSec  Int       @default(0)
+  description  String    @default("")
+  tags         String[]  @default([])
+  coverUrl     String?
+  stats        Json?
+  transcript   String    @default("")
+  comments     String    @default("")
+  summary      String    @default("")
+  keyPoints    String[]  @default([])
+  framesPath   String?
+  frameCount   Int       @default(0)
+  watchedAt    DateTime  @default(now())
+  lastUsedAt   DateTime  @default(now())
+  usageCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([platform, videoId])
+  @@index([lastUsedAt])
 }
 
 /// Raw request/response snapshots for every LLM call. Only the newest 200 rows

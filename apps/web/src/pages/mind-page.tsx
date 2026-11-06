@@ -296,7 +296,7 @@ export function MindPage() {
               />
             ) : null}
             {tab === 'journal' ? <MindJournalTab personaId={persona.id} /> : null}
-            {tab === 'stickers' ? <MindStickersTab /> : null}
+            {tab === 'stickers' ? <MindStickersTab channelId={channelId} /> : null}
           </div>
         </>
       )}

@@ -52,6 +52,7 @@ pnpm workspace + Turborepo 管理任务编排；`apps/*` 与 `packages/*` 均为
 
 - `onboarding.completed` — 是否完成初始化
 - `redis.connection` — Redis 连接参数（标记为敏感）
+- `video.bilibili` — B 站 SESSDATA 与昵称（标记为敏感，设置页维护，用于读取自动字幕）
 
 ## 认证与会话
 

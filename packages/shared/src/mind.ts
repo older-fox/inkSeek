@@ -434,6 +434,7 @@ export interface PersonaJournalRecord {
 
 export interface StickerRecord {
   id: string;
+  channelId: string;
   sha256: string;
   filePath: string;
   mimeType: string | null;
@@ -442,7 +443,6 @@ export interface StickerRecord {
   height: number | null;
   tags: string[];
   description: string;
-  scope: string;
   enabled: boolean;
   usageCount: number;
   lastUsedAt: string | null;

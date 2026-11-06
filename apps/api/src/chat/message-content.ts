@@ -75,19 +75,23 @@ export function extractContent(
           hasPlainText = true;
         }
         break;
-      case 'video':
-        parts.push('[视频]');
+      case 'video': {
+        const url = findBilibiliVideoUrl(data);
+        parts.push(url ? `[视频: ${url}]` : '[视频]');
         hasPlainText = true;
         break;
+      }
       case 'file':
         parts.push('[文件]');
         hasPlainText = true;
         break;
       case 'json':
-      case 'xml':
-        parts.push('[卡片消息]');
+      case 'xml': {
+        const url = findBilibiliVideoUrl(data);
+        parts.push(url ? `[视频链接: ${url}]` : '[卡片消息]');
         hasPlainText = true;
         break;
+      }
       default:
         break;
     }
@@ -212,16 +216,20 @@ export function buildParts(
             appendText('[引用]');
           }
           break;
-        case 'video':
-          appendText('[视频]');
+        case 'video': {
+          const url = findBilibiliVideoUrl(data);
+          appendText(url ? `[视频: ${url}]` : '[视频]');
           break;
+        }
         case 'file':
           appendText('[文件]');
           break;
         case 'json':
-        case 'xml':
-          appendText('[卡片消息]');
+        case 'xml': {
+          const url = findBilibiliVideoUrl(data);
+          appendText(url ? `[视频链接: ${url}]` : '[卡片消息]');
           break;
+        }
         default:
           break;
       }
@@ -244,4 +252,75 @@ export function buildParts(
   }
 
   return parts;
+}
+
+const B23_URL = /(?:https?:\/\/)?b23\.tv\/[0-9A-Za-z]+/i;
+const BILI_VIDEO_URL =
+  /(?:https?:\/\/)?(?:www\.|m\.)?bilibili\.com\/video\/(?:BV[0-9A-Za-z]{10}|av\d+)[^\s"'<>]*/i;
+const BARE_BVID = /(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10})(?![0-9A-Za-z])/;
+
+/**
+ * QQ share cards hide the real link inside a JSON/XML string. The persona needs
+ * the URL in the message text so it can decide to call video.watch later.
+ */
+export function findBilibiliVideoUrl(value: unknown, depth = 0): string | null {
+  if (depth > 5 || value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const direct = value.match(B23_URL)?.[0] ?? value.match(BILI_VIDEO_URL)?.[0];
+    if (direct) {
+      return normalizeVideoUrl(direct);
+    }
+    const bare = value.match(BARE_BVID)?.[1];
+    if (bare) {
+      return `https://www.bilibili.com/video/${bare}`;
+    }
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return findBilibiliVideoUrl(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findBilibiliVideoUrl(item, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      const found = findBilibiliVideoUrl(item, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+function normalizeVideoUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/[)\]，。！？、;,.!?'"]+$/, '');
+  if (trimmed.startsWith('//')) {
+    return `https:${trimmed}`;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^b23\.tv\//i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  if (/^bilibili\.com\//i.test(trimmed) || /^(?:www\.|m\.)?bilibili\.com\//i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  const bvid = trimmed.match(BARE_BVID)?.[1];
+  return bvid ? `https://www.bilibili.com/video/${bvid}` : trimmed;
 }

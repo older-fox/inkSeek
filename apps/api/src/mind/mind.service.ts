@@ -351,8 +351,8 @@ export class MindService {
     return this.heartbeat.trigger(personaId);
   }
 
-  listStickers(): Promise<StickerRecord[]> {
-    return this.stickers.list();
+  listStickers(channelId: string): Promise<StickerRecord[]> {
+    return this.stickers.list(channelId);
   }
 }
 

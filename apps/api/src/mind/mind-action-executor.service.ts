@@ -204,16 +204,17 @@ export class MindActionExecutor {
       return summary.id;
     }
     if (beat.kind === 'sticker') {
+      const channelId = scene.persona.channelId;
       const [dataUrl, description] = await Promise.all([
-        this.stickers.toDataUrl(beat.stickerId),
-        this.stickers.descriptionOf(beat.stickerId),
+        this.stickers.toDataUrl(beat.stickerId, channelId),
+        this.stickers.descriptionOf(beat.stickerId, channelId),
       ]);
       const summary = await chat.sendMessage(scene.conversation.id, {
         text: '',
         images: [dataUrl],
         imageDescriptions: description ? [description] : undefined,
       });
-      await this.stickers.recordUsage(beat.stickerId);
+      await this.stickers.recordUsage(beat.stickerId, channelId);
       return summary.id;
     }
     throw new Error(`暂不支持发送 ${beat.kind} 类型的消息段（动作 ${actionId}）`);

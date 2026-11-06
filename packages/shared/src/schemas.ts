@@ -43,6 +43,11 @@ export const redisSettingsSchema = redisConnectionSchema.extend({
   clearPassword: z.boolean().optional().default(false),
 });
 
+export const bilibiliSettingsSchema = z.object({
+  sessdata: z.string().trim().max(2048, 'SESSDATA 过长').optional().or(z.literal('')),
+  clearCookie: z.boolean().optional().default(false),
+});
+
 export const modelProviderProtocols = ['openai', 'anthropic', 'gemini'] as const;
 
 export const modelProviderProtocolSchema = z.enum(modelProviderProtocols);
@@ -148,6 +153,7 @@ export interface PersonaAiProviderOption {
 
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
+export type BilibiliSettingsInput = z.infer<typeof bilibiliSettingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
 export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

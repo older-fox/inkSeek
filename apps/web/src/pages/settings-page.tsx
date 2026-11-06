@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { motion } from 'motion/react';
+import { BilibiliSettingsSection } from '@/components/bilibili-settings-section';
 import { GhostButton } from '@/components/button';
 import { ModelProviderSection } from '@/components/model-provider-section';
 import { RedisSettingsSection } from '@/components/redis-settings-section';
@@ -99,6 +100,14 @@ export function SettingsPage() {
               transition={{ duration: 0.45, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
             >
               <RedisSettingsSection redis={overview?.redis ?? null} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <BilibiliSettingsSection bilibili={overview?.bilibili ?? null} />
             </motion.div>
 
             <motion.div

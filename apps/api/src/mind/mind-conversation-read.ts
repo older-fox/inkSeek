@@ -1,5 +1,4 @@
 import type { PersonaMemoryRecord } from '@inkseek/shared';
-import type { PersonaState } from '../generated/prisma/client.js';
 import { cosineSimilarity, embedText } from './mind-vector.js';
 import { clamp, personaValueText, type MindScene, type SceneMessage } from './mind.types.js';
 
@@ -278,7 +277,6 @@ export function classifyText(raw: string, hasMedia = false): MessageKind {
  */
 export function readConversation(input: {
   scene: MindScene;
-  state: Pick<PersonaState, 'currentActivity' | 'location'>;
   memories: readonly PersonaMemoryRecord[];
   now?: Date;
 }): ConversationRead {
@@ -495,10 +493,9 @@ export function readConversation(input: {
 
 function readInterest(input: {
   scene: MindScene;
-  state: Pick<PersonaState, 'currentActivity' | 'location'>;
   memories: readonly PersonaMemoryRecord[];
 }): InterestRead {
-  const { scene, state } = input;
+  const { scene } = input;
   const values = scene.persona.values as Record<string, unknown> | null;
   const sources: { label: string; text: string }[] = [];
   const seen = new Set<string>();
@@ -514,8 +511,6 @@ function readInterest(input: {
   for (const key of SELF_SOURCE_KEYS) {
     addSource(personaValueText(values, key));
   }
-  addSource(state.currentActivity, '正在做：');
-  addSource(state.location, '在：');
   for (const memory of input.memories) {
     if (!INTEREST_MEMORY_KINDS.has(memory.kind) && memory.subjectType !== 'TOPIC') continue;
     addSource(memory.content);

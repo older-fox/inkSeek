@@ -30,16 +30,19 @@ export class StickerService implements OnModuleInit {
     await mkdir(STICKER_ROOT, { recursive: true }).catch(() => undefined);
   }
 
-  async list(): Promise<StickerRecord[]> {
+  async list(channelId: string): Promise<StickerRecord[]> {
     const rows = await this.prisma.stickerAsset.findMany({
-      where: { enabled: true },
+      where: { channelId, enabled: true },
       orderBy: [{ lastUsedAt: 'desc' }, { createdAt: 'desc' }],
       take: 300,
     });
     return rows.map(toRecord);
   }
 
-  async importFromReceived(input: StickerCollectInput): Promise<StickerRecord> {
+  async importFromReceived(
+    input: StickerCollectInput,
+    channelId: string,
+  ): Promise<StickerRecord> {
     const media = await this.findReceivedMedia(input.mediaId, input.imageUrl);
     if (!media) {
       throw new NotFoundException({ code: 'IMAGE_NOT_FOUND', message: '找不到这张图片' });
@@ -73,8 +76,9 @@ export class StickerService implements OnModuleInit {
     }
     const embedding = embedText([description, ...tags].filter(Boolean).join('\n'));
     const row = await this.prisma.stickerAsset.upsert({
-      where: { sha256 },
+      where: { channelId_sha256: { channelId, sha256 } },
       create: {
+        channelId,
         sha256,
         filePath,
         mimeType,
@@ -137,9 +141,9 @@ export class StickerService implements OnModuleInit {
     return this.prisma.chatMediaObject.findFirst({ where: { storagePath } });
   }
 
-  async search(query: string, limit = 5): Promise<StickerRecord[]> {
+  async search(query: string, channelId: string, limit = 5): Promise<StickerRecord[]> {
     const rows = await this.prisma.stickerAsset.findMany({
-      where: { enabled: true },
+      where: { channelId, enabled: true },
       take: 500,
     });
     if (rows.length === 0) {
@@ -161,8 +165,8 @@ export class StickerService implements OnModuleInit {
    * Re-run vision on a stored sticker and persist the fresh description.
    * The embedding is rebuilt so retrieval follows the new wording.
    */
-  async review(id: string, focus?: string): Promise<StickerRecord> {
-    const row = await this.prisma.stickerAsset.findUnique({ where: { id } });
+  async review(id: string, channelId: string, focus?: string): Promise<StickerRecord> {
+    const row = await this.prisma.stickerAsset.findFirst({ where: { id, channelId } });
     if (!row) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
     }
@@ -185,14 +189,14 @@ export class StickerService implements OnModuleInit {
     }
     const embedding = embedText([description, ...row.tags].filter(Boolean).join('\n'));
     const updated = await this.prisma.stickerAsset.update({
-      where: { id },
+      where: { id: row.id },
       data: { description, embedding },
     });
     return toRecord(updated);
   }
 
-  async toDataUrl(id: string): Promise<string> {
-    const row = await this.prisma.stickerAsset.findUnique({ where: { id } });
+  async toDataUrl(id: string, channelId: string): Promise<string> {
+    const row = await this.prisma.stickerAsset.findFirst({ where: { id, channelId } });
     if (!row) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
     }
@@ -209,17 +213,17 @@ export class StickerService implements OnModuleInit {
   }
 
   /** Keeps the sent sticker meaningful in later chat context. */
-  async descriptionOf(id: string): Promise<string> {
-    const row = await this.prisma.stickerAsset.findUnique({
-      where: { id },
+  async descriptionOf(id: string, channelId: string): Promise<string> {
+    const row = await this.prisma.stickerAsset.findFirst({
+      where: { id, channelId },
       select: { description: true },
     });
     return row?.description.trim() ?? '';
   }
 
-  async recordUsage(id: string): Promise<void> {
+  async recordUsage(id: string, channelId: string): Promise<void> {
     await this.prisma.stickerAsset.updateMany({
-      where: { id },
+      where: { id, channelId },
       data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
     });
   }
@@ -267,6 +271,7 @@ function mimeForExtension(extension: string): string {
 function toRecord(row: StickerAsset): StickerRecord {
   return {
     id: row.id,
+    channelId: row.channelId,
     sha256: row.sha256,
     filePath: row.filePath,
     mimeType: row.mimeType,
@@ -275,7 +280,6 @@ function toRecord(row: StickerAsset): StickerRecord {
     height: row.height,
     tags: row.tags,
     description: row.description,
-    scope: row.scope,
     enabled: row.enabled,
     usageCount: row.usageCount,
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,

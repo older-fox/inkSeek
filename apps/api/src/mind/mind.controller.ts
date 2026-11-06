@@ -279,9 +279,9 @@ export class MindController {
     return this.mind.listHeartbeats(personaId, query);
   }
 
-  @Get('stickers')
+  @Get('stickers/:channelId')
   @ApiOperation({ summary: '读取 Agent 收藏的表情库' })
-  stickers() {
-    return this.mind.listStickers();
+  stickers(@Param('channelId') channelId: string) {
+    return this.mind.listStickers(channelId);
   }
 }

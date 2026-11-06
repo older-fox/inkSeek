@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   redisConnectionSchema,
+  type BilibiliSettingsInput,
+  type BilibiliSettingsResult,
   type ModelProviderInput,
   type ModelProviderProtocol,
   type ModelProviderSaveResult,
@@ -11,6 +13,7 @@ import {
   type RedisSettingsResult,
   type SettingsOverview,
 } from '@inkseek/shared';
+import { BilibiliAuthService } from '../config/bilibili-auth.service.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
@@ -28,18 +31,25 @@ export class SettingsService {
     private readonly config: SystemConfigService,
     private readonly redisProbe: RedisProbeService,
     private readonly providerProbe: ModelProviderProbeService,
+    private readonly bilibili: BilibiliAuthService,
   ) {}
 
   async getOverview(): Promise<SettingsOverview> {
-    const [redisRecord, providers] = await Promise.all([
+    const [redisRecord, providers, bilibili] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
       this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.bilibili.overview(),
     ]);
 
     return {
       redis: toRedisSettings(redisRecord?.value, redisRecord?.updatedAt),
+      bilibili,
       providers: providers.map(toProviderSummary),
     };
+  }
+
+  async updateBilibili(input: BilibiliSettingsInput): Promise<BilibiliSettingsResult> {
+    return { bilibili: await this.bilibili.save(input) };
   }
 
   async updateRedis(input: RedisSettingsInput): Promise<RedisSettingsResult> {
