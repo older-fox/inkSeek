@@ -328,7 +328,7 @@ export function DropdownSelect({
                 : { bottom: placement.bottom }),
             }}
             className={cn(
-              'fixed z-[80] overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.12] bg-ink-900/95 p-2 shadow-[0_28px_80px_-24px_rgba(0,0,0,0.95)] outline-none backdrop-blur-xl',
+              'fixed z-[200] overflow-y-auto overscroll-contain rounded-xl border border-mist-100/[0.12] bg-ink-900/95 p-2 shadow-[0_28px_80px_-24px_rgba(0,0,0,0.95)] outline-none backdrop-blur-xl',
               placement.dropUp ? 'origin-bottom' : 'origin-top',
             )}
           >

@@ -50,10 +50,37 @@ export interface BilibiliSettings {
   updatedAt: string;
 }
 
+export interface PhoneDeviceInfo {
+  serial: string;
+  state: string;
+  model: string;
+  product: string;
+}
+
+export interface PhoneSettings {
+  adbAvailable: boolean;
+  adbPath: string;
+  adbVersion: string;
+  devices: PhoneDeviceInfo[];
+  error: string;
+}
+
+/** Wireless devices available for channel-level selection. */
+export interface PhoneDeviceList {
+  adbAvailable: boolean;
+  devices: PhoneDeviceInfo[];
+  error: string;
+}
+
 export interface SettingsOverview {
   redis: RedisSettings | null;
   bilibili: BilibiliSettings | null;
+  phone: PhoneSettings;
   providers: ModelProviderSummary[];
+}
+
+export interface PhoneSettingsResult {
+  phone: PhoneSettings;
 }
 
 export interface RedisSettingsResult {

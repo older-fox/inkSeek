@@ -23,9 +23,11 @@ import type {
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
+  PhoneDeviceList,
   StickerRecord,
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
+import { PhoneService } from '../phone/phone.service.js';
 import type {
   AgentIntention,
   AgentTodo,
@@ -62,6 +64,7 @@ export class MindService {
     private readonly heartbeat: MindHeartbeatService,
     private readonly heartbeatLogs: MindHeartbeatLogService,
     private readonly stickers: StickerService,
+    private readonly phones: PhoneService,
   ) {}
 
   listChanges(
@@ -353,6 +356,10 @@ export class MindService {
 
   listStickers(channelId: string): Promise<StickerRecord[]> {
     return this.stickers.list(channelId);
+  }
+
+  phoneDevices(): Promise<PhoneDeviceList> {
+    return this.phones.devices();
   }
 }
 

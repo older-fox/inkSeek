@@ -42,6 +42,9 @@ export class ChatMessageProcessor {
       }
 
       if (message.conversationKind === 'PRIVATE' && settings.privateBurstSeconds > 0) {
+        // The quiet window delays the next turn; stop the previous run now
+        // instead of letting it finish while the person keeps typing.
+        this.mind.interrupt(message.conversationId, message.senderId);
         this.burst.schedule(message, settings.privateBurstSeconds, (messages, quietSeconds) =>
           this.handleBurst(messages, quietSeconds),
         );

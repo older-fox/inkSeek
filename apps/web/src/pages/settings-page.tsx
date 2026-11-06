@@ -4,9 +4,18 @@ import { motion } from 'motion/react';
 import { BilibiliSettingsSection } from '@/components/bilibili-settings-section';
 import { GhostButton } from '@/components/button';
 import { ModelProviderSection } from '@/components/model-provider-section';
+import { PhoneSettingsSection } from '@/components/phone-settings-section';
 import { RedisSettingsSection } from '@/components/redis-settings-section';
 import { ApiError } from '@/lib/api';
 import { meQuery, settingsQuery } from '@/lib/queries';
+
+const EMPTY_PHONE = {
+  adbAvailable: false,
+  adbPath: '',
+  adbVersion: '',
+  devices: [],
+  error: '',
+};
 
 export function SettingsPage() {
   const { data: user } = useQuery(meQuery);
@@ -59,7 +68,7 @@ export function SettingsPage() {
               设置
             </h1>
             <p className="mt-3 max-w-2xl text-[0.9rem] leading-7 text-mist-500">
-              维护平台的缓存连接与模型接入。所有保存动作都会先进行真实连通性测试， 通过后才会落库。
+              维护缓存连接、手机控制与模型接入。所有保存动作都会先进行真实连通性测试， 通过后才会落库。
             </p>
           </div>
 
@@ -107,13 +116,21 @@ export function SettingsPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
             >
-              <BilibiliSettingsSection bilibili={overview?.bilibili ?? null} />
+              <PhoneSettingsSection phone={overview?.phone ?? EMPTY_PHONE} />
             </motion.div>
 
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <BilibiliSettingsSection bilibili={overview?.bilibili ?? null} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
             >
               <ModelProviderSection providers={providers} />
             </motion.div>

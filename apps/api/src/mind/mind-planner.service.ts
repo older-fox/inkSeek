@@ -388,6 +388,7 @@ export class MindPlannerService {
       '- 【可用工具】列着全部工具，可以直接按名字调用；参数不确定时先 tools.search（query 写你想做的事）查详细参数。不要臆造工具，也不要因为没把握就放弃查证。',
       '- 动手前先过一遍：这轮有没有不确定、需要接续或需要核实的东西？涉及过去的事、对方说过的话、关系细节、承诺、群里的旧话题、当前时间或自身状态，都值得先查。记忆先用 memory.search，聊天记录用 history.search，关系用 relationship.get；一次没查到就换关键词，或用 aroundMessageId 往回翻，一轮可以连续调用多个工具。查证是为了心里有数，不一定要把查到的都说出来。',
       '- 消息里出现 B 站视频链接（bilibili.com/video/BV…、b23.tv/…）或有人分享视频、问你看了没时，先用 video.watch 看；同一个视频按 ID 缓存，重复调用直接返回上次内容。看视频要下载和识别，先判断值不值得看，不要每个链接都看。',
+      '- 设置里已连接手机时，你可以真的操作它：先 phone.screen 看界面和可点坐标，再用 phone.act 点按/滑动/按键/输入/打开应用；每次操作后再 phone.screen 确认，不要凭记忆点坐标。输入只支持英文数字和符号，中文要用手机自己的输入法。',
       '- 需要关系细节（私下称呼、各场合称呼、可公开范围、边界、承诺、共同经历、对象档案）时，用 relationship.get 读；它返回 37 项 attributes（含空值），可把其中任意 key 放进 relationship.update 的 attributes 写回。',
       '- 需要补充人设细节时，用 self.attributes.list 查键、self.attributes.get 读值；不要凭空编造未写明的设定。',
       '- 已经通过工具调整过的关系，不要再在 relationshipSignals 里重复写同一维度。',

@@ -13,10 +13,17 @@ import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   bilibiliSettingsSchema,
   modelProviderSchema,
+  phoneConnectSchema,
+  phoneDisconnectSchema,
+  phonePairSchema,
   redisSettingsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
   type ModelProviderInput,
+  type PhoneConnectInput,
+  type PhoneDisconnectInput,
+  type PhonePairInput,
+  type PhoneSettingsResult,
   type ModelProviderSaveResult,
   type RedisSettingsInput,
   type RedisSettingsResult,
@@ -56,6 +63,33 @@ export class SettingsController {
     @Body(new ZodValidationPipe(bilibiliSettingsSchema)) input: BilibiliSettingsInput,
   ): Promise<BilibiliSettingsResult> {
     return this.settings.updateBilibili(input);
+  }
+
+  @Post('phone/connect')
+  @HttpCode(200)
+  @ApiOperation({ summary: '通过 adb connect 连接手机（管理员）' })
+  connectPhone(
+    @Body(new ZodValidationPipe(phoneConnectSchema)) input: PhoneConnectInput,
+  ): Promise<PhoneSettingsResult> {
+    return this.settings.connectPhone(input);
+  }
+
+  @Post('phone/pair')
+  @HttpCode(200)
+  @ApiOperation({ summary: '无线调试配对（管理员）' })
+  pairPhone(
+    @Body(new ZodValidationPipe(phonePairSchema)) input: PhonePairInput,
+  ): Promise<PhoneSettingsResult> {
+    return this.settings.pairPhone(input);
+  }
+
+  @Post('phone/disconnect')
+  @HttpCode(200)
+  @ApiOperation({ summary: '断开无线调试设备（管理员）' })
+  disconnectPhone(
+    @Body(new ZodValidationPipe(phoneDisconnectSchema)) input: PhoneDisconnectInput,
+  ): Promise<PhoneSettingsResult> {
+    return this.settings.disconnectPhone(input);
   }
 
   @Post('providers')

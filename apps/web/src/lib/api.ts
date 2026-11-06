@@ -37,6 +37,11 @@ import type {
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
+  PhoneConnectInput,
+  PhoneDeviceList,
+  PhoneDisconnectInput,
+  PhonePairInput,
+  PhoneSettingsResult,
   StickerRecord,
   ModelProviderSaveResult,
   PersonaAiGenerateInput,
@@ -130,6 +135,21 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
+  connectPhone: (input: PhoneConnectInput) =>
+    request<PhoneSettingsResult>('/settings/phone/connect', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  pairPhone: (input: PhonePairInput) =>
+    request<PhoneSettingsResult>('/settings/phone/pair', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  disconnectPhone: (input: PhoneDisconnectInput) =>
+    request<PhoneSettingsResult>('/settings/phone/disconnect', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   createModelProvider: (input: ModelProviderInput) =>
     request<ModelProviderSaveResult>('/settings/providers', {
       method: 'POST',
@@ -193,6 +213,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
+  mindPhoneDevices: () => request<PhoneDeviceList>('/mind/phone-devices'),
   mindSettings: (channelId: string) =>
     request<MindSettingsRecord>(`/mind/settings/${encodeURIComponent(channelId)}`),
   updateMindSettings: (channelId: string, input: MindSettingsUpdateInput) =>

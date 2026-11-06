@@ -115,6 +115,17 @@ export class MindRuntimeService implements OnModuleInit {
   }
 
   /**
+   * Abort the in-flight turn right away. Burst merging delays the next turn by
+   * the quiet window, so waiting for `turn()` would let the old run finish
+   * while the person is already typing again.
+   */
+  interrupt(conversationId: string, senderId: string): void {
+    const key = `${conversationId}:${senderId}`;
+    this.turnGenerations.set(key, (this.turnGenerations.get(key) ?? 0) + 1);
+    this.activeTurns.get(key)?.controller.abort();
+  }
+
+  /**
    * Message turns for the same sender in the same conversation are serialised:
    * a newer message aborts the in-flight model call and re-plans from the
    * latest scene, while middle messages that were already superseded drop out.

@@ -244,6 +244,8 @@ interface SocialRead {
 - `web.search`
 - `web.read`：读取单个公开网页正文（去标签、限长、拒绝私网地址与重定向到内网）
 - `video.watch`：观看 B 站视频（链接/BV/av），拉标题、简介、字幕、热评并抽 9 帧拼图交给视觉模型，生成内容概述与要点；按 `(platform, videoId)` 缓存在 `VideoInsight`，重复调用直接返回，`focus` 可基于已存画面重看。B 站自动字幕只对登录用户开放，设置页填 SESSDATA 后走 WBI 签名的 `player/wbi/v2` 读取，未配置时退回普通 CC 字幕。分享卡片里的链接会从 JSON/XML 提取进消息文本。
+- `phone.screen`：读取本渠道手机的界面（adb `uiautomator dump`），返回应用包名、屏幕尺寸和可点元素的文字/类型/中心坐标；操作前先看，操作后再看确认。
+- `phone.act`：操作本渠道手机，支持 tap/swipe/key/type/open；type 只支持 ASCII，中文需要手机自己的输入法。设备在渠道人格面板 → 心智设置 → 手机设备里选择，找不到或离线时直接报错。
 - `sticker.search`：返回表情 `id`、描述、标签与相似度；`id` 直接作为 `beats[].stickerId`
 - `sticker.describe`：重新识别一张表情（可带 `focus`），新描述与向量写回 `StickerAsset`
 - `sticker.collect`：把本会话收到的图片收进表情库，`image` 传 `[图片：描述]` 的描述原文
@@ -379,7 +381,8 @@ type OutgoingBeat =
 - 用最后一条消息触发 turn；场景本来就包含最近对话，所以人格能读到整串碎片，仍然可以回多条气泡。
 - 本轮除最后一条外的消息各写一条 `AgentRun`（`SKIPPED`，`ATTENTION` 步骤标题「私聊连发合并」），运行轨迹不丢消息。
 - 同一会话的合并批次串行执行，不会出现两轮同时回复；不同会话互不影响。
-- 这不是群聊的回复回避窗口：不吞消息、不取消已决定的回复，只改变「什么时候回、回几次」。`0` 关闭；私聊默认仍是零延迟。
+- 新消息一到就立即中断上一条仍在执行的心智运行（包括气泡之间的等待），合并窗口只延迟下一轮；不会等窗口结束才去取消。
+- 这不是群聊的回复回避窗口：不吞消息，只改变「什么时候回、回几次」。`0` 关闭；私聊默认仍是零延迟。
 
 ### 生活小事（空闲心跳的低概率事件）
 
@@ -531,6 +534,7 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 客服腔收口（2026-11-07）：真实私聊出现「复述对方的话 + 关心式追问 + 自我状态播报」三连（「你怎么这个点还醒着呀」「你才睡几个小时呀」「我这边还迷迷糊糊的 脑子没开机」）。提示词补三条：不要换个语气复述对方的话再抛回去；对方只是报告状态时不必追问，说自己的判断/反应/正在想的事；状态只影响语气和长度，不要当话术播报，顺从、怕冷落不等于照顾对话。第二条气泡必须是补充/更正/情绪没说完且有新信息，不能重复同一层意思或补状态。兴趣匹配移除「正在做」「在：」两个来源，自己的活动/位置只作处境，不再让「刚醒」被算成相关话题并诱导自我播报。试跑确认反问消失、回复变成有内容的短句。
 - 意图去重与偏执（2026-11-07）：真实数据出现 8 条同一对象、同一 need、10 分钟内创建的「天亮看照片 / 欠一个亲」意图，模型每轮都把同一件事换个说法再建一条。旧去重只在 seed 二元组 Jaccard ≥0.55 时合并，中文改写句全部漏过。现在增加 containment（短 seed 是否大部分出现在长 seed 里）≥0.3 也视为重复，合并后保留更长的 seed；【未结意图】每个目标展开数从 3 提到 5，超出时提示「另有 N 条未展开」。提示词明确意图不是提醒/待办，同一件事、同一个梗只留一条，新细节用 `intention.update` 并进原条，已经说出口的玩笑让它过去。实测 8 条真实 seed 单遍合并后只剩 1 条，互不相关的话题不合并。
 
+- 手机控制（2026-11-07）：新增 `PhoneService`（adb 网关）与设置页「手机控制」卡片。后端自动发现 `ADB_PATH` / `ANDROID_HOME` / `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` / PATH 上的 adb，只保留无线设备（`adb devices -l` 中 serial 为 `IP:端口` 或 `._adb-tls-connect._tcp` 的项，USB 设备与本地模拟器不显示也不能选）；支持无线 `adb connect`、Android 11+ `adb pair` 和断开。设备选择按渠道隔离，存在 `ChatMindSettings.phoneDevice`（迁移 `20261107140000_mind_phone_device`），在渠道人格面板 → 心智设置 → 手机设备里从当前在线的无线设备中选择；旧全局 `SystemConfig` 的 `phone.device` 已删除。Agent 新增 `phone.screen`（uiautomator 结构树转成紧凑文字，含可点坐标）和 `phone.act`（tap/swipe/key/type/open），按当前会话渠道解析设备，提示词要求「先看、再操作、再看一次」；试跑模式禁止读取或操作真机。`type` 仅支持 ASCII（`input text` 的限制），中文需用手机输入法；iOS 不在此实现内。已在 Pixel Tablet 模拟器上实测读界面、Home、打开设置、点搜索框和输入文本。
 - 属性单一真源（2026-11-04）：删除 `PersonaRelationship.baseValues`；把 `ChatPrivatePersona`/`ChatGroupPersona` 迁移进 `PersonaRelationship`/`PersonaGroupStance` 后删表；对话页人格面板改读这两张表；渠道人格面板改为服务端保存并写入 `ChatChannelPersona.history`；`PersonaState` 仍是唯一动态状态，渠道快照只做读时投影。
 - 计划同意与记忆节流（2026-11-04）：`todos` 需邀请/答应两条消息并通过时序、间隔、否定词、点名校验；普通情景记忆不再每轮写入，阈值与冷却时间见第 5 节。
 - 提示词日志（2026-11-04）：所有 `LlmService.complete` 调用与人格 AI 编写都会写入 `LlmPromptLog`，插入后裁剪到最近 200 条。

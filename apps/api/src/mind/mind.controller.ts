@@ -66,6 +66,12 @@ export class MindController {
     return this.mind.getSettings(channelId);
   }
 
+  @Get('phone-devices')
+  @ApiOperation({ summary: '列出可选的无线 adb 设备' })
+  phoneDevices() {
+    return this.mind.phoneDevices();
+  }
+
   @Patch('settings/:channelId')
   @ApiOperation({ summary: '更新渠道心智模式' })
   updateSettings(

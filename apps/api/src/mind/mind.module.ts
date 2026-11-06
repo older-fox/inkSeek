@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { MediaModule } from '../chat/media.module.js';
+import { PhoneModule } from '../phone/phone.module.js';
 import { RedisModule } from '../redis/redis.module.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindController } from './mind.controller.js';
@@ -26,7 +27,7 @@ import { VideoInsightService } from './video-insight.service.js';
 import { WebSearchService } from './web-search.service.js';
 
 @Module({
-  imports: [AuthModule, AiModule, RedisModule, MediaModule],
+  imports: [AuthModule, AiModule, RedisModule, MediaModule, PhoneModule],
   controllers: [MindController],
   providers: [
     MindSettingsService,

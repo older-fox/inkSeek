@@ -1,8 +1,9 @@
-import type { MindSettingsUpdateInput } from '@inkseek/shared';
+import type { MindSettingsUpdateInput, PhoneDeviceInfo } from '@inkseek/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { DropdownSelect, type DropdownOption } from '@/components/dropdown-select';
 import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { MODES } from './mind-format';
@@ -21,6 +22,11 @@ export function MindSettingsPanel({
     queryFn: () => api.mindSettings(channelId),
     enabled: Boolean(channelId),
     staleTime: 5_000,
+  });
+  const phoneDevicesQuery = useQuery({
+    queryKey: ['mind', 'phone-devices'],
+    queryFn: api.mindPhoneDevices,
+    staleTime: 0,
   });
   const settings = settingsQuery.data ?? null;
   const [mode, setMode] = useState('OFF');
@@ -43,6 +49,7 @@ export function MindSettingsPanel({
   const [curiosityLimit, setCuriosityLimit] = useState(0);
   const [reflectionHours, setReflectionHours] = useState(6);
   const [imagePrompt, setImagePrompt] = useState('');
+  const [phoneDevice, setPhoneDevice] = useState('');
   const appliedSettingsRef = useRef('');
 
   useEffect(() => {
@@ -69,6 +76,7 @@ export function MindSettingsPanel({
     setCuriosityLimit(settings.curiosityDailyLimit);
     setReflectionHours(settings.reflectionIntervalHours);
     setImagePrompt(settings.imageDescriptionPrompt);
+    setPhoneDevice(settings.phoneDevice ?? '');
   }, [settings]);
 
   const mutation = useMutation({
@@ -112,7 +120,8 @@ export function MindSettingsPanel({
     settings.curiosityChancePercent !== curiosityChance ||
     settings.curiosityDailyLimit !== curiosityLimit ||
     settings.reflectionIntervalHours !== reflectionHours ||
-    settings.imageDescriptionPrompt !== imagePrompt;
+    settings.imageDescriptionPrompt !== imagePrompt ||
+    (settings.phoneDevice ?? '') !== phoneDevice;
 
   return (
     <div>
@@ -330,6 +339,33 @@ export function MindSettingsPanel({
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">手机设备</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          只支持无线 ADB：已连接或无线调试自动发现的设备都会列出。这里选择的是本渠道可以操作的设备；没选或设备离线时，手机工具会拒绝执行。
+        </p>
+        <div className="mt-2">
+          <DropdownSelect
+            value={phoneDevice}
+            options={phoneDeviceOptions(phoneDevice, phoneDevicesQuery.data?.devices ?? [])}
+            onChange={setPhoneDevice}
+            ariaLabel="手机设备"
+            placeholder="不使用手机"
+            showValue={false}
+          />
+        </div>
+        {phoneDevicesQuery.data && !phoneDevicesQuery.data.adbAvailable && (
+          <p className="mt-2 text-[0.64rem] text-signal-400">
+            {phoneDevicesQuery.data.error || '没有找到可用的 adb'}
+          </p>
+        )}
+        {phoneDevicesQuery.data?.adbAvailable && phoneDevicesQuery.data.devices.length === 0 && (
+          <p className="mt-2 text-[0.64rem] text-mist-600">
+            还没有可用的无线设备。先到系统设置 → 手机控制完成连接与配对。
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
         <p className="text-[0.8rem] text-mist-300">图片理解</p>
         <div className="mt-2">
           <TextAreaField
@@ -366,6 +402,7 @@ export function MindSettingsPanel({
             curiosityDailyLimit: curiosityLimit,
             reflectionIntervalHours: reflectionHours,
             imageDescriptionPrompt: imagePrompt.trim(),
+            phoneDevice: phoneDevice || null,
           })
         }
         className="mt-4 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-brass-400/30 bg-brass-400/10 text-[0.78rem] text-brass-200 transition hover:bg-brass-400/20 disabled:cursor-not-allowed disabled:opacity-40"
@@ -379,4 +416,19 @@ export function MindSettingsPanel({
       </button>
     </div>
   );
+}
+
+function phoneDeviceOptions(current: string, devices: PhoneDeviceInfo[]): DropdownOption[] {
+  const options: DropdownOption[] = [{ value: '', label: '不使用手机' }];
+  for (const device of devices) {
+    const state = device.state === 'device' ? '' : `（${device.state}）`;
+    options.push({
+      value: device.serial,
+      label: `${device.model || '安卓设备'} · ${device.serial}${state}`,
+    });
+  }
+  if (current && !options.some((option) => option.value === current)) {
+    options.push({ value: current, label: `${current}（离线）` });
+  }
+  return options;
 }

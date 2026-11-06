@@ -29,6 +29,7 @@ const SETTINGS_DEFAULTS = {
   imageDescriptionPrompt: '',
   providerId: null,
   model: null,
+  phoneDevice: null,
   quietHours: null,
 } as const;
 
@@ -113,6 +114,9 @@ export class MindSettingsService {
     }
     if (input.providerId !== undefined) data.providerId = input.providerId;
     if (input.model !== undefined) data.model = input.model;
+    if (input.phoneDevice !== undefined) {
+      data.phoneDevice = input.phoneDevice?.trim() || null;
+    }
     if (input.quietHours !== undefined) {
       data.quietHours =
         input.quietHours === null ? Prisma.JsonNull : (input.quietHours as Prisma.InputJsonValue);
@@ -146,6 +150,7 @@ export class MindSettingsService {
         imageDescriptionPrompt: input.imageDescriptionPrompt?.trim() ?? '',
         providerId: input.providerId ?? null,
         model: input.model ?? null,
+        phoneDevice: input.phoneDevice?.trim() || null,
         quietHours:
           input.quietHours === undefined
             ? undefined
@@ -197,6 +202,7 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     quietHours: row.quietHours,
     providerId: row.providerId,
     model: row.model,
+    phoneDevice: row.phoneDevice,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

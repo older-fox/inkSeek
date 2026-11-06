@@ -101,6 +101,8 @@ export interface MindSettingsRecord {
   quietHours: unknown;
   providerId: string | null;
   model: string | null;
+  /** Wireless adb address (ip:port) this channel may operate. */
+  phoneDevice: string | null;
   updatedAt: string;
 }
 
@@ -720,6 +722,19 @@ export const mindSettingsUpdateSchema = z.object({
   quietHours: z.unknown().optional(),
   providerId: z.string().max(64).nullable().optional(),
   model: z.string().max(200).nullable().optional(),
+  phoneDevice: z
+    .string()
+    .trim()
+    .max(120)
+    .nullable()
+    .optional()
+    .refine(
+      (value) =>
+        !value ||
+        /^[A-Za-z0-9.-]+:\d{1,5}$/u.test(value) ||
+        /\._adb-tls-connect\._tcp$/u.test(value),
+      '仅支持无线 ADB 设备（IP:端口 或无线调试的 mDNS 名称）',
+    ),
 });
 
 export type MindSettingsUpdateInput = z.infer<typeof mindSettingsUpdateSchema>;

@@ -9,6 +9,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaState, Prisma } from '../generated/prisma/client.js';
+import { PhoneService } from '../phone/phone.service.js';
 import { checkTodoConsent } from './mind-consent.js';
 import { jsonValue } from './mind-json.js';
 import { relationshipLines } from './mind-behavior.js';
@@ -54,6 +55,8 @@ const DRY_RUN_BLOCKED_TOOLS = new Set([
   'sticker.describe',
   'sticker.collect',
   'video.watch',
+  'phone.screen',
+  'phone.act',
   'todo.create',
   'intention.update',
   'intention.cancel',
@@ -95,6 +98,8 @@ const TOOL_SEARCH_KEYWORDS: Record<string, readonly string[]> = {
   'web.search': ['网页', '搜索', '资料'],
   'web.read': ['网页', '阅读', '打开', '链接', '文章', '来源', '资料'],
   'video.watch': ['视频', '看视频', 'b站', 'bilibili', 'BV', 'av', '链接', '分享'],
+  'phone.screen': ['手机', '安卓', 'adb', '屏幕', '界面', '截图', '点哪里'],
+  'phone.act': ['手机', '操作手机', '点按', '滑动', '输入', '按键', '打开应用', 'adb'],
   'sticker.search': ['表情', '表情包'],
   'sticker.describe': ['表情', '表情包', '识别', '描述', '重新看'],
   'sticker.collect': ['表情', '收藏', '图片'],
@@ -127,6 +132,8 @@ export const MIND_TOOL_MENU: readonly { name: string; hint: string }[] = [
   { name: 'web.search', hint: '搜索网页资料（query/limit）' },
   { name: 'web.read', hint: '打开网页读正文（url）' },
   { name: 'video.watch', hint: '看 B 站视频并记住内容（video/focus），同 ID 会缓存' },
+  { name: 'phone.screen', hint: '看手机当前界面与可点坐标（无参数）' },
+  { name: 'phone.act', hint: '操作手机：点按/滑动/按键/输入/打开应用（action/…）' },
   { name: 'sticker.search', hint: '按情绪或场景搜表情库（query/limit）' },
   { name: 'sticker.describe', hint: '重新识别一张表情（stickerId/focus）' },
   { name: 'sticker.collect', hint: '把对话里的图片收进表情库（image/tags）' },
@@ -250,6 +257,30 @@ export const MIND_TOOL_CATALOG = [
     },
   },
   {
+    name: 'phone.screen',
+    description:
+      '查看当前手机界面：返回应用包名、屏幕尺寸和可点的元素（文字、类型、中心坐标）。操作手机前先看一次，操作后再看一次确认结果；不要凭记忆点坐标。',
+    input: {},
+  },
+  {
+    name: 'phone.act',
+    description:
+      '操作当前手机。action=tap 点按(x,y)、swipe 滑动(x1,y1,x2,y2,duration)、key 按键(back|home|recents|enter|delete|volume_up|volume_down|power)、type 输入(text，仅英文数字符号)、open 打开(target=应用包名或 http 链接)。每次操作后用 phone.screen 确认。',
+    input: {
+      action: 'string（tap|swipe|key|type|open）',
+      x: 'number? tap 横坐标',
+      y: 'number? tap 纵坐标',
+      x1: 'number? swipe 起点横坐标',
+      y1: 'number? swipe 起点纵坐标',
+      x2: 'number? swipe 终点横坐标',
+      y2: 'number? swipe 终点纵坐标',
+      duration: 'number? swipe 时长毫秒，默认 300',
+      key: 'string? 按键名',
+      text: 'string? 要输入的文字（仅 ASCII）',
+      target: 'string? 应用包名或 http(s) 链接',
+    },
+  },
+  {
     name: 'sticker.search',
     description:
       '按情绪或使用场景检索自己的表情库。返回每张表情的 id、描述和标签；这个 id 可以直接放进 beats 的 stickerId 用来发表情。description 只用于挑选，不要复述、引用或写进回复文字。',
@@ -367,6 +398,7 @@ export class MindToolsService {
     private readonly stickers: StickerService,
     private readonly web: WebSearchService,
     private readonly videos: VideoInsightService,
+    private readonly phones: PhoneService,
   ) {}
 
   async execute(name: string, input: unknown, context: MindToolContext): Promise<ToolExecution> {
@@ -401,7 +433,9 @@ export class MindToolsService {
         note:
           name === 'video.watch'
             ? '试跑模式不下载视频、不写缓存，也没有内容返回；不要假装看过这个视频。'
-            : '试跑模式不写数据库：这次调用的写入被跳过，可以当作已经完成来继续规划。',
+            : name === 'phone.screen' || name === 'phone.act'
+              ? '试跑模式不读取、也不操作手机；不要假装看到了界面或完成了操作。'
+              : '试跑模式不写数据库：这次调用的写入被跳过，可以当作已经完成来继续规划。',
       };
     }
     switch (name) {
@@ -425,6 +459,10 @@ export class MindToolsService {
         return this.webRead(args);
       case 'video.watch':
         return this.videoWatch(args);
+      case 'phone.screen':
+        return this.phoneScreen(context);
+      case 'phone.act':
+        return this.phoneAct(args, context);
       case 'sticker.search':
         return this.stickerSearch(args, context);
       case 'sticker.describe':
@@ -1011,6 +1049,30 @@ export class MindToolsService {
     return this.videos.watch(video, { focus });
   }
 
+  private phoneScreen(context: MindToolContext) {
+    return this.phones.screen(context.scene.persona.channelId);
+  }
+
+  private phoneAct(args: Record<string, unknown>, context: MindToolContext) {
+    const action = readString(args['action']).trim();
+    if (!action) {
+      throw new Error('action 不能为空；可用 tap/swipe/key/type/open');
+    }
+    return this.phones.act(context.scene.persona.channelId, {
+      action,
+      x: optionalNumber(args['x']),
+      y: optionalNumber(args['y']),
+      x1: optionalNumber(args['x1']),
+      y1: optionalNumber(args['y1']),
+      x2: optionalNumber(args['x2']),
+      y2: optionalNumber(args['y2']),
+      duration: optionalNumber(args['duration']),
+      key: readString(args['key']) || undefined,
+      text: readString(args['text']) || undefined,
+      target: readString(args['target']) || undefined,
+    });
+  }
+
   private async stickerSearch(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim() || '自然';
     const limit = Math.max(1, Math.min(5, readNumber(args['limit'], 3)));
@@ -1576,6 +1638,10 @@ function parseDate(value: unknown): Date | null {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function readNumericInput(value: unknown): number | null {

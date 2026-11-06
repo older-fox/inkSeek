@@ -48,6 +48,19 @@ export const bilibiliSettingsSchema = z.object({
   clearCookie: z.boolean().optional().default(false),
 });
 
+export const phoneConnectSchema = z.object({
+  address: z.string().trim().min(1, '请填写 IP:端口').max(120, '地址过长'),
+});
+
+export const phonePairSchema = z.object({
+  address: z.string().trim().min(1, '请填写配对地址').max(120, '地址过长'),
+  code: z.string().trim().regex(/^\d{6}$/, '配对码是 6 位数字'),
+});
+
+export const phoneDisconnectSchema = z.object({
+  address: z.string().trim().max(120, '地址过长').optional(),
+});
+
 export const modelProviderProtocols = ['openai', 'anthropic', 'gemini'] as const;
 
 export const modelProviderProtocolSchema = z.enum(modelProviderProtocols);
@@ -154,6 +167,9 @@ export interface PersonaAiProviderOption {
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type BilibiliSettingsInput = z.infer<typeof bilibiliSettingsSchema>;
+export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
+export type PhonePairInput = z.infer<typeof phonePairSchema>;
+export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
 export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

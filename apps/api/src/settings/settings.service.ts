@@ -4,6 +4,10 @@ import {
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
   type ModelProviderInput,
+  type PhoneConnectInput,
+  type PhoneDisconnectInput,
+  type PhonePairInput,
+  type PhoneSettingsResult,
   type ModelProviderProtocol,
   type ModelProviderSaveResult,
   type ModelProviderSummary,
@@ -18,6 +22,7 @@ import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider, Prisma } from '../generated/prisma/client.js';
+import { PhoneService } from '../phone/phone.service.js';
 import { RedisProbeService } from '../redis/redis-probe.service.js';
 import { ModelProviderProbeService } from './model-provider-probe.service.js';
 
@@ -32,24 +37,39 @@ export class SettingsService {
     private readonly redisProbe: RedisProbeService,
     private readonly providerProbe: ModelProviderProbeService,
     private readonly bilibili: BilibiliAuthService,
+    private readonly phone: PhoneService,
   ) {}
 
   async getOverview(): Promise<SettingsOverview> {
-    const [redisRecord, providers, bilibili] = await Promise.all([
+    const [redisRecord, providers, bilibili, phone] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
       this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
       this.bilibili.overview(),
+      this.phone.status(),
     ]);
 
     return {
       redis: toRedisSettings(redisRecord?.value, redisRecord?.updatedAt),
       bilibili,
+      phone,
       providers: providers.map(toProviderSummary),
     };
   }
 
   async updateBilibili(input: BilibiliSettingsInput): Promise<BilibiliSettingsResult> {
     return { bilibili: await this.bilibili.save(input) };
+  }
+
+  async connectPhone(input: PhoneConnectInput): Promise<PhoneSettingsResult> {
+    return { phone: await this.phone.connect(input.address) };
+  }
+
+  async pairPhone(input: PhonePairInput): Promise<PhoneSettingsResult> {
+    return { phone: await this.phone.pair(input.address, input.code) };
+  }
+
+  async disconnectPhone(input: PhoneDisconnectInput): Promise<PhoneSettingsResult> {
+    return { phone: await this.phone.disconnect(input.address) };
   }
 
   async updateRedis(input: RedisSettingsInput): Promise<RedisSettingsResult> {
