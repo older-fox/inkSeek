@@ -14,6 +14,7 @@ export const MODES = [
 ] as const;
 
 export const MIND_TABS = [
+  { key: 'focus', label: '此刻' },
   { key: 'runs', label: '运行轨迹' },
   { key: 'changes', label: '变动历史' },
   { key: 'relations', label: '个人关系' },

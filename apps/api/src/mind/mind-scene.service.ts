@@ -6,6 +6,7 @@ import type {
   ChatConversation,
   ChatMessageRecord,
   ChatChannelPersona,
+  Prisma,
 } from '../generated/prisma/client.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
 import {
@@ -15,12 +16,15 @@ import {
   type SceneCastMember,
   type SceneKnownCastMember,
   type SceneMessage,
+  type SceneSelfMessage,
 } from './mind.types.js';
 
-const SCENE_MESSAGE_LIMIT = 30;
+const SCENE_MESSAGE_LIMIT = 200;
 const CAST_LIMIT = 80;
 const SCENE_IMAGE_DESCRIBE_LIMIT = 6;
 const SCENE_IMAGE_DESCRIBE_BATCH = 3;
+const SELF_HISTORY_WINDOW_MS = 6 * 3_600_000;
+const SELF_HISTORY_LIMIT = 12;
 
 type MessageWithAssets = ChatMessageRecord & {
   images: {
@@ -107,6 +111,7 @@ export class MindSceneService {
       cast,
       knownCast: await this.loadKnownCast(conversation, persona, cast),
       stance,
+      recentSelf: await this.loadRecentSelf(conversation.id, message.sentAt.toISOString()),
       startedAt: new Date(),
     };
   }
@@ -258,8 +263,38 @@ export class MindSceneService {
       cast,
       knownCast: await this.loadKnownCast(conversation, persona, cast),
       stance,
+      recentSelf: await this.loadRecentSelf(conversation.id, now.toISOString()),
       startedAt: now,
     };
+  }
+
+  /**
+   * Own messages are paged separately from the prompt window: in a busy chat
+   * they slide out within minutes, and the persona then re-announces plans it
+   * already made. The planner renders only the ones not already in view.
+   */
+  private async loadRecentSelf(
+    conversationId: string,
+    anchorSentAt: string,
+  ): Promise<SceneSelfMessage[]> {
+    const anchor = new Date(anchorSentAt);
+    const since = new Date(anchor.getTime() - SELF_HISTORY_WINDOW_MS);
+    const rows = await this.prisma.chatMessageRecord.findMany({
+      where: {
+        conversationId,
+        isSelf: true,
+        sentAt: { gte: since, lte: anchor },
+        text: { not: '' },
+      },
+      orderBy: { sentAt: 'desc' },
+      take: SELF_HISTORY_LIMIT,
+      select: { id: true, text: true, sentAt: true },
+    });
+    return rows.reverse().map((row) => ({
+      id: row.id,
+      text: row.text,
+      sentAt: row.sentAt.toISOString(),
+    }));
   }
 
   async recentMessages(
@@ -520,6 +555,12 @@ export class MindSceneService {
                 blocked: relationship.blocked,
                 mutedUntil: relationship.mutedUntil?.toISOString() ?? null,
                 disclosureScope: relationship.disclosureScope,
+                relationTags: relationList(relationship.relationTags),
+                addressHere: relationList(relationship.addressHere),
+                publicMask: relationText(relationship.publicMask),
+                boundaries: relationList(relationship.boundaries),
+                openPromises: relationList(relationship.openPromises),
+                sharedEvents: relationList(relationship.sharedEvents),
               }
             : null,
         },
@@ -565,6 +606,12 @@ export class MindSceneService {
               blocked: relationship.blocked,
               mutedUntil: relationship.mutedUntil?.toISOString() ?? null,
               disclosureScope: relationship.disclosureScope,
+              relationTags: relationList(relationship.relationTags),
+              addressHere: relationList(relationship.addressHere),
+              publicMask: relationText(relationship.publicMask),
+              boundaries: relationList(relationship.boundaries),
+              openPromises: relationList(relationship.openPromises),
+              sharedEvents: relationList(relationship.sharedEvents),
             }
           : null,
       };
@@ -698,4 +745,27 @@ export function toChatMessageSnapshot(
     voiceCount: 0,
     sentAt: record.sentAt,
   };
+}
+
+/** Legacy rows hold `{}` placeholders and nested objects in list columns. */
+function relationList(value: Prisma.JsonValue | null): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const items = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => Boolean(item) && item !== '{}' && item !== '[]');
+  return items.length > 0 ? items : null;
+}
+
+function relationText(value: Prisma.JsonValue | null): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text && text !== '{}' ? text : null;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.keys(value).length > 0 ? JSON.stringify(value).slice(0, 300) : null;
+  }
+  return null;
 }

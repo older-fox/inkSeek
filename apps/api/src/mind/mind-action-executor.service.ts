@@ -259,6 +259,7 @@ export class MindActionExecutor {
       cast: [],
       knownCast: [],
       stance: null,
+      recentSelf: [],
       startedAt: new Date(),
     };
   }

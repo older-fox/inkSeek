@@ -1,5 +1,5 @@
-import type { PersonaLongEventRecord, PersonaStateRecord } from '@inkseek/shared';
-import { Activity, CalendarClock, HeartPulse, Moon } from 'lucide-react';
+import type { PersonaFocusRecord, PersonaLongEventRecord, PersonaStateRecord } from '@inkseek/shared';
+import { Activity, CalendarClock, HeartPulse, Moon, Pause, Smartphone } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import {
   BASE_METRIC_LABELS,
@@ -31,6 +31,7 @@ export function MindBrief({
   modeLabel,
   state,
   longEvents,
+  focus,
   base,
   onEndEvent,
   endingEvent,
@@ -41,6 +42,7 @@ export function MindBrief({
   modeLabel: string;
   state: PersonaStateRecord | null;
   longEvents: PersonaLongEventRecord[];
+  focus?: PersonaFocusRecord | null;
   base: Record<string, number>;
   onEndEvent?: () => void;
   endingEvent?: boolean;
@@ -97,6 +99,7 @@ export function MindBrief({
                   <CalendarClock className="size-3 text-brass-300" />
                   下次唤醒 {formatTime(state.nextWakeAt)}
                 </span>
+                {focus ? <FocusChip focus={focus} /> : null}
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -233,6 +236,41 @@ export function MindBrief({
         ) : null}
       </section>
     </div>
+  );
+}
+
+function FocusChip({ focus }: { focus: PersonaFocusRecord }) {
+  const state =
+    focus.state && typeof focus.state === 'object' && !Array.isArray(focus.state)
+      ? (focus.state as Record<string, unknown>)
+      : {};
+  const activity =
+    typeof state['activity'] === 'string' && state['activity'].trim()
+      ? state['activity'].trim()
+      : focus.goal;
+  const paused = focus.status === 'PAUSED';
+  const label =
+    focus.kind === 'PHONE'
+      ? `${paused ? '手机暂停' : '在玩手机'}${activity ? ` · ${activity}` : ''} · 第 ${focus.step + 1} 步`
+      : '回消息中';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1',
+        focus.kind === 'PHONE'
+          ? 'border-jade-400/25 bg-jade-400/[0.06] text-jade-200'
+          : 'border-brass-400/25 bg-brass-400/[0.06] text-brass-200',
+      )}
+    >
+      {paused ? (
+        <Pause className="size-3" />
+      ) : focus.kind === 'PHONE' ? (
+        <Smartphone className="size-3" />
+      ) : (
+        <Activity className="size-3" />
+      )}
+      {label}
+    </span>
   );
 }
 

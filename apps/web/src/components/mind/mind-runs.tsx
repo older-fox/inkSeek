@@ -98,6 +98,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   HEARTBEAT: '心跳唤醒',
   PROACTIVE: '主动唤醒',
   MANUAL: '手动触发',
+  PHONE: '手机消遣',
 };
 
 const STEP_TYPE_LABELS: Record<string, string> = {

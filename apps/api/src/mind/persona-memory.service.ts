@@ -34,8 +34,15 @@ import {
 const VECTOR_RECENT_LIMIT = 600;
 const VECTOR_IMPORTANT_LIMIT = 300;
 const VECTOR_IMPORTANCE_FLOOR = 60;
+/** Old, low-importance rows rotate through this pool so they stay reachable. */
+const VECTOR_ARCHIVE_LIMIT = 400;
+/** Explicit searches (tool/UI) scan the whole library, bounded for safety. */
+const FULL_SEARCH_LIMIT = 10_000;
 const CORE_MEMORY_LIMIT = 3;
 const CORE_IMPORTANCE_FLOOR = 60;
+/** Memories older than this are offered to the model for a keep/forget call. */
+const STALE_REVIEW_AGE_MS = 180 * 86_400_000;
+const STALE_REVIEW_LIMIT = 3;
 /** Channel-wide memories must share at least a little text with this turn. */
 const MIN_GLOBAL_RELEVANCE = 0.03;
 const CORE_KINDS: readonly PersonaMemoryKind[] = [
@@ -215,17 +222,33 @@ export class PersonaMemoryService {
     });
   }
 
+  /** The model can forget its own memories; ownership is checked before delete. */
+  async forget(
+    personaId: string,
+    ids: string[],
+  ): Promise<{ forgotten: string[]; skipped: string[] }> {
+    const wanted = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (wanted.length === 0) {
+      return { forgotten: [], skipped: [] };
+    }
+    const rows = await this.prisma.personaMemory.findMany({
+      where: { id: { in: wanted }, personaId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    const owned = rows.map((row) => row.id);
+    if (owned.length > 0) {
+      await this.prisma.personaMemory.updateMany({
+        where: { id: { in: owned } },
+        data: { status: 'DELETED', embedding: [] },
+      });
+    }
+    const kept = new Set(owned);
+    return { forgotten: owned, skipped: wanted.filter((id) => !kept.has(id)) };
+  }
+
   async list(input: PersonaMemoryQueryInput): Promise<PersonaMemoryRecord[]> {
     await this.persona(input.personaId);
-    const where: Prisma.PersonaMemoryWhereInput = {
-      personaId: input.personaId,
-      ...(input.includeDeleted ? {} : { status: 'ACTIVE' as const }),
-      ...(input.scope ? { scope: input.scope } : {}),
-      ...(input.kind ? { kind: input.kind } : {}),
-      ...(input.sourceType ? { sourceType: input.sourceType } : {}),
-      ...(input.subjectType ? { subjectType: input.subjectType } : {}),
-      ...(input.subjectId ? { subjectId: input.subjectId } : {}),
-    };
+    const where = this.listWhere(input);
 
     if (!input.query?.trim()) {
       const rows = await this.prisma.personaMemory.findMany({
@@ -237,7 +260,9 @@ export class PersonaMemoryService {
       return rows.map(toRecord);
     }
 
-    const candidates = await this.loadCandidates(where);
+    // Library search is explicit, so it scans everything instead of only the
+    // automatic pools; otherwise old memories would never be findable.
+    const candidates = await this.loadCandidates(where, { full: true });
     const queryEmbedding = embedText(input.query);
     const scored = candidates
       .map((row) => ({
@@ -250,6 +275,23 @@ export class PersonaMemoryService {
     return scored.map((entry) => ({ ...toRecord(entry.row), score: round(entry.score) }));
   }
 
+  async count(input: PersonaMemoryQueryInput): Promise<number> {
+    await this.persona(input.personaId);
+    return this.prisma.personaMemory.count({ where: this.listWhere(input) });
+  }
+
+  private listWhere(input: PersonaMemoryQueryInput): Prisma.PersonaMemoryWhereInput {
+    return {
+      personaId: input.personaId,
+      ...(input.includeDeleted ? {} : { status: 'ACTIVE' as const }),
+      ...(input.scope ? { scope: input.scope } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.sourceType ? { sourceType: input.sourceType } : {}),
+      ...(input.subjectType ? { subjectType: input.subjectType } : {}),
+      ...(input.subjectId ? { subjectId: input.subjectId } : {}),
+    };
+  }
+
   /**
    * Two-layer recall for a turn: a few stable "who I am / what I promised"
    * memories that must stay in view, plus the memories that actually match
@@ -260,10 +302,11 @@ export class PersonaMemoryService {
     scene: MindScene,
     query: string,
     limit = 10,
-    options: { markRecalled?: boolean } = {},
+    options: { markRecalled?: boolean; full?: boolean; review?: boolean } = {},
   ): Promise<{
     core: PersonaMemoryRecord[];
     relevant: PersonaMemoryRecord[];
+    stale: PersonaMemoryRecord[];
     stats: MindMemoryStats;
   }> {
     const where = this.sceneWhere(scene);
@@ -278,7 +321,7 @@ export class PersonaMemoryService {
         orderBy: [{ importance: 'desc' }, { updatedAt: 'desc' }],
         take: CORE_MEMORY_LIMIT * 6,
       }),
-      this.loadCandidates(where),
+      this.loadCandidates(where, { full: options.full }),
       this.prisma.personaMemory.count({ where }),
       this.prisma.personaMemory.count({
         where: { ...where, occurredAt: { gte: weekAgo } },
@@ -311,12 +354,14 @@ export class PersonaMemoryService {
       // would inflate the same few rows hundreds of times.
       await this.markRecalled(relevant.map((entry) => entry.row.id));
     }
+    const stale = options.review ? await this.loadStaleReview(where) : [];
     return {
       core: coreRows.map(toRecord),
       relevant: relevant.map((entry) => ({
         ...toRecord(entry.row),
         score: round(entry.score),
       })),
+      stale,
       stats: {
         total,
         recent7d,
@@ -347,7 +392,19 @@ export class PersonaMemoryService {
     return semantic + keyword >= MIN_GLOBAL_RELEVANCE;
   }
 
-  private async loadCandidates(where: Prisma.PersonaMemoryWhereInput): Promise<PersonaMemory[]> {
+  private async loadCandidates(
+    where: Prisma.PersonaMemoryWhereInput,
+    options: { full?: boolean } = {},
+  ): Promise<PersonaMemory[]> {
+    if (options.full) {
+      // An explicit search must not be blocked by the automatic pools. The cap
+      // only exists so a runaway library cannot exhaust memory in one call.
+      return this.prisma.personaMemory.findMany({
+        where,
+        orderBy: [{ occurredAt: 'desc' }],
+        take: FULL_SEARCH_LIMIT,
+      });
+    }
     const [recent, important] = await Promise.all([
       this.prisma.personaMemory.findMany({
         where,
@@ -364,7 +421,46 @@ export class PersonaMemoryService {
     for (const row of [...recent, ...important]) {
       byId.set(row.id, row);
     }
+    // Anything older than the recent window and below the importance floor
+    // would otherwise be unreachable forever. Least-recently-recalled first so
+    // the archive rotates instead of pinning the same rows.
+    const oldestRecent = recent.at(-1)?.occurredAt ?? null;
+    const archive = await this.prisma.personaMemory.findMany({
+      where: {
+        ...where,
+        importance: { lt: VECTOR_IMPORTANCE_FLOOR },
+        ...(oldestRecent ? { occurredAt: { lt: oldestRecent } } : {}),
+      },
+      orderBy: [{ lastRecalledAt: { sort: 'asc', nulls: 'first' } }, { importance: 'desc' }],
+      take: VECTOR_ARCHIVE_LIMIT,
+    });
+    for (const row of archive) {
+      byId.set(row.id, row);
+    }
     return [...byId.values()];
+  }
+
+  /** Very old rows offered to the model: keep them or forget them, its call. */
+  private async loadStaleReview(
+    where: Prisma.PersonaMemoryWhereInput,
+  ): Promise<PersonaMemoryRecord[]> {
+    const cutoff = new Date(Date.now() - STALE_REVIEW_AGE_MS);
+    const rows = await this.prisma.personaMemory.findMany({
+      where: { ...where, occurredAt: { lt: cutoff } },
+      orderBy: [{ staleReviewedAt: { sort: 'asc', nulls: 'first' } }, { occurredAt: 'asc' }],
+      take: STALE_REVIEW_LIMIT,
+    });
+    if (rows.length === 0) {
+      return [];
+    }
+    // Mark as reviewed so the next turn rotates to another batch. This is not
+    // a recall: lastRecalledAt drives decay and the archive pool, so it stays
+    // untouched.
+    await this.prisma.personaMemory.updateMany({
+      where: { id: { in: rows.map((row) => row.id) } },
+      data: { staleReviewedAt: new Date() },
+    });
+    return rows.map(toRecord);
   }
 
   /**

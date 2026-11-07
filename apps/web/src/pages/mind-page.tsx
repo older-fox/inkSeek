@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { DropdownSelect } from '@/components/dropdown-select';
 import { MindBrief } from '@/components/mind/mind-brief';
 import { MindChangesTab } from '@/components/mind/mind-changes';
+import { MindFocusTab } from '@/components/mind/mind-focus';
 import {
   MODES,
   MIND_TABS,
@@ -88,6 +89,13 @@ export function MindPage() {
     queryFn: () => api.mindSettings(channelId),
     enabled: Boolean(channelId),
     staleTime: 5_000,
+  });
+  const focusQuery = useQuery({
+    queryKey: ['mind', 'focus', persona?.id],
+    queryFn: () => api.mindFocus(persona!.id),
+    enabled: Boolean(persona),
+    staleTime: 3_000,
+    networkMode: 'always',
   });
 
   const endLongEvent = useMutation({
@@ -216,6 +224,7 @@ export function MindPage() {
               modeLabel={modeLabel}
               state={stateQuery.data ?? null}
               longEvents={longEventsQuery.data ?? []}
+              focus={focusQuery.data?.active ?? null}
               base={persona.values ? numericBase(persona.values) : {}}
               onEndEvent={() => endLongEvent.mutate()}
               endingEvent={endLongEvent.isPending}
@@ -281,6 +290,12 @@ export function MindPage() {
             data-mind-scroll
             className="mind-scroll mt-5 h-[min(70vh,860px)] min-h-[26rem] overflow-y-auto overscroll-contain pr-1"
           >
+            {tab === 'focus' ? (
+              <MindFocusTab
+                personaId={persona.id}
+                phoneDevice={settingsQuery.data?.phoneDevice ?? null}
+              />
+            ) : null}
             {tab === 'runs' ? (
               <MindRunsTab personaId={persona.id} approvalMode={mode === 'APPROVAL'} />
             ) : null}

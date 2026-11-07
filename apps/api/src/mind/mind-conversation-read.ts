@@ -57,6 +57,10 @@ const SETTLED_RE =
 /** Self-repetition read: which everyday topics the persona keeps bringing up. */
 export interface RepetitionRead {
   topics: { text: string; count: number }[];
+  /** Words from the persona's own identity that keep coming up unprompted. */
+  identity: { text: string; count: number }[];
+  /** Recurring sentence openings, the clearest tell of template speech. */
+  openings: { text: string; count: number }[];
 }
 
 export interface BoundaryEscalation {
@@ -175,6 +179,10 @@ const REPETITION_STOP_BIGRAMS = new Set([
   '那么',
   '我觉',
   '你觉',
+  '女孩',
+  '男孩',
+  '女生',
+  '男生',
 ]);
 
 export function readRepetition(scene: MindScene): RepetitionRead | null {
@@ -189,6 +197,7 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     }
   }
   const counts = new Map<string, number>();
+  const openingCounts = new Map<string, number>();
   for (const message of selfMessages) {
     const seen = new Set<string>();
     // Split at punctuation so "刷锅，炒饭" does not produce the fake "锅炒".
@@ -207,13 +216,38 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
         counts.set(bigram, (counts.get(bigram) ?? 0) + 1);
       }
     }
+    const opening = normalizeText(message.text).replace(/[^\u3400-\u9fff]/gu, '').slice(0, 3);
+    if (opening.length === 3) {
+      openingCounts.set(opening, (openingCounts.get(opening) ?? 0) + 1);
+    }
   }
+  // Identity words are allowed to come up once; twice in twelve messages reads
+  // as repeating a self-introduction.
+  const identityWords = new Set(chineseBigrams(scene.persona.identity));
   const topics = [...counts.entries()]
-    .filter(([, count]) => count >= 3)
+    .filter(([text, count]) => count >= 3 && !identityWords.has(text))
     .sort((left, right) => right[1] - left[1])
     .slice(0, 3)
     .map(([text, count]) => ({ text, count }));
-  return topics.length > 0 ? { topics } : null;
+  const identity = [...counts.entries()]
+    .filter(
+      ([text, count]) =>
+        count >= 2 &&
+        identityWords.has(text) &&
+        !REPETITION_STOP_BIGRAMS.has(text) &&
+        ![...text].some((char) => REPETITION_STOP_CHARS.has(char)),
+    )
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 2)
+    .map(([text, count]) => ({ text, count }));
+  const openings = [...openingCounts.entries()]
+    .filter(([, count]) => count >= 3)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 2)
+    .map(([text, count]) => ({ text, count }));
+  return topics.length > 0 || identity.length > 0 || openings.length > 0
+    ? { topics, identity, openings }
+    : null;
 }
 
 function chineseBigrams(text: string): string[] {

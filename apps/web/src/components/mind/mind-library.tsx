@@ -7,8 +7,17 @@ import type {
   StickerRecord,
 } from '@inkseek/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LoaderCircle, Plus, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { DropdownSelect } from '@/components/dropdown-select';
 import { ApiError, api } from '@/lib/api';
@@ -23,26 +32,53 @@ import {
 } from './mind-format';
 import { EmptyState, LazyList, MindDrawer, MindSection } from './mind-ui';
 
+const MEMORY_PAGE_SIZE = 50;
+
 export function MindMemoriesTab({ personaId }: { personaId: string }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(0);
   const [composeOpen, setComposeOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [kind, setKind] = useState<PersonaMemoryKind>('FACT');
   const [visibility, setVisibility] = useState<PersonaMemoryVisibility>('SCENE');
+  const search = query.trim();
 
   const memoriesQuery = useQuery({
-    queryKey: ['mind', 'memories', personaId, query.trim()],
+    queryKey: ['mind', 'memories', personaId, search, page],
     queryFn: () =>
       api.mindMemories({
         personaId,
-        query: query.trim() || undefined,
-        limit: 80,
+        query: search || undefined,
+        limit: MEMORY_PAGE_SIZE,
+        offset: page * MEMORY_PAGE_SIZE,
+      }),
+    enabled: Boolean(personaId),
+    staleTime: 4_000,
+  });
+
+  const countQuery = useQuery({
+    queryKey: ['mind', 'memories', personaId, search, 'count'],
+    queryFn: () =>
+      api.mindMemoryCount({
+        personaId,
+        query: search || undefined,
+        limit: 1,
         offset: 0,
       }),
     enabled: Boolean(personaId),
     staleTime: 4_000,
   });
+
+  const total = countQuery.data?.total ?? null;
+  const pageCount = total === null ? null : Math.max(1, Math.ceil(total / MEMORY_PAGE_SIZE));
+
+  // Forgetting the last row of the last page must not strand the view.
+  useEffect(() => {
+    if (pageCount !== null && page >= pageCount) {
+      setPage(pageCount - 1);
+    }
+  }, [page, pageCount]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -77,16 +113,19 @@ export function MindMemoriesTab({ personaId }: { personaId: string }) {
   return (
     <>
       <MindSection
-        title={`Memories · ${rows.length}`}
-        count={query.trim() ? '搜索结果' : '最近 80 条'}
+        title={`Memories · ${total ?? rows.length}`}
+        count={search ? '全部记忆中的搜索结果' : '全部记忆'}
       >
         <div className="mt-2 flex items-center gap-2">
           <div className="flex flex-1 items-center gap-2 rounded-lg border border-mist-100/[0.1] bg-ink-950/40 px-2.5">
             <Search className="size-3.5 text-mist-600" />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="按语义搜索记忆，例如「B 考试」「群里的冲突」"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(0);
+              }}
+              placeholder="按语义搜索全部记忆，包括很久以前的，例如「B 考试」"
               className="h-9 flex-1 bg-transparent text-[0.78rem] text-mist-200 outline-none placeholder:text-mist-600"
             />
           </div>
@@ -109,7 +148,7 @@ export function MindMemoriesTab({ personaId }: { personaId: string }) {
           <div className="mt-3 space-y-1.5">
             <LazyList
               items={rows}
-              step={30}
+              step={25}
               renderItem={(memory) => (
                 <div
                   key={memory.id}
@@ -142,6 +181,31 @@ export function MindMemoriesTab({ personaId }: { personaId: string }) {
                 </div>
               )}
             />
+            {pageCount !== null && pageCount > 1 ? (
+              <div className="mt-3 flex items-center justify-between gap-2 font-mono text-[0.66rem] text-mist-500">
+                <button
+                  type="button"
+                  disabled={page === 0}
+                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                  className="inline-flex items-center gap-1 rounded-md border border-mist-100/[0.1] px-2 py-1 transition hover:border-brass-400/30 hover:text-brass-200 disabled:opacity-30"
+                >
+                  <ChevronLeft className="size-3" />
+                  上一页
+                </button>
+                <span>
+                  第 {page + 1} / {pageCount} 页 · {search ? `在 ${total} 条中检索` : `共 ${total} 条`}
+                </span>
+                <button
+                  type="button"
+                  disabled={page + 1 >= pageCount}
+                  onClick={() => setPage((current) => current + 1)}
+                  className="inline-flex items-center gap-1 rounded-md border border-mist-100/[0.1] px-2 py-1 transition hover:border-brass-400/30 hover:text-brass-200 disabled:opacity-30"
+                >
+                  下一页
+                  <ChevronRight className="size-3" />
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </MindSection>

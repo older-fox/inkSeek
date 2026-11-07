@@ -532,6 +532,19 @@ enum AgentRunTrigger {
   HEARTBEAT
   PROACTIVE
   MANUAL
+  PHONE
+}
+
+/// What currently has the persona's attention. One body, one focus at a time.
+enum PersonaFocusKind {
+  CHAT
+  PHONE
+}
+
+enum PersonaFocusStatus {
+  ACTIVE
+  PAUSED
+  DONE
 }
 
 enum AgentRunStatus {
@@ -617,8 +630,37 @@ model ChatMindSettings {
   model                      String?
   /// Wireless adb device (ip:port) this channel may operate; null disables phone tools.
   phoneDevice                String?
+  /// Chance in percent, rolled only on idle heartbeats, that the persona starts
+  /// playing with its phone on its own. 0 disables autonomous phone time.
+  phonePlayChancePercent     Int             @default(0)
+  /// Optional cap on autonomous phone sessions per persona-local day.
+  /// 0 means unlimited.
+  phonePlayDailyLimit        Int             @default(0)
   createdAt                  DateTime        @default(now())
   updatedAt                  DateTime        @updatedAt
+}
+
+/// The persona's attention focus. A chat interruption pauses the phone focus
+/// and resumes it afterwards; rows survive restarts so the scene is not lost.
+model PersonaFocus {
+  id        String             @id @default(cuid())
+  personaId String
+  channelId String
+  kind      PersonaFocusKind
+  status    PersonaFocusStatus @default(ACTIVE)
+  /// Set when a chat focus interrupts a phone focus.
+  parentId  String?
+  goal      String             @default("")
+  step      Int                @default(0)
+  state     Json               @default("{}")
+  pausedAt  DateTime?
+  startedAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  endedAt   DateTime?
+
+  @@index([personaId, status, updatedAt])
+  @@index([personaId, kind, startedAt])
+  @@index([channelId, status])
 }
 
 /// Live self-state. One row per channel persona instance.
@@ -816,6 +858,8 @@ model PersonaMemory {
   validFrom        DateTime?
   validTo          DateTime?
   lastRecalledAt   DateTime?
+  /// Separate from lastRecalledAt so review rotation does not block decay.
+  staleReviewedAt  DateTime?
   recallCount      Int                      @default(0)
   sourceType       PersonaMemorySourceType  @default(INFERENCE)
   sourceIds        String[]                 @default([])
@@ -899,6 +943,8 @@ model AgentRun {
   conversationId   String?
   conversation     ChatConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   messageId        String?
+  /// PersonaFocus this run belongs to, so phone sessions read as one timeline.
+  focusId          String?
   trigger          AgentRunTrigger    @default(MESSAGE)
   mode             PersonaMindMode    @default(LIVE)
   status           AgentRunStatus     @default(RUNNING)
@@ -920,6 +966,7 @@ model AgentRun {
 
   @@index([personaId, startedAt])
   @@index([conversationId, startedAt])
+  @@index([focusId, startedAt])
   @@index([status, startedAt])
 }
 

@@ -19,6 +19,7 @@ import {
   mindHeartbeatQuerySchema,
   mindJournalQuerySchema,
   mindLongEventQuerySchema,
+  mindPhoneFocusStartSchema,
   mindPromptLogQuerySchema,
   mindRunQuerySchema,
   mindSettingsUpdateSchema,
@@ -35,6 +36,7 @@ import {
   type MindHeartbeatQueryInput,
   type MindJournalQueryInput,
   type MindLongEventQueryInput,
+  type MindPhoneFocusStartInput,
   type MindPromptLogQueryInput,
   type MindRunQueryInput,
   type MindSettingsUpdateInput,
@@ -70,6 +72,21 @@ export class MindController {
   @ApiOperation({ summary: '列出可选的无线 adb 设备' })
   phoneDevices() {
     return this.mind.phoneDevices();
+  }
+
+  @Get('focus/:personaId')
+  @ApiOperation({ summary: '读取人格当前焦点与最近焦点' })
+  focus(@Param('personaId') personaId: string) {
+    return this.mind.focusOverview(personaId);
+  }
+
+  @Post('focus/:personaId/phone')
+  @ApiOperation({ summary: '让 TA 开始一段后台手机时间' })
+  startPhoneFocus(
+    @Param('personaId') personaId: string,
+    @Body(new ZodValidationPipe(mindPhoneFocusStartSchema)) input: MindPhoneFocusStartInput,
+  ) {
+    return this.mind.startPhoneFocus(personaId, input.goal);
   }
 
   @Patch('settings/:channelId')
@@ -164,6 +181,14 @@ export class MindController {
     @Query(new ZodValidationPipe(personaMemoryQuerySchema)) query: PersonaMemoryQueryInput,
   ) {
     return this.mind.listMemories(query);
+  }
+
+  @Get('memories/count')
+  @ApiOperation({ summary: '统计人格记忆条数' })
+  async countMemories(
+    @Query(new ZodValidationPipe(personaMemoryQuerySchema)) query: PersonaMemoryQueryInput,
+  ): Promise<{ total: number }> {
+    return { total: await this.mind.countMemories(query) };
   }
 
   @Post('memories')

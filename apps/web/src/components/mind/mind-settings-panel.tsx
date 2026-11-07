@@ -50,6 +50,8 @@ export function MindSettingsPanel({
   const [reflectionHours, setReflectionHours] = useState(6);
   const [imagePrompt, setImagePrompt] = useState('');
   const [phoneDevice, setPhoneDevice] = useState('');
+  const [phonePlayChance, setPhonePlayChance] = useState(0);
+  const [phonePlayLimit, setPhonePlayLimit] = useState(0);
   const appliedSettingsRef = useRef('');
 
   useEffect(() => {
@@ -77,6 +79,8 @@ export function MindSettingsPanel({
     setReflectionHours(settings.reflectionIntervalHours);
     setImagePrompt(settings.imageDescriptionPrompt);
     setPhoneDevice(settings.phoneDevice ?? '');
+    setPhonePlayChance(settings.phonePlayChancePercent);
+    setPhonePlayLimit(settings.phonePlayDailyLimit);
   }, [settings]);
 
   const mutation = useMutation({
@@ -121,7 +125,9 @@ export function MindSettingsPanel({
     settings.curiosityDailyLimit !== curiosityLimit ||
     settings.reflectionIntervalHours !== reflectionHours ||
     settings.imageDescriptionPrompt !== imagePrompt ||
-    (settings.phoneDevice ?? '') !== phoneDevice;
+    (settings.phoneDevice ?? '') !== phoneDevice ||
+    settings.phonePlayChancePercent !== phonePlayChance ||
+    settings.phonePlayDailyLimit !== phonePlayLimit;
 
   return (
     <div>
@@ -366,6 +372,33 @@ export function MindSettingsPanel({
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">手机消遣</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          空闲心跳时才可能自己拿起手机，按自己的节奏一步步玩；有人说话会先停下，回完再继续。
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <NumberField
+            label="每次心跳概率（%）"
+            hint="0 关闭；只在空闲心跳掷骰"
+            value={phonePlayChance}
+            min={0}
+            max={100}
+            onChange={setPhonePlayChance}
+            compact
+          />
+          <NumberField
+            label="每日上限"
+            hint="0 表示不限制"
+            value={phonePlayLimit}
+            min={0}
+            max={500}
+            onChange={setPhonePlayLimit}
+            compact
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
         <p className="text-[0.8rem] text-mist-300">图片理解</p>
         <div className="mt-2">
           <TextAreaField
@@ -403,6 +436,8 @@ export function MindSettingsPanel({
             reflectionIntervalHours: reflectionHours,
             imageDescriptionPrompt: imagePrompt.trim(),
             phoneDevice: phoneDevice || null,
+            phonePlayChancePercent: phonePlayChance,
+            phonePlayDailyLimit: phonePlayLimit,
           })
         }
         className="mt-4 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-brass-400/30 bg-brass-400/10 text-[0.78rem] text-brass-200 transition hover:bg-brass-400/20 disabled:cursor-not-allowed disabled:opacity-40"

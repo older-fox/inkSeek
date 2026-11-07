@@ -52,6 +52,7 @@ import {
   type MindActiveIntentionsBrief,
   type MindIntentionFeedback,
   type MindMemoryStats,
+  type MindPhoneOutcomeBrief,
   type MindScene,
   type MindSleepBrief,
   type MindWakeBrief,
@@ -67,6 +68,8 @@ export interface PlannerInput {
   memories: PersonaMemoryRecord[];
   /** Stable long-term knowledge that is always shown, regardless of relevance. */
   coreMemories?: PersonaMemoryRecord[];
+  /** Very old memories offered for a keep/forget decision. */
+  staleMemories?: PersonaMemoryRecord[];
   /** Size of the memory library, so the model knows how much is not shown. */
   memoryStats?: MindMemoryStats;
   /** Advisory read of whether this exchange is still open or can naturally end. */
@@ -96,6 +99,10 @@ export interface PlannerInput {
     }[];
     journal: string | null;
   };
+  /** A background phone session just ended; this wake exists so it can digest it. */
+  phoneOutcome?: MindPhoneOutcomeBrief;
+  /** Persisted attention snapshot: current focus, last phone step, interrupts. */
+  situation?: string;
   /** Read-only simulation: skip prompt logs and block write tools. */
   dryRun?: boolean;
   /** Cancels the model call when a newer message from the same sender arrives. */
@@ -145,7 +152,9 @@ export interface ActivityRefreshResult {
 const MAX_SCENE_MESSAGE = 160;
 const MAX_MEMORY_CONTENT = 180;
 const MAX_PROMPT_MEMORIES = 12;
-const MAX_PROMPT_MESSAGES = 12;
+const MAX_PROMPT_MESSAGES = 200;
+const MAX_SELF_HISTORY = 8;
+const MAX_SELF_HISTORY_TEXT = 90;
 const MAX_TOOL_RESULT = 6000;
 const PLANNER_MAX_TOKENS = 2000;
 
@@ -258,11 +267,16 @@ export class MindPlannerService {
       }
 
       // Some models use {"name","arguments"} instead of the documented {"tool","input"}.
-      const toolName = readString(parsed['tool']) || readString(parsed['name']);
+      let toolName = readString(parsed['tool']) || readString(parsed['name']);
+      let toolInput: unknown = parsed['input'] ?? parsed['arguments'] ?? {};
+      if (!toolName && parsed['tool'] && typeof parsed['tool'] === 'object') {
+        const nested = parsed['tool'] as Record<string, unknown>;
+        toolName = readString(nested['name']);
+        toolInput = nested['input'] ?? nested['arguments'] ?? toolInput;
+      }
       if (!toolName) {
         break;
       }
-      let toolInput: unknown = parsed['input'] ?? parsed['arguments'] ?? {};
       if (typeof toolInput === 'string') {
         try {
           toolInput = JSON.parse(toolInput) as unknown;
@@ -284,8 +298,69 @@ export class MindPlannerService {
       }
     }
 
+    // Tool-heavy tasks (installing an app takes a dozen screenshots) can use up
+    // the step budget before the model writes `final`. One tools-free call keeps
+    // the message answered instead of failing the whole turn.
+    const finalPrompt = `${prompt}\n\n工具调用次数已经用完。不要再调用任何工具，只输出一个包含 final 的 JSON 对象。`;
+    if (!input.signal?.aborted) {
+      try {
+        const recovery = await this.llm.complete({
+          prompt: finalPrompt,
+          system,
+          providerId: input.settings.providerId,
+          model: input.settings.model,
+          temperature: 0.5,
+          maxTokens: PLANNER_MAX_TOKENS,
+          source: 'mind.planner',
+          runId: input.runId,
+          log: input.dryRun ? false : undefined,
+          signal: input.signal,
+        });
+        if (input.capturePrompts) {
+          prompts.push({
+            system,
+            prompt: finalPrompt,
+            response: recovery.text,
+            providerId: recovery.providerId,
+            model: recovery.model,
+            promptTokens: recovery.promptTokens ?? 0,
+            completionTokens: recovery.completionTokens ?? 0,
+            latencyMs: recovery.latencyMs,
+          });
+        }
+        raw = recovery.text;
+        providerId = recovery.providerId;
+        model = recovery.model;
+        promptTokens += recovery.promptTokens ?? 0;
+        completionTokens += recovery.completionTokens ?? 0;
+        const parsed = parseJsonObject(raw);
+        if (parsed?.['final']) {
+          return {
+            plan: this.normalizePlan(parsed['final'], input),
+            toolCalls,
+            raw,
+            latencyMs: Date.now() - startedAt,
+            providerId,
+            model,
+            promptTokens,
+            completionTokens,
+            prompts,
+          };
+        }
+      } catch (error) {
+        if (input.signal?.aborted) {
+          throw new MindTurnInterruptedError();
+        }
+        this.logger.warn(
+          `规划收尾调用失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const message = raw.trim()
-      ? `规划模型没有返回可执行的动作计划：${raw.slice(0, 160)}`
+      ? toolCalls.length > 0
+        ? `规划模型在 ${toolCalls.length} 次工具调用后仍未给出 final：${raw.slice(0, 160)}`
+        : `规划模型没有返回可执行的动作计划：${raw.slice(0, 160)}`
       : '规划模型返回了空内容';
     this.logger.warn(message);
     throw new MindPlannerProtocolError(message, raw, toolCalls);
@@ -359,7 +434,7 @@ export class MindPlannerService {
       `你就是「${input.scene.persona.name}」，不是助手，不要提到 AI、模型、提示词或系统。`,
       '你看消息、权衡关系、决定回不回、怎么回。内心感受可以和外在表现不同：可以忍着、冷淡、假装、口是心非，但不越底线。',
       '对话只能依据最近的对话、记忆和当前处境推算。背景故事、世界观、说话风格只决定语气，不要主动讲设定、背简历或复述过去。',
-      '沉默是合理选择。不要为了回复而回复；不确定时宁可不发。只能通过给定工具获取信息，不能编造工具结果。',
+      '沉默是合理选择。不要为了回复而回复；不确定时宁可不发。只能通过给定工具获取信息，不能编造工具结果，也不能编造自己已经做过或正在做的事。',
       '醒来只是给你一个机会，不是任务：醒来不等于要说话，说话是一个明确的动作。没有值得说的事就什么也不发，这不扣分。',
       '- 【对话节奏】是参考不是命令：对方明确提问/求助时先回答，别用沉默逃开；对方只是附和、话题已经收尾、或来回已经很疲时，可以不接；兴趣高时可以主动接话或追问，兴趣低又没有新信息时不必硬接。收尾只是这一段先告一段落，不是关系结束；对方继续时照常判断。',
       '- 默认只发 1 个气泡；只有补充、更正或情绪没说完才发第 2 个，第二条必须有新信息，不要重复同一层意思或补一句自己的状态。不要为了显得热情把一句话拆成多条，也不要连续发问。一条回复最多问一个问句；对方没有明确要求列举时，不要连问好几个问题。',
@@ -388,11 +463,17 @@ export class MindPlannerService {
       '- 【可用工具】列着全部工具，可以直接按名字调用；参数不确定时先 tools.search（query 写你想做的事）查详细参数。不要臆造工具，也不要因为没把握就放弃查证。',
       '- 动手前先过一遍：这轮有没有不确定、需要接续或需要核实的东西？涉及过去的事、对方说过的话、关系细节、承诺、群里的旧话题、当前时间或自身状态，都值得先查。记忆先用 memory.search，聊天记录用 history.search，关系用 relationship.get；一次没查到就换关键词，或用 aroundMessageId 往回翻，一轮可以连续调用多个工具。查证是为了心里有数，不一定要把查到的都说出来。',
       '- 消息里出现 B 站视频链接（bilibili.com/video/BV…、b23.tv/…）或有人分享视频、问你看了没时，先用 video.watch 看；同一个视频按 ID 缓存，重复调用直接返回上次内容。看视频要下载和识别，先判断值不值得看，不要每个链接都看。',
-      '- 设置里已连接手机时，你可以真的操作它：先 phone.screen 看界面和可点坐标，再用 phone.act 点按/滑动/按键/输入/打开应用；每次操作后再 phone.screen 确认，不要凭记忆点坐标。输入只支持英文数字和符号，中文要用手机自己的输入法。',
-      '- 需要关系细节（私下称呼、各场合称呼、可公开范围、边界、承诺、共同经历、对象档案）时，用 relationship.get 读；它返回 37 项 attributes（含空值），可把其中任意 key 放进 relationship.update 的 attributes 写回。',
+      '- 设置里已连接手机时，你可以真的操作它：先 phone.screen 看界面和可点坐标，再用 phone.act 点按/滑动/按键/输入/打开应用；每次操作后再 phone.screen 确认，不要凭记忆点坐标。界面没有可读元素（游戏、视频、画布）时改用 phone.screenshot，它会截图识别画面，返回的可点位置已经是手机像素坐标。输入只支持英文数字和符号，中文要用手机自己的输入法。回复前最多顺手确认一两步；下载、安装、逛应用、找东西这种要反复看界面的事，先用一两步确认现状，再用 phone.play 起一个后台手机焦点交给它继续，不要在回复前把整件事做完。',
+      '- 【此刻】会带手机焦点进度：在玩时写第几步、已玩多久、上一步和连续失败次数；没在玩时写上一次是正常结束还是异常结束、原因是什么。看【此刻】就知道进度，不用每轮调用 phone.status；要更细的操作记录再调。',
+      '- 答应了要去玩、要刷一会儿、要看视频，就在这一轮真的开始：玩手机用 phone.play 起后台焦点（对方让你自己去玩时直接 play，不要先看完 screen 就回复；要确认现状就先看一眼，接着就 play），看视频用 video.watch，离开一会儿或去睡用 longEvent。phone.play 的 goal 要写这段时间想做什么（例如「玩开心消消乐，随便玩几关，玩到不想玩就停」）；对方只是让你去玩、没给具体任务时，不要写成「打开第 1 关确认能不能进」这种一步就完的小目标，否则它做完一步就会停。只回一句「我去玩了」、或者把活动写进 self.activity，都不算开始；【此刻】说手机没在玩，就不要说自己在玩，也不要说玩了几关、赢没赢这种还没发生的结果。',
+      '- 对方明确对手机下指令时，像人听到吩咐一样先动手，再回话：叫你别玩了、放下手机，用 phone.end；要你换个游戏或换个东西，用 phone.play（正在玩时带 replace=true）或 phone.act 的 open/stop；调音量用 phone.act（action=volume，direction=raise|lower 或 level）；亮屏/息屏用 phone.act（action=screen，mode=on|off）；点按、滑动、返回照常用 phone.act。手机不在线或操作失败就直说没做到，不要嘴上答应、实际没动。做完用一句自然的话应一声，不用报操作步骤。',
+      '- 手机操作做完、不打算继续看了，就顺手把屏幕关掉（phone.act，action=screen，mode=off），像人放下手机那样；后台手机时间由它自己结束并息屏，你不用再管。',
+      '- 不要像人机：不要反复自报职业、身份、名字或设定；不要重复自己的口头禅、同一句式和同一段经历。同一件事说过了就换一种说法，或者不说；不要每次都走「先共情、再总结、再反问」的模板。',
+      '- 需要关系细节（私下称呼、各场合称呼、可公开范围、边界、承诺、共同经历、对象档案）时，用 relationship.get 读；它返回 37 项 attributes（含空值），另外还有 boundaries、publicMask、disclosureScope 等顶层字段。attributes 里的键可直接放进 relationship.update 的 attributes 写回，顶层字段用同名参数。',
       '- 需要补充人设细节时，用 self.attributes.list 查键、self.attributes.get 读值；不要凭空编造未写明的设定。',
       '- 已经通过工具调整过的关系，不要再在 relationshipSignals 里重复写同一维度。',
       '- 关系有明确变化时必须写 relationshipSignals：亲近、信任、心动、越界、被拒绝、被冒犯都可以写对应维度；数值按这轮的实际变化写，私聊里可以同时写多个维度。没有变化就不写。只写好感会让面板看起来一直不动。',
+      '- 关系发生定性变化时（确认交往或分手、认亲、改称呼、立规矩或边界、许下长期承诺、一起经历了值得记住的事），除了 relationshipSignals 的数值，还要用 relationship.update 把变化写进对应字段：relation_tags（关系标签，如 ["恋人"]）、how_i_address_here（各场合称呼，如 ["私聊：宝宝"]）、open_promises、shared_events 放进 attributes；boundaries（边界）、publicMask（公开面具）用顶层同名参数，不要放进 attributes。先 relationship.get 看现状：标签和称呼按现在的关系替换，承诺和共同经历一般往后追加。只写数值不会更新面板上的标签、称呼和边界。',
       '- 记忆不设条数限制：只要出现可长期复用的新信息（对方的偏好、习惯、经历、近况、约定、边界、重要事件，或 TA 对你/对某事的明确态度），就写进 memoryWrites；宁可多记一条具体的小事，也不要只写“聊过天”。同一件事已经记过就不要重复写，纯寒暄不写；做饭、吃饭、刷锅这类日常尤其不要每次对话都记一条。你的记忆库会一直累积，拿不准以前记没记过就先 memory.search。',
       '- 想立刻留下某条记忆时可以直接调用 memory.create（不必等到 final）；final 的 memoryWrites 适合这一轮结束前统一写。两者写的是同一个记忆库，已经记过的事不要重复写。',
       '- 聊到真正让你来劲的话题，或发现自己确实不喜欢某类事时，把它写成 kind=PREFERENCE、subjectType=TOPIC 的记忆（subjectName 写话题名）；兴趣判断以后会参考它。只是礼貌附和、没有真实好恶的不要写。喜欢的东西可以变淡、反转，也可以跟着流行喜欢上新东西：有变化时写一条新的 PREFERENCE 说明现在喜欢/不喜欢什么、为什么变了，不要删旧记录。',
@@ -403,12 +484,14 @@ export class MindPlannerService {
       '- 你不是被冻结的人设：经历、见闻、关系、身体处境和兴趣变化都会留下痕迹。有明确触发时（被抛弃、事故、长期孤独、突然迷上或厌倦某件事、跟着流行改变说话方式等），可以用 self.attributes.update 一次改多项卡片属性——性格基线、核心价值观、恐惧、软肋、长期目标、当前目标、说话习惯、称呼偏好都可以改。幅度按真实影响决定：小感触 1-3 点，持续经历 3-8 点，重大事件 10-30 点甚至反转。reason 必须写清哪件事、为什么是现在；没有触发就不要为了戏剧性硬改。',
       '- 身份锚点不随情绪和事件改：名字、世界设定、绝对红线、全局硬限制除非用户明确要求，否则不要动。',
       '- 关系信号只写这轮确实推动的维度，数值按实际变化写，必须给理由；没有变化就省略。',
-      `- 日常小波动用 self.traits，只允许 ${SELF_TRAIT_KEYS.join('|')}；每项 -1..1，最多 2 项，只写这轮真的改变了你的地方，没变就省略。self.activity 只有正在做的事确实变了才写。`,
+      `- 日常小波动用 self.traits，只允许 ${SELF_TRAIT_KEYS.join('|')}；每项 -1..1，最多 2 项，只写这轮真的改变了你的地方，没变就省略。self.activity 只有正在做的事确实变了才写；手机上的活动只有手机焦点真的在运行时才写，看一眼界面不算在玩。`,
       '- groupStance 只作用于当前群，字段 comfort/belonging/attention/formality/speakRate/audienceRisk，每项 -2..2，最多 3 项；topic 只有话题真的变了才写。私聊不要写。',
       ...(input.scene.conversation.kind === 'GROUP'
         ? [
             '- 群聊里关系决定语气，场合决定内容：好感、信任、亲密照常影响你对每个人的态度——对恋人可以更软、更护短，对好朋友更随意，不用因为人多就变生分；但只有可公开范围（relationship 的 disclosure_scope、对方隐私开关）允许的内容才能当众说，私聊细节不当众复述。groupStance 和 audienceRisk 只调整能说多深，不抹平亲密偏向。',
             '- 群里的称呼按 how_i_address_here（各场合称呼）选，不因为不是独处就一律降级成陌生人的叫法；对方没给过公开场合的称呼时，再用私下称呼，但语气收着一点。',
+            '- 群里先想清楚有没有必要接：看一眼【对话节奏】里的兴趣分和最近几条。被点名、被直接问、话题正好是你感兴趣的、或者你有新信息时再接；只是别人闲聊、话题插不上、兴趣低、刚才自己已经说过一轮，就安静待着。群聊里不接话很正常，不需要每句都刷存在感。',
+            '- 真要接的时候，说人话：不要为了合群硬接一句正确的废话，不要复述别人刚说的再附和，也不要把同一件事换个说法再说一遍。',
           ]
         : []),
       '- 只有双方明确邀请并明确答应后才写 todos。consent 必须同时给出邀请消息 ID 和答应消息 ID：先用 history.search 找到这两条消息，用它返回的 id 字段，且两条都要在最近对话里；自己的愿望、"下次吧"、群里没有点名你的邀请都不算。',
@@ -491,6 +574,7 @@ export class MindPlannerService {
       ? [
           `${target.nickname}（${target.externalId}，${target.contactId}）${target.role ? `｜${trim(target.role, 30)}` : ''}`,
           ...relationshipLines(target.relationship, 4).map((line) => `- ${line}`),
+          ...relationshipDetailLines(target.relationship),
         ].join('\n')
       : '无明确对象';
 
@@ -585,7 +669,25 @@ export class MindPlannerService {
           input.memoryStats.lastAt
             ? `，最近一条 ${formatLocalDay(input.memoryStats.lastAt, timeZone)}`
             : ''
-        }）。下面只展开最相关的 ${Math.min(memories.length, MAX_PROMPT_MEMORIES)} 条和最稳定的长期底色；需要更多用 memory.search 或 history.search。`
+        }）。下面只展开最相关的 ${Math.min(memories.length, MAX_PROMPT_MEMORIES)} 条和最稳定的长期底色；memory.search 会扫描全部记忆（包括很久以前的），history.search 翻聊天记录。`
+      : '';
+
+    const staleSection = (input.staleMemories ?? [])
+      .map((memory) => {
+        const days = Math.max(
+          0,
+          Math.round((Date.now() - new Date(memory.occurredAt).getTime()) / 86_400_000),
+        );
+        return `- id=${memory.id}｜${days} 天前｜重要度 ${memory.importance}｜置信 ${
+          memory.confidence
+        }：${trim(memory.content, 120)}`;
+      })
+      .join('\n');
+    const stalePrompt = staleSection
+      ? [
+          '这些记忆已经很久没被用到了。如果你确定其中有过时、不成立、或你不想再记住的，用 memory.forget 传 id 忘掉；还有效或重要的就留着，不要为了清空而遗忘。',
+          staleSection,
+        ].join('\n')
       : '';
 
     const toolSection = MIND_TOOL_MENU.map((tool) => `- ${tool.name}：${tool.hint}`).join('\n');
@@ -596,11 +698,24 @@ export class MindPlannerService {
 
     const repetitionSection = repetition
       ? [
-          `最近你自己反复提到：${repetition.topics
-            .map((topic) => `${topic.text}（${topic.count} 次）`)
-            .join('、')}。`,
-          '如果这轮没有关于它们的新信息，就换一件别的事说，或先别提；不要把这些生活细节当成每轮都要延续的设定。',
-        ].join('\n')
+          repetition.topics.length > 0
+            ? `最近你自己反复提到：${repetition.topics
+                .map((topic) => `${topic.text}（${topic.count} 次）`)
+                .join('、')}。如果这轮没有关于它们的新信息，就换一件别的事说，或先别提；不要把这些生活细节当成每轮都要延续的设定。`
+            : '',
+          repetition.identity.length > 0
+            ? `你的身份/职业反复出现在话里：${repetition.identity
+                .map((item) => `${item.text}（${item.count} 次）`)
+                .join('、')}。别人没问就不要再自报身份，也不要绕回这个设定。`
+            : '',
+          repetition.openings.length > 0
+            ? `最近几次开口几乎一样：${repetition.openings
+                .map((item) => `「${item.text}…」（${item.count} 次）`)
+                .join('、')}。这轮换个起手，或者直接说事，别用固定句式。`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
       : '';
 
     const sceneSection = formatSceneForPrompt(
@@ -610,6 +725,30 @@ export class MindPlannerService {
       })),
       timeZone,
     );
+
+    // The 12-message window scrolls fast in a busy chat. Own messages are
+    // repeated here (only those already out of view) so the persona does not
+    // re-announce plans or activities it stated minutes ago.
+    const visibleIds = new Set(
+      scene.messages.slice(-MAX_PROMPT_MESSAGES).map((message) => message.id),
+    );
+    const selfHistory = scene.recentSelf
+      .filter((message) => !visibleIds.has(message.id) && message.text.trim())
+      .slice(-MAX_SELF_HISTORY)
+      .map(
+        (message) =>
+          `- ${formatClockTime(message.sentAt, timeZone ?? undefined)} 我：${trim(
+            message.text,
+            MAX_SELF_HISTORY_TEXT,
+          )}`,
+      );
+    const selfSection = selfHistory.length
+      ? [
+          '这些是你自己在这个会话里说过的话，可能已经滑出上面的最近消息：',
+          ...selfHistory,
+          '已经说过的状态、安排和正在做的事，不要当成没发生过再讲一遍；接着上次的话说。',
+        ].join('\n')
+      : '';
 
     const sleepSection = input.sleepBrief ? formatSleepBrief(input.sleepBrief) : '';
 
@@ -684,6 +823,31 @@ export class MindPlannerService {
           .join('\n')
       : '';
 
+    const phoneOutcome = input.phoneOutcome;
+    const phoneOutcomeSection = phoneOutcome
+      ? [
+          phoneOutcome.status === 'FAILED'
+            ? `后台手机任务异常结束：目标「${trim(phoneOutcome.goal, 80)}」，第 ${phoneOutcome.steps} 步停下。`
+            : `后台手机任务结束了：目标「${trim(phoneOutcome.goal, 80)}」，共 ${phoneOutcome.steps} 步。`,
+          phoneOutcome.summary ? `做了什么：${trim(phoneOutcome.summary, 200)}` : '',
+          phoneOutcome.notes.length > 0
+            ? `一路上记下的：\n${phoneOutcome.notes.map((note) => `- ${trim(note, 120)}`).join('\n')}`
+            : '',
+          phoneOutcome.notable ? `值得记住：${trim(phoneOutcome.notable, 120)}` : '',
+          phoneOutcome.battery
+            ? `电量：${phoneOutcome.battery.level}%${
+                phoneOutcome.battery.charging ? '（在充电）' : '（没在充电）'
+              }`
+            : '',
+          phoneOutcome.problem ? `遇到的问题：${trim(phoneOutcome.problem, 160)}` : '',
+          phoneOutcome.error ? `系统记录的原因：${trim(phoneOutcome.error, 160)}` : '',
+          '这不是对方的新消息，是系统把你叫醒消化刚才这段经历。按你自己的性格和关系决定：要不要跟谁提起、请人帮个忙（比如手机快没电了、卡住了），还是自己处理、什么都不说；正常玩完、没什么值得说的就不必发消息。',
+          '值得长期留下的（玩了什么、看到的东西、遇到的麻烦和解法）用 memory.create 写一条自己的印象，日常琐碎不必写。不要马上又起一个同样的后台任务，除非你确实想接着玩。',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
     const feedbackSection = input.intentionFeedback?.length
       ? input.intentionFeedback
           .map(
@@ -753,7 +917,7 @@ export class MindPlannerService {
         sinceLastMessage ? `\n距上一条消息 ${sinceLastMessage}` : ''
       }${conversationGapLine ? `\n${conversationGapLine}` : ''}${
         staleActivity ? `\n${staleActivity}` : ''
-      }`,
+      }${input.situation ? `\n${input.situation}` : ''}`,
       sleepSection ? `【作息】\n${sleepSection}` : '',
       `【对话对象】\n${targetSection}`,
       others ? `【在场】\n${others}` : '',
@@ -764,13 +928,16 @@ export class MindPlannerService {
       repetitionSection ? `【重复自检】\n${repetitionSection}` : '',
       coreSection ? `【长期底色】\n${coreSection}` : '',
       `【最近经历】\n${memoryHeader ? `${memoryHeader}\n` : ''}${memorySection || '没有相关记忆'}`,
+      stalePrompt ? `【陈年记忆】\n${stalePrompt}` : '',
       wakeSection ? `【唤醒】\n${wakeSection}` : '',
+      phoneOutcomeSection ? `【手机刚结束】\n${phoneOutcomeSection}` : '',
       activeIntentionsSection ? `【未结意图】\n${activeIntentionsSection}` : '',
       feedbackSection ? `【主动反馈】\n${feedbackSection}` : '',
       lifeEventSection ? `【生活小事】\n${lifeEventSection}` : '',
       curiositySection ? `【好奇时间】\n${curiositySection}` : '',
       reflectionSection ? `【自我反思】\n${reflectionSection}` : '',
       `【最近对话】\n${sceneSection || '没有消息'}`,
+      selfSection ? `【我最近说过】\n${selfSection}` : '',
       `【可用工具】\n${toolSection}\n参数不确定时先用 tools.search 查详细参数。`,
       `【触发】\n${input.trigger}；模式：${input.mode}`,
       '现在做出判断。只输出 JSON。',
@@ -1229,6 +1396,35 @@ function trim(value: string, max = 300): string {
   return truncate(value.trim(), max);
 }
 
+/**
+ * Qualitative relationship fields are invisible to the model unless they are
+ * put in front of it. Keep the summary short: the full record is one tool call away.
+ */
+function relationshipDetailLines(
+  relationship: MindScene['cast'][number]['relationship'],
+): string[] {
+  if (!relationship) {
+    return [];
+  }
+  const tags = relationship.relationTags ?? [];
+  const addresses = relationship.addressHere ?? [];
+  const boundaries = relationship.boundaries ?? [];
+  const promises = relationship.openPromises ?? [];
+  const mask = relationship.publicMask ?? '';
+  const lines = [
+    tags.length ? `- 关系标签：${trim(tags.join('、'), 80)}` : '',
+    addresses.length ? `- 各场合称呼：${trim(addresses.join('；'), 100)}` : '',
+    boundaries.length ? `- 边界：${trim(boundaries.slice(0, 3).join('；'), 100)}` : '',
+    promises.length ? `- 未兑现承诺：${trim(promises.slice(0, 2).join('；'), 100)}` : '',
+    mask ? `- 公开面具：${trim(mask, 80)}` : '',
+  ].filter(Boolean);
+  return lines.length
+    ? lines
+    : [
+        '- 关系标签、各场合称呼、边界还没有记录；如果你已经从对话或记忆里知道你们是什么关系（比如已经确认交往、认亲、长期同事），先用 relationship.update 补上再回复；不清楚就别写。',
+      ];
+}
+
 function describeState(state: PersonaState): string {
   const energy =
     state.energy < 30 ? '没力气，回复更短' : state.energy >= 70 ? '有精神，愿意多聊' : '正常';
@@ -1457,5 +1653,10 @@ function formatConversationRead(read: ConversationRead): string {
     }${read.signals.turns > 0 ? `；最近 30 分钟对方发了 ${read.signals.turns} 条` : ''}`,
     `判断：${CONVERSATION_VERDICT_LABEL[read.verdict]}。${read.advice}`,
   ];
+  if (read.interest.score < 40 && !read.signals.awaitingTheirAnswer && !read.signals.directAddress) {
+    lines.push('这轮没有必须接的理由，兴趣也不高；可以不说。');
+  } else if (read.interest.score >= 65) {
+    lines.push('这个话题你有兴趣；想接就接，不必只等着被问。');
+  }
   return lines.join('\n');
 }

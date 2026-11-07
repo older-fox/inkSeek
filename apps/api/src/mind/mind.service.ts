@@ -10,6 +10,7 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   MindHeartbeatLogRecord,
+  MindFocusOverview,
   MindHeartbeatQueryInput,
   MindPromptLogQueryInput,
   MindSettingsRecord,
@@ -18,6 +19,7 @@ import type {
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
   PersonaJournalRecord,
+  PersonaMemoryQueryInput,
   PersonaMemoryRecord,
   PersonaRelationshipRecord,
   PersonaRelationshipUpdateInput,
@@ -35,10 +37,14 @@ import type {
   PersonaJournal,
 } from '../generated/prisma/client.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
+import { MindFocusService } from './mind-focus.service.js';
 import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
+import { MindLoopService } from './mind-loop.service.js';
+import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindRuntimeService, toRunSummary } from './mind-runtime.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
+import { MindSituationService } from './mind-situation.service.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
 import {
   PersonaLongEventService,
@@ -65,6 +71,10 @@ export class MindService {
     private readonly heartbeatLogs: MindHeartbeatLogService,
     private readonly stickers: StickerService,
     private readonly phones: PhoneService,
+    private readonly focus: MindFocusService,
+    private readonly phoneFocus: MindPhoneFocusService,
+    private readonly loop: MindLoopService,
+    private readonly situation: MindSituationService,
   ) {}
 
   listChanges(
@@ -159,18 +169,12 @@ export class MindService {
     return this.stances.update(personaId, input);
   }
 
-  listMemories(input: {
-    personaId: string;
-    query?: string;
-    scope?: PersonaMemoryRecord['scope'];
-    kind?: PersonaMemoryRecord['kind'];
-    subjectType?: PersonaMemoryRecord['subjectType'];
-    subjectId?: string;
-    includeDeleted?: boolean;
-    limit: number;
-    offset: number;
-  }): Promise<PersonaMemoryRecord[]> {
+  listMemories(input: PersonaMemoryQueryInput): Promise<PersonaMemoryRecord[]> {
     return this.memories.list(input);
+  }
+
+  countMemories(input: PersonaMemoryQueryInput): Promise<number> {
+    return this.memories.count(input);
   }
 
   listTodos(personaId: string): Promise<AgentTodoRecord[]> {
@@ -360,6 +364,36 @@ export class MindService {
 
   phoneDevices(): Promise<PhoneDeviceList> {
     return this.phones.devices();
+  }
+
+  async focusOverview(personaId: string): Promise<MindFocusOverview> {
+    const [overview, state, situation] = await Promise.all([
+      this.focus.overview(personaId),
+      this.prisma.personaState.findUnique({ where: { personaId } }),
+      this.situation.describe(personaId),
+    ]);
+    return {
+      ...overview,
+      now: {
+        activity: state?.currentActivity ?? '',
+        activitySince: state?.activitySince?.toISOString() ?? null,
+        location: state?.location ?? '',
+        situation,
+      },
+    };
+  }
+
+  async startPhoneFocus(personaId: string, goal?: string) {
+    const persona = await this.prisma.chatChannelPersona.findUnique({
+      where: { id: personaId },
+      select: { channelId: true },
+    });
+    if (!persona) {
+      throw new NotFoundException({ code: 'PERSONA_NOT_FOUND', message: '人格实例不存在' });
+    }
+    const focus = await this.phoneFocus.startManual(personaId, persona.channelId, goal);
+    this.loop.kick(personaId);
+    return focus;
   }
 }
 

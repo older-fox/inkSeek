@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service.js';
-import { MindRuntimeService } from './mind-runtime.service.js';
+import { MindLoopService } from './mind-loop.service.js';
 
 const TICK_MS = 30_000;
 const LEASE_MS = 2 * 60_000;
@@ -15,7 +15,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly runtime: MindRuntimeService,
+    private readonly loop: MindLoopService,
   ) {}
 
   onModuleInit(): void {
@@ -97,7 +97,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
         await this.reschedule(personaId, settings?.wakeIntervalMinutes ?? 30);
         return;
       }
-      const result = await this.runtime.heartbeat(personaId);
+      const result = await this.loop.submitHeartbeat(personaId);
       if (!result) {
         // Runtime reschedules on its own paths; this is a safety net.
         await this.reschedule(personaId, settings.wakeIntervalMinutes);

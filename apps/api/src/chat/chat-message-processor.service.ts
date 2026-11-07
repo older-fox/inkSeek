@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { MindLoopService } from '../mind/mind-loop.service.js';
 import { MindRuntimeService } from '../mind/mind-runtime.service.js';
 import { MindSettingsService } from '../mind/mind-settings.service.js';
 import type { ChatMessageSnapshot } from './chat-message.types.js';
@@ -15,6 +16,7 @@ export class ChatMessageProcessor {
 
   constructor(
     private readonly mind: MindRuntimeService,
+    private readonly loop: MindLoopService,
     private readonly mindSettings: MindSettingsService,
     private readonly burst: PrivateBurstService,
   ) {}
@@ -45,12 +47,13 @@ export class ChatMessageProcessor {
         // The quiet window delays the next turn; stop the previous run now
         // instead of letting it finish while the person keeps typing.
         this.mind.interrupt(message.conversationId, message.senderId);
+        void this.loop.notifyIncoming(message.channelId);
         this.burst.schedule(message, settings.privateBurstSeconds, (messages, quietSeconds) =>
           this.handleBurst(messages, quietSeconds),
         );
         return;
       }
-      await this.mind.turn({ message, trigger: 'MESSAGE' });
+      await this.loop.submitMessage(message);
     } catch (error) {
       this.logger.warn(`消息处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -70,6 +73,6 @@ export class ChatMessageProcessor {
           );
         });
     }
-    await this.mind.turn({ message: last, trigger: 'MESSAGE' });
+    await this.loop.submitMessage(last);
   }
 }

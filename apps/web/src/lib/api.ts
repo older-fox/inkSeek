@@ -21,6 +21,7 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   LoginInput,
+  MindFocusOverview,
   MindHeartbeatLogRecord,
   MindSettingsRecord,
   MindSettingsUpdateInput,
@@ -214,6 +215,13 @@ export const api = {
       body: JSON.stringify(input),
     }),
   mindPhoneDevices: () => request<PhoneDeviceList>('/mind/phone-devices'),
+  mindFocus: (personaId: string) =>
+    request<MindFocusOverview>(`/mind/focus/${encodeURIComponent(personaId)}`),
+  startMindPhoneFocus: (personaId: string, goal?: string) =>
+    request<unknown>(`/mind/focus/${encodeURIComponent(personaId)}/phone`, {
+      method: 'POST',
+      body: JSON.stringify({ goal }),
+    }),
   mindSettings: (channelId: string) =>
     request<MindSettingsRecord>(`/mind/settings/${encodeURIComponent(channelId)}`),
   updateMindSettings: (channelId: string, input: MindSettingsUpdateInput) =>
@@ -247,18 +255,12 @@ export const api = {
       body: JSON.stringify(input),
     }),
   mindMemories: (query: PersonaMemoryQueryInput) => {
-    const params = new URLSearchParams({
-      personaId: query.personaId,
-      limit: String(query.limit ?? 40),
-    });
-    if (query.query) params.set('query', query.query);
-    if (query.scope) params.set('scope', query.scope);
-    if (query.kind) params.set('kind', query.kind);
-    if (query.sourceType) params.set('sourceType', query.sourceType);
-    if (query.subjectType) params.set('subjectType', query.subjectType);
-    if (query.includeDeleted) params.set('includeDeleted', 'true');
-    if (query.offset) params.set('offset', String(query.offset));
+    const params = memoryQueryParams(query);
     return request<PersonaMemoryRecord[]>(`/mind/memories?${params.toString()}`);
+  },
+  mindMemoryCount: (query: PersonaMemoryQueryInput) => {
+    const params = memoryQueryParams(query);
+    return request<{ total: number }>(`/mind/memories/count?${params.toString()}`);
   },
   createMindMemory: (input: PersonaMemoryCreateInput) =>
     request<PersonaMemoryRecord>('/mind/memories', {
@@ -338,3 +340,18 @@ export const api = {
     request<boolean>(`/mind/heartbeat/${encodeURIComponent(personaId)}`, { method: 'POST' }),
   mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
 };
+
+function memoryQueryParams(query: PersonaMemoryQueryInput): URLSearchParams {
+  const params = new URLSearchParams({
+    personaId: query.personaId,
+    limit: String(query.limit ?? 40),
+  });
+  if (query.query) params.set('query', query.query);
+  if (query.scope) params.set('scope', query.scope);
+  if (query.kind) params.set('kind', query.kind);
+  if (query.sourceType) params.set('sourceType', query.sourceType);
+  if (query.subjectType) params.set('subjectType', query.subjectType);
+  if (query.includeDeleted) params.set('includeDeleted', 'true');
+  if (query.offset) params.set('offset', String(query.offset));
+  return params;
+}

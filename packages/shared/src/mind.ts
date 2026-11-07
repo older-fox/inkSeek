@@ -36,7 +36,15 @@ export const agentIntentionStatuses = [
   'EXPIRED',
   'CANCELLED',
 ] as const;
-export const agentRunTriggers = ['MESSAGE', 'HEARTBEAT', 'PROACTIVE', 'MANUAL'] as const;
+export const agentRunTriggers = [
+  'MESSAGE',
+  'HEARTBEAT',
+  'PROACTIVE',
+  'MANUAL',
+  'PHONE',
+] as const;
+export const personaFocusKinds = ['CHAT', 'PHONE'] as const;
+export const personaFocusStatuses = ['ACTIVE', 'PAUSED', 'DONE'] as const;
 export const agentRunStatuses = ['RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'] as const;
 export const agentStepTypes = [
   'ATTENTION',
@@ -66,6 +74,8 @@ export type AgentRunStatus = (typeof agentRunStatuses)[number];
 export type AgentStepType = (typeof agentStepTypes)[number];
 export type AgentActionKind = (typeof agentActionKinds)[number];
 export type AgentActionStatus = (typeof agentActionStatuses)[number];
+export type PersonaFocusKind = (typeof personaFocusKinds)[number];
+export type PersonaFocusStatus = (typeof personaFocusStatuses)[number];
 
 export interface MindSettingsRecord {
   channelId: string;
@@ -103,7 +113,40 @@ export interface MindSettingsRecord {
   model: string | null;
   /** Wireless adb address (ip:port) this channel may operate. */
   phoneDevice: string | null;
+  /** Percent chance per idle heartbeat; 0 disables autonomous phone time. */
+  phonePlayChancePercent: number;
+  /** Per persona-local day cap; 0 means unlimited. */
+  phonePlayDailyLimit: number;
   updatedAt: string;
+}
+
+/** One attention focus row. `state` is the runner's free-form workbook. */
+export interface PersonaFocusRecord {
+  id: string;
+  personaId: string;
+  channelId: string;
+  kind: PersonaFocusKind;
+  status: PersonaFocusStatus;
+  parentId: string | null;
+  goal: string;
+  step: number;
+  state: unknown;
+  pausedAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  updatedAt: string;
+}
+
+export interface MindFocusOverview {
+  active: PersonaFocusRecord | null;
+  recent: PersonaFocusRecord[];
+  /** What the persona says it is doing, plus the same situation the planner sees. */
+  now: {
+    activity: string;
+    activitySince: string | null;
+    location: string;
+    situation: string;
+  };
 }
 
 export interface PersonaStateRecord {
@@ -735,7 +778,15 @@ export const mindSettingsUpdateSchema = z.object({
         /\._adb-tls-connect\._tcp$/u.test(value),
       '仅支持无线 ADB 设备（IP:端口 或无线调试的 mDNS 名称）',
     ),
+  phonePlayChancePercent: z.number().int().min(0).max(100).optional(),
+  phonePlayDailyLimit: z.number().int().min(0).max(500).optional(),
 });
+
+export const mindPhoneFocusStartSchema = z.object({
+  goal: z.string().trim().max(200).optional(),
+});
+
+export type MindPhoneFocusStartInput = z.infer<typeof mindPhoneFocusStartSchema>;
 
 export type MindSettingsUpdateInput = z.infer<typeof mindSettingsUpdateSchema>;
 

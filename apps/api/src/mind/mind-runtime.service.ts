@@ -22,9 +22,11 @@ import {
   MindHeartbeatLogService,
   type MindHeartbeatLogInput,
 } from './mind-heartbeat-log.service.js';
+import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
 import { MindSceneService } from './mind-scene.service.js';
+import { MindSituationService } from './mind-situation.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import { MindSocialService } from './mind-social.service.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
@@ -46,6 +48,7 @@ import {
   type MindActiveIntentionsBrief,
   type MindIntentionFeedback,
   type MindPersona,
+  type MindPhoneOutcomeBrief,
   type MindScene,
   type MindSleepBrief,
   type MindWakeBrief,
@@ -93,6 +96,8 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly executor: MindActionExecutor,
     private readonly replyLock: MindReplyLockService,
     private readonly heartbeatLogs: MindHeartbeatLogService,
+    private readonly situation: MindSituationService,
+    private readonly phoneFocus: MindPhoneFocusService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -134,6 +139,8 @@ export class MindRuntimeService implements OnModuleInit {
     message: ChatMessageSnapshot;
     mode?: PersonaMindMode;
     trigger?: Trigger;
+    /** Chat focus that interrupted a phone session, for the run timeline. */
+    focusId?: string;
   }): Promise<MindTurnResult> {
     if (input.message.isSelf) {
       return skipped('自己发出的消息不触发心智');
@@ -192,6 +199,7 @@ export class MindRuntimeService implements OnModuleInit {
       message: ChatMessageSnapshot;
       mode?: PersonaMindMode;
       trigger?: Trigger;
+      focusId?: string;
     },
     signal?: AbortSignal,
     interruptedPredecessor = false,
@@ -387,7 +395,7 @@ export class MindRuntimeService implements OnModuleInit {
       scene.persona.values as Record<string, unknown> | null,
     );
     const query = buildMemoryQuery(scene);
-    const recall = await this.memories.recallForScene(scene, query, 12);
+    const recall = await this.memories.recallForScene(scene, query, 12, { review: true });
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const conversationRead = readConversation({ scene, memories });
@@ -400,6 +408,7 @@ export class MindRuntimeService implements OnModuleInit {
         channelId: scene.persona.channelId,
         conversationId: scene.conversation.id,
         messageId: input.message.messageId || null,
+        focusId: input.focusId ?? null,
         trigger: input.trigger ?? 'MESSAGE',
         mode,
         status: 'RUNNING',
@@ -518,6 +527,7 @@ export class MindRuntimeService implements OnModuleInit {
         social: decision.read,
         memories: recall.relevant,
         coreMemories: recall.core,
+        staleMemories: recall.stale,
         memoryStats: recall.stats,
         conversationRead,
         intentionFeedback,
@@ -526,6 +536,7 @@ export class MindRuntimeService implements OnModuleInit {
         mode,
         trigger: input.trigger ?? 'MESSAGE',
         sleepBrief,
+        situation: await this.situation.describe(scene.persona.id),
         signal,
       });
     } catch (error) {
@@ -693,7 +704,10 @@ export class MindRuntimeService implements OnModuleInit {
     };
   }
 
-  async heartbeat(personaId: string): Promise<MindTurnResult | null> {
+  async heartbeat(
+    personaId: string,
+    phoneOutcome?: MindPhoneOutcomeBrief,
+  ): Promise<MindTurnResult | null> {
     const persona = await this.states.persona(personaId);
     const settings = await this.settings.get(persona.channelId);
     const log = (
@@ -775,11 +789,41 @@ export class MindRuntimeService implements OnModuleInit {
           take: 8,
         })
       : [];
+    const unconsolidated = await this.memories.countUnconsolidated(personaId);
+    // Phone reflection belongs where the phone time was requested, not in
+    // whatever chat happens to be most recent.
+    const phoneConversationId = phoneOutcome?.conversationId
+      ? ((await this.prisma.chatConversation.findFirst({
+          where: { id: phoneOutcome.conversationId, channelId: persona.channelId },
+          select: { id: true },
+        }))?.id ?? null)
+      : null;
     const conversationId =
+      phoneConversationId ??
       dueTodos.find((todo) => todo.relatedConversationId)?.relatedConversationId ??
       (await this.conversationForIntentions(persona.channelId, dueIntentionsAll)) ??
       (await this.mostRecentConversationId(personaId, persona.channelId));
     if (!conversationId) {
+      // Phone time does not need a conversation; an otherwise idle persona can
+      // still pick up the phone and do something by itself.
+      const phoneIdle =
+        dueTodos.length === 0 &&
+        dueIntentionsAll.length === 0 &&
+        unconsolidated < 2 &&
+        !phoneOutcome;
+      if (phoneIdle && !quiet) {
+        const started = await this.phoneFocus.startAutonomous(personaId, settings, timeZone);
+        if (started) {
+          await this.reschedule(personaId, settings.wakeIntervalMinutes, '自己玩手机');
+          await log('IDLE', '空闲心跳：没有会话，自己玩手机', {
+            dueTodos: 0,
+            dueIntentions: 0,
+            unconsolidated,
+            detail: { wakeReason: state.wakeReason, phoneFocusId: started.id },
+          });
+          return null;
+        }
+      }
       await this.reschedule(personaId, settings.wakeIntervalMinutes, '没有可用的会话');
       await log('NO_CONVERSATION', '没有可用的会话', {
         dueTodos: dueTodos.length,
@@ -804,16 +848,21 @@ export class MindRuntimeService implements OnModuleInit {
       )
     ).slice(0, 5);
     const dueIntentionBriefs = await this.dueIntentionBriefs(personaId, dueIntentions);
-    const unconsolidated = await this.memories.countUnconsolidated(personaId);
 
     // Only idle beats roll for everyday events or curiosity, so busy days never
     // stack a second storyline on top of the messages already being handled.
     // Reflection is scheduled by time and takes priority over both.
-    const idle = dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2;
-    const reflection = !quiet && (await this.reflectionDue(personaId, settings));
+    const idle =
+      dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2 && !phoneOutcome;
+    const reflection = !phoneOutcome && !quiet && (await this.reflectionDue(personaId, settings));
     const lifeEvent =
-      !reflection && idle && !quiet && (await this.rollLifeEvent(personaId, settings, timeZone));
+      !phoneOutcome &&
+      !reflection &&
+      idle &&
+      !quiet &&
+      (await this.rollLifeEvent(personaId, settings, timeZone));
     const curiosity =
+      !phoneOutcome &&
       !reflection &&
       !lifeEvent &&
       idle &&
@@ -845,6 +894,20 @@ export class MindRuntimeService implements OnModuleInit {
             gate,
             nextMinutes: gate.nextMinutes,
           },
+        });
+        return null;
+      }
+    }
+
+    // Idle time can be spent with the phone. It becomes its own focus, so it
+    // keeps running when nobody writes, and a message only pauses it.
+    if (idle && !quiet && !lifeEvent && !curiosity && !reflection) {
+      const started = await this.phoneFocus.startAutonomous(personaId, settings, timeZone);
+      if (started) {
+        await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '自己玩手机');
+        await log('IDLE', '空闲心跳：自己玩手机', {
+          ...heartbeatBase,
+          detail: { ...heartbeatBase, wakeReason: state.wakeReason, phoneFocusId: started.id },
         });
         return null;
       }
@@ -942,7 +1005,7 @@ export class MindRuntimeService implements OnModuleInit {
       ...dueTodos.map((todo) => todo.title),
       ...dueIntentionBriefs.map((intent) => intent.reason || intent.seed),
     ].join('；');
-    const recall = await this.memories.recallForScene(scene, query, 12);
+    const recall = await this.memories.recallForScene(scene, query, 12, { review: true });
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const [intentionFeedback, activeIntentions] = await Promise.all([
@@ -955,13 +1018,37 @@ export class MindRuntimeService implements OnModuleInit {
         personaId,
         channelId: persona.channelId,
         conversationId,
-        trigger: dueIntentions.length > 0 || dueTodos.length > 0 ? 'PROACTIVE' : 'HEARTBEAT',
+        trigger:
+          dueIntentions.length > 0 ||
+          dueTodos.length > 0 ||
+          phoneOutcome?.status === 'FAILED' ||
+          Boolean(phoneOutcome?.problem)
+            ? 'PROACTIVE'
+            : 'HEARTBEAT',
         mode,
         status: 'RUNNING',
         scene: compactScene(scene),
       },
     });
     await this.step(run.id, 'ATTENTION', '唤醒简报', { wakeBrief }, { decision: decision.read }, 0);
+    if (phoneOutcome) {
+      await this.step(
+        run.id,
+        'ATTENTION',
+        phoneOutcome.status === 'FAILED' ? '手机任务失败' : '手机玩完了',
+        { focusId: phoneOutcome.focusId, goal: phoneOutcome.goal },
+        {
+          status: phoneOutcome.status,
+          summary: phoneOutcome.summary,
+          notes: phoneOutcome.notes.length,
+          problem: phoneOutcome.problem,
+          battery: phoneOutcome.battery,
+          error: phoneOutcome.error,
+          steps: phoneOutcome.steps,
+        },
+        0,
+      );
+    }
     if (lifeEvent) {
       await this.step(
         run.id,
@@ -1007,18 +1094,24 @@ export class MindRuntimeService implements OnModuleInit {
         social: decision.read,
         memories: recall.relevant,
         coreMemories: recall.core,
+        staleMemories: recall.stale,
         memoryStats: recall.stats,
         intentionFeedback,
         activeIntentions,
         settings,
         mode,
-        trigger: 'HEARTBEAT',
+        trigger:
+          phoneOutcome?.status === 'FAILED' || Boolean(phoneOutcome?.problem)
+            ? 'PROACTIVE'
+            : 'HEARTBEAT',
         wakeBrief,
         sleepBrief,
         lifeEvent,
         curiosity,
         reflection,
         reflectionBrief,
+        phoneOutcome,
+        situation: await this.situation.describe(personaId),
       });
       await this.step(
         run.id,
@@ -1147,6 +1240,7 @@ export class MindRuntimeService implements OnModuleInit {
         detail: {
           ...heartbeatBase,
           wakeReason: state.wakeReason,
+          phoneOutcome: phoneOutcome ?? null,
           outcome,
           conversationId,
           brief: {
@@ -1280,6 +1374,7 @@ export class MindRuntimeService implements OnModuleInit {
       social: decision.read,
       memories: recall.relevant,
       coreMemories: recall.core,
+      staleMemories: recall.stale,
       memoryStats: recall.stats,
       conversationRead,
       intentionFeedback,

@@ -87,6 +87,13 @@ export interface SceneCastMember {
     blocked: boolean;
     mutedUntil: string | null;
     disclosureScope: string;
+    /** Qualitative columns, normalized to prompt-safe text: junk objects are dropped. */
+    relationTags?: string[] | null;
+    addressHere?: string[] | null;
+    publicMask?: string | null;
+    boundaries?: string[] | null;
+    openPromises?: string[] | null;
+    sharedEvents?: string[] | null;
   } | null;
 }
 
@@ -95,6 +102,12 @@ export interface SceneKnownCastMember {
   contactId: string;
   nickname: string;
   memoryCount: number;
+}
+
+export interface SceneSelfMessage {
+  id: string;
+  text: string;
+  sentAt: string;
 }
 
 export interface MindScene {
@@ -106,6 +119,11 @@ export interface MindScene {
   /** Group turns only: present members with history elsewhere, without leaking it. */
   knownCast: SceneKnownCastMember[];
   stance: MindGroupStance | null;
+  /**
+   * The persona's own recent messages in this conversation. Busy chats push
+   * them out of the prompt window, which made it re-announce what it already said.
+   */
+  recentSelf: SceneSelfMessage[];
   startedAt: Date;
 }
 
@@ -224,6 +242,51 @@ export interface MindMemoryStats {
 export const MIND_EMBEDDING_DIM = 256;
 export const MIND_MAX_TOOL_STEPS = 10;
 export const MIND_MAX_TOOL_MS = 25_000;
+/// Upper bound for one phone session; shared by the runner and the prompt so
+/// the model always sees how far along it is.
+export const PHONE_FOCUS_MAX_STEPS = 24;
+
+export interface MindPhoneBattery {
+  level: number;
+  charging: boolean;
+}
+
+/** Passed to the next wake so the persona can digest the session and act. */
+export interface MindPhoneOutcomeBrief {
+  focusId: string;
+  goal: string;
+  status: 'SUCCEEDED' | 'FAILED';
+  /** What actually happened, in the decision model's words. */
+  summary: string;
+  /** The one memorable line from the last round. */
+  notable: string;
+  /** Small impressions collected along the way. */
+  notes: string[];
+  /** Her own words for what got in the way; empty when nothing did. */
+  problem: string;
+  battery: MindPhoneBattery | null;
+  error: string;
+  steps: number;
+  /** Conversation that requested the phone time, so help is asked in the right place. */
+  conversationId?: string | null;
+}
+
+/// Compact "N 分钟 / N 小时 / N 天" label for how long ago something started
+/// or ended. Shared by the situation paragraph, phone runner and phone.status.
+export function elapsedLabel(value: Date | string): string {
+  const started = typeof value === 'string' ? new Date(value).getTime() : value.getTime();
+  const ms = Math.max(0, Date.now() - started);
+  if (ms < 60_000) {
+    return '不到 1 分钟';
+  }
+  if (ms < 3_600_000) {
+    return `${Math.round(ms / 60_000)} 分钟`;
+  }
+  if (ms < 86_400_000) {
+    return `${Math.round(ms / 3_600_000)} 小时`;
+  }
+  return `${Math.round(ms / 86_400_000)} 天`;
+}
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));

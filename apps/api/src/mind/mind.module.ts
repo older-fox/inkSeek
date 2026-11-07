@@ -7,14 +7,18 @@ import { RedisModule } from '../redis/redis.module.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindController } from './mind.controller.js';
 import { MindDriftService } from './mind-drift.service.js';
+import { MindFocusService } from './mind-focus.service.js';
 import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
+import { MindLoopService } from './mind-loop.service.js';
+import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
 import { MindRuntimeService } from './mind-runtime.service.js';
 import { MindSceneService } from './mind-scene.service.js';
 import { MindService } from './mind.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
+import { MindSituationService } from './mind-situation.service.js';
 import { MindSocialService } from './mind-social.service.js';
 import { MindToolsService } from './mind-tools.service.js';
 import { PersonaGroupStanceService } from './persona-group-stance.service.js';
@@ -36,6 +40,8 @@ import { WebSearchService } from './web-search.service.js';
     PersonaGroupStanceService,
     PersonaLongEventService,
     PersonaMemoryService,
+    MindFocusService,
+    MindSituationService,
     MindSceneService,
     MindSocialService,
     MindToolsService,
@@ -43,6 +49,8 @@ import { WebSearchService } from './web-search.service.js';
     MindPlannerService,
     MindReplyLockService,
     MindHeartbeatLogService,
+    MindPhoneFocusService,
+    MindLoopService,
     StickerService,
     VideoInsightService,
     WebSearchService,
@@ -61,6 +69,10 @@ import { WebSearchService } from './web-search.service.js';
     MindRuntimeService,
     MindService,
     MindActionExecutor,
+    MindFocusService,
+    MindSituationService,
+    MindPhoneFocusService,
+    MindLoopService,
     StickerService,
   ],
 })

@@ -30,6 +30,8 @@ const SETTINGS_DEFAULTS = {
   providerId: null,
   model: null,
   phoneDevice: null,
+  phonePlayChancePercent: 0,
+  phonePlayDailyLimit: 0,
   quietHours: null,
 } as const;
 
@@ -117,6 +119,12 @@ export class MindSettingsService {
     if (input.phoneDevice !== undefined) {
       data.phoneDevice = input.phoneDevice?.trim() || null;
     }
+    if (input.phonePlayChancePercent !== undefined) {
+      data.phonePlayChancePercent = input.phonePlayChancePercent;
+    }
+    if (input.phonePlayDailyLimit !== undefined) {
+      data.phonePlayDailyLimit = input.phonePlayDailyLimit;
+    }
     if (input.quietHours !== undefined) {
       data.quietHours =
         input.quietHours === null ? Prisma.JsonNull : (input.quietHours as Prisma.InputJsonValue);
@@ -151,6 +159,8 @@ export class MindSettingsService {
         providerId: input.providerId ?? null,
         model: input.model ?? null,
         phoneDevice: input.phoneDevice?.trim() || null,
+        phonePlayChancePercent: input.phonePlayChancePercent ?? 0,
+        phonePlayDailyLimit: input.phonePlayDailyLimit ?? 0,
         quietHours:
           input.quietHours === undefined
             ? undefined
@@ -203,6 +213,8 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     providerId: row.providerId,
     model: row.model,
     phoneDevice: row.phoneDevice,
+    phonePlayChancePercent: row.phonePlayChancePercent,
+    phonePlayDailyLimit: row.phonePlayDailyLimit,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
