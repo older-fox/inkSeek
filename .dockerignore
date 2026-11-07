@@ -1,0 +1,18 @@
+# 构建上下文只需要源码、锁文件和部署配置；不把本机依赖/产物带进镜像。
+.git
+.gitignore
+.idea
+.vscode
+.turbo
+**/node_modules
+**/dist
+*.log
+.env
+.env.*
+!.env.example
+data
+doc
+vibe_images
+
+# Prisma Client 在镜像里重新生成，避免把本机生成的 stale 产物 COPY 进去。
+apps/api/src/generated

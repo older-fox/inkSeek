@@ -1,0 +1,158 @@
+# inkSeek Platform 镜像流水线
+#
+# 运行环境约束：Runner 是容器内 runner，没有 docker daemon / dind / privileged，
+# 所以镜像统一用 kaniko 在容器内构建并推送，不依赖 docker build。
+#
+# 加速地址（都可在项目 CI/CD Variables 里覆盖）：
+#   NODE_IMAGE             Docker Hub 加速（node:24-bookworm-slim）
+#   NPM_REGISTRY           npm 加速
+#   APT_MIRROR             Debian apt 加速（运行镜像要装 nginx / ffmpeg / adb）
+#   PRISMA_ENGINES_MIRROR  Prisma 引擎下载加速
+#   KANIKO_IMAGE           kaniko 镜像（gcr.io 经 daocloud 加速）
+#
+# 触发：推送任意分支 / tag、页面手动运行、API 触发都会执行。
+
+stages:
+  - check
+  - image
+
+variables:
+  NODE_IMAGE: docker.1ms.run/library/node:24-bookworm-slim
+  NPM_REGISTRY: https://registry.npmmirror.com
+  APT_MIRROR: http://mirrors.tuna.tsinghua.edu.cn
+  PRISMA_ENGINES_MIRROR: https://registry.npmmirror.com/-/binary/prisma
+  PNPM_VERSION: "12.11.2"
+  PRISMA_VERSION: "7.10.1"
+  KANIKO_IMAGE: gcr.m.daocloud.io/kaniko-project/executor:debug
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "api"
+      when: always
+    - when: never
+
+# 便宜的检查放在镜像之前：PR 里类型错误不应该先花几分钟跑一次 kaniko。
+# 构建阶段会再次执行 pnpm build，但这里更早暴露问题，也覆盖 lint。
+check:typecheck:
+  stage: check
+  image:
+    name: $NODE_IMAGE
+    entrypoint: [""]
+  interruptible: true
+  variables:
+    GIT_STRATEGY: clone
+    # prisma generate 不连接数据库，但 prisma.config.ts 会读取 DATABASE_URL。
+    DATABASE_URL: "postgresql://ci:ci@127.0.0.1:5432/ci"
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store
+  before_script:
+    - npm install -g pnpm@$PNPM_VERSION --registry "$NPM_REGISTRY" --no-audit --no-fund
+    - pnpm config set registry "$NPM_REGISTRY"
+    - pnpm config set store-dir "$CI_PROJECT_DIR/.pnpm-store"
+  script:
+    # postinstall 已经会 generate；再显式跑一次，保证缓存恢复后 Prisma Client 一定存在。
+    - pnpm install --frozen-lockfile
+    - pnpm db:generate
+    - pnpm typecheck
+    - pnpm lint
+    # web 的 build 是 tsc --noEmit && vite build，能同时拦住类型错误与产物构建问题。
+    - pnpm build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
+# 公共 kaniko 任务：无 daemon，构建后直接推送到项目容器注册表。
+# 镜像 tag 规则：sha-<short> 始终推送；tag 推版本号；默认分支推 latest；其他分支推分支 slug。
+.docker_job:
+  stage: image
+  image:
+    name: $KANIKO_IMAGE
+    entrypoint: [""]
+  interruptible: true
+  # 加速镜像源偶发断流表现为 kaniko 退出码 1；整条 job 重跑一次即可恢复。
+  # 真正的构建错误也会重试，最多 2 次。
+  retry:
+    max: 2
+  variables:
+    GIT_STRATEGY: clone
+    DOCKER_TARGET: runtime
+    DOCKER_REPO: $CI_REGISTRY_IMAGE
+    DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/cache
+  script:
+    - |
+      dests="--destination ${DOCKER_REPO}:sha-${CI_COMMIT_SHORT_SHA}"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        dests="$dests --destination ${DOCKER_REPO}:${CI_COMMIT_TAG}"
+      elif [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        dests="$dests --destination ${DOCKER_REPO}:latest"
+      else
+        dests="$dests --destination ${DOCKER_REPO}:${CI_COMMIT_REF_SLUG}"
+      fi
+      echo "[ci] target=${DOCKER_TARGET} ref=${CI_COMMIT_REF_NAME} destinations: $dests"
+    # 项目容器注册表凭据（GitLab 预置变量）。
+    - mkdir -p /kaniko/.docker
+    - |
+      cat > /kaniko/.docker/config.json <<EOF
+      {"auths":{"$CI_REGISTRY":{"username":"$CI_REGISTRY_USER","password":"$CI_REGISTRY_PASSWORD"}}}
+      EOF
+    # 加速参数与 OOM 取值：
+    #   --snapshot-mode=redo       只比对 mtime/size/mode/uid/gid，不逐文件读内容。
+    #   --use-new-run              用 marker + mtime 找变更，减少全盘快照时间。
+    #   --compressed-caching=false 不把压缩层常驻内存，降低 pnpm 大依赖层的峰值内存。
+    #   --ignore-path=/pnpm-store  排除 pnpm store；Dockerfile 里的 npm 缓存同理排除。
+    #   --cache-repo               层缓存推回项目仓库，后续构建可直接命中。
+    #   三个 retry 覆盖从加速镜像源拉层的瞬时中断。
+    - |
+      /kaniko/executor \
+        --context "$CI_PROJECT_DIR" \
+        --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+        --target "$DOCKER_TARGET" \
+        --build-arg NODE_IMAGE="$NODE_IMAGE" \
+        --build-arg NPM_REGISTRY="$NPM_REGISTRY" \
+        --build-arg APT_MIRROR="$APT_MIRROR" \
+        --build-arg PRISMA_ENGINES_MIRROR="$PRISMA_ENGINES_MIRROR" \
+        --build-arg PNPM_VERSION="$PNPM_VERSION" \
+        --build-arg PRISMA_VERSION="$PRISMA_VERSION" \
+        --cache=true \
+        --cache-repo "$DOCKER_CACHE_REPO" \
+        --snapshot-mode=redo \
+        --use-new-run \
+        --compressed-caching=false \
+        --ignore-path=/pnpm-store \
+        --ignore-path=/root/.npm \
+        --ignore-path=/root/.cache \
+        --image-download-retry=3 \
+        --image-fs-extract-retry=3 \
+        --push-retry=3 \
+        $dests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
+# 运行镜像：Nginx(80) + Nest API(3100)。
+docker:image:
+  extends: .docker_job
+  variables:
+    DOCKER_TARGET: runtime
+    DOCKER_REPO: $CI_REGISTRY_IMAGE
+    DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/cache
+
+# 迁移镜像：只带 Prisma CLI 和 migrations，部署时作为一次性任务运行：
+#   docker run --rm -e DATABASE_URL=... <registry>/<project>/migrate:<tag>
+# 与运行镜像分开，避免把 Prisma CLI / 引擎塞进常驻镜像。
+docker:migrate:
+  extends: .docker_job
+  variables:
+    DOCKER_TARGET: migrate
+    DOCKER_REPO: $CI_REGISTRY_IMAGE/migrate
+    DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/migrate/cache
