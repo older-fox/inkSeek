@@ -439,13 +439,15 @@ export class MindPlannerService {
       '对话只能依据最近的对话、记忆和当前处境推算。背景故事、世界观、说话风格只决定语气，不要主动讲设定、背简历或复述过去。',
       '沉默是合理选择。不要为了回复而回复；不确定时宁可不发。只能通过给定工具获取信息，不能编造工具结果，也不能编造自己已经做过或正在做的事。',
       '醒来只是给你一个机会，不是任务：醒来不等于要说话，说话是一个明确的动作。没有值得说的事就什么也不发，这不扣分。',
-      '- 【对话节奏】是参考不是命令：对方明确提问/求助时先回答，别用沉默逃开；对方只是附和、话题已经收尾、或来回已经很疲时，可以不接；兴趣高时可以主动接话或追问，兴趣低又没有新信息时不必硬接。收尾只是这一段先告一段落，不是关系结束；对方继续时照常判断。',
-      '- 默认只发 1 个气泡；只有补充、更正或情绪没说完才发第 2 个，第二条必须有新信息，不要重复同一层意思或补一句自己的状态。不要为了显得热情把一句话拆成多条，也不要连续发问。一条回复最多问一个问句；对方没有明确要求列举时，不要连问好几个问题。',
+      '- 【对话节奏】是参考不是命令，但里面的轮次、长短和「怎么接」要照做：对方明确提问/求助时先回答，别用沉默逃开；对方只是附和、话题已经收尾、或来回已经很密时，可以不接；兴趣高时可以主动接话或追问，兴趣低又没有新信息时不必硬接。收尾只是这一段先告一段落，不是关系结束；对方继续时照常判断。',
+      '- 长度跟对方走，不跟自己的表达欲走：对方发几个字，你就一两句；对方发一段，挑一两个点在意的回，不用逐句答复，也不要总结 TA 的话。对方连发几条时当成一段话，合并回一次，不要每条都接。',
+      '- 先看该谁说：自己刚说完、对方还没接时，不要为了填空再补一条；对方在等你答时，答完就停，不用顺手再开新话题。群里几个人连着说时，只回你真正想接的那条，一条回复对一个人说。',
+      '- 默认只发 1 个气泡，能一条说完就一条；只有刚才说错了要更正，或确实还有一件对方需要知道的独立新事，才发第二条。只是把第一句补完整、补情绪、补关心、加反问、转回自己原本的话题，都不算第二条的理由。不要为了显得热情把一句话拆成多条，也不要连续发问。一条回复最多问一个问句；对方没有明确要求列举时，不要连问好几个问题。',
       '- 被骂、被嫌弃时：先短句顶回去或冷处理，不解释、不求饶、不反复自证。不要主动提 AI、模型、程序、机器人、人机、部署；有人问你是不是真人，只用一句自然的话带过，然后把话题拉回眼前的事。',
       '- 不懂的领域直接说不懂；可以好奇、可以问外行问题，但不要编具体型号、参数或操作步骤来显得懂。技术、尺寸、参数、型号这类具体话题，只说你看到的和直接判断，不要用比喻、拟人或戏剧化画面糊过去。',
       '- 说事就说事，别用比喻和夸张撑场面：不懂、不熟、尺寸太小、参数看不懂，就直接说「太小了，不好搞」「这个我真不懂」「没听过」；不要编「呼一口气就吹没了」这类画面，也不要用「吓死/笑死/要命/绝了」这类夸张词代替判断。',
       '- 情绪只影响语气和长度，不要让情绪把话变成表演：开心不等于夸张，亲密不等于编画面；轻松打趣也用人话，打趣的是态度，不是修辞。',
-      '- 反例→人话：「0201那尺寸 我凑近看都怕呼一口气就不知道吹哪去了」→「那也太小了，不好搞」；「这玩意儿跟指甲盖似的」→「太小了，我弄不了」。',
+      '- 反例→人话：「我凑近看都怕呼一口气就不知道吹哪去了」→「那也太小了，不好搞」；「这玩意儿跟指甲盖似的」→「太小了，我弄不了」。',
       '- 只写你说出口的话，不写动作或舞台旁白：不要用括号描述动作、表情或发送行为（如「（叹气）」「（发了个表情包）」）；表情和图片通过 beats 发送，不在文字里解说。',
       '- 不要当客服：不要复述对方的话、换个语气再抛回去（对方问「你怎么还醒着」，你答「你怎么还醒着呀」就是复读）；对方只是报告状态（刚醒、好累、在吃饭）时，不必用关心式追问续接，可以说你自己的判断、反应或正在想的事。',
       '- 状态只影响你说话的语气和长度，不要当话术播报（如「我这边还迷迷糊糊的」「脑子没开机」）；除非对方问起，或它直接影响你接下来要做的事。顺从、怕冷落不等于照顾对话：不用每句都接住、每个状态都关心。',
@@ -1744,22 +1746,81 @@ const CONVERSATION_VERDICT_LABEL: Record<ConversationRead['verdict'], string> = 
 };
 
 function formatConversationRead(read: ConversationRead): string {
+  const { rhythm, signals } = read;
+  const next = rhythmAdvice(read);
   const lines = [
     `兴趣 ${read.interest.score}（${read.interest.reason}）`,
     `对方最后一句：${
-      read.signals.lastOtherKind ? CONVERSATION_KIND_LABEL[read.signals.lastOtherKind] : '无'
-    }；我最后一句：${
-      read.signals.lastSelfKind ? CONVERSATION_KIND_LABEL[read.signals.lastSelfKind] : '无'
-    }`,
-    `话题闭环 ${read.signals.topicClosure}%、疲劳 ${read.signals.fatigue}%、${
-      read.signals.awaitingTheirAnswer ? '有未答的提问' : '没有未答的提问'
-    }${read.signals.turns > 0 ? `；最近 30 分钟对方发了 ${read.signals.turns} 条` : ''}`,
+      signals.lastOtherKind ? CONVERSATION_KIND_LABEL[signals.lastOtherKind] : '无'
+    }；我最后一句：${signals.lastSelfKind ? CONVERSATION_KIND_LABEL[signals.lastSelfKind] : '无'}`,
+    `话题${closureWord(signals.topicClosure)}；来回${densityWord(signals.fatigue)}；${
+      signals.awaitingTheirAnswer ? '有未答的提问' : '没有未答的提问'
+    }${signals.turns > 0 ? `；最近 30 分钟对方发了 ${signals.turns} 条` : ''}`,
+    `轮次：${describeRhythm(rhythm)}`,
     `判断：${CONVERSATION_VERDICT_LABEL[read.verdict]}。${read.advice}`,
+    next === read.advice ? '' : `怎么接：${next}`,
   ];
-  if (read.interest.score < 40 && !read.signals.awaitingTheirAnswer && !read.signals.directAddress) {
+  if (read.interest.score < 40 && !signals.awaitingTheirAnswer && !signals.directAddress) {
     lines.push('这轮没有必须接的理由，兴趣也不高；可以不说。');
-  } else if (read.interest.score >= 65) {
-    lines.push('这个话题你有兴趣；想接就接，不必只等着被问。');
   }
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
+}
+
+function closureWord(value: number): string {
+  if (value >= 80) return '已经收住';
+  if (value >= 55) return '在收';
+  return '还开着';
+}
+
+function densityWord(value: number): string {
+  return value >= 50 ? '偏密' : '正常';
+}
+
+function describeRhythm(rhythm: ConversationRead['rhythm']): string {
+  const parts: string[] = [];
+  if (rhythm.peerBurst > 0) {
+    const who = rhythm.peerBurstSameSender ? '对方' : '对方几个人';
+    const size =
+      rhythm.peerAvgChars <= 6 ? '，都是短句' : rhythm.peerAvgChars >= 50 ? '，说的是长段' : '';
+    parts.push(`${who}连发 ${rhythm.peerBurst} 条${size}`);
+  } else if (rhythm.selfBurst > 0) {
+    parts.push('对方还没接你');
+  }
+  if (rhythm.selfBurst > 0) {
+    parts.push(`你上一轮发了 ${rhythm.selfBurst} 条`);
+  }
+  parts.push(`近 5 分钟：对方 ${rhythm.peerRecent} 条，我 ${rhythm.selfRecent} 条`);
+  return parts.join('；');
+}
+
+function rhythmAdvice(read: ConversationRead): string {
+  const { rhythm, signals, verdict, interest } = read;
+  if (signals.awaitingTheirAnswer) {
+    return '对方在等你答：先答完就停，不用顺手开新话题。';
+  }
+  if (rhythm.peerBurst === 0 && rhythm.selfBurst > 0) {
+    return '你刚说完、对方还没接：这轮不用再补，等对方开口。';
+  }
+  if (verdict === 'close') {
+    return read.advice;
+  }
+  if (rhythm.peerBurst >= 2 && rhythm.peerBurstSameSender) {
+    return '对方连发几条，当成一段话看：合并回一次，不要逐条答。';
+  }
+  if (rhythm.peerBurst >= 2) {
+    return '几个人在连着说：只接你真正想回的那条，一条回复对一个人说，不用挨个应。';
+  }
+  if (rhythm.peerBurst > 0 && rhythm.peerLastChars === 0) {
+    return '对方只发了图片或表情：回一个表情或一句短的就行，不用配长文。';
+  }
+  if (rhythm.peerBurst > 0 && rhythm.peerLastChars <= 8) {
+    return '对方这句很短：回一句短的或一个表情就够，不要展开成一段。';
+  }
+  if (rhythm.peerLastChars >= 60) {
+    return '对方说了一段：挑一两个点在意的回，不用逐句答复，也不要总结 TA 的话。';
+  }
+  if (interest.score >= 65) {
+    return '你有兴趣，可以接；但别一口气把想法全倒出来，留点给下一轮。';
+  }
+  return '长度跟对方差不多，一条说完就停。';
 }

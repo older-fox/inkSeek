@@ -31,6 +31,17 @@ export interface ConversationRead {
     turns: number;
     sinceLastOtherMinutes: number | null;
   };
+  /** Who spoke last and how: burst length and message size decide reply shape. */
+  rhythm: {
+    peerBurst: number;
+    peerBurstSameSender: boolean;
+    peerAvgChars: number;
+    peerLastChars: number;
+    selfBurst: number;
+    selfLastChars: number;
+    peerRecent: number;
+    selfRecent: number;
+  };
   reasons: string[];
   advice: string;
 }
@@ -47,6 +58,9 @@ const QUESTION_WORD_RE =
   /(吗|嘛|么|咋|怎么|为什么|为啥|什么|哪个|哪里|哪儿|谁|多少|几点|是不是|有没有|能不能|可不可以|要不要|好不好|对不对|行不行|在不在|忙不忙|睡了吗|吃了吗)\s*[。！!…～~]*$/u;
 const QUESTION_CONTAINS_RE =
   /(什么|怎么|为什么|为啥|哪个|哪里|哪儿|谁|多少|几点|是不是|有没有|能不能|可不可以|要不要)/u;
+/** Long messages often end with "你说…是不是…" but no question mark. */
+const QUESTION_ASK_RE =
+  /(你说|你觉得|你看|你说说|帮我看看)[^。！!？?…\n]{0,30}(吗|嘛|么|是不是|有没有|能不能|可不可以|要不要|好不好|对不对|行不行|咋样|怎么样|如何)/u;
 const REQUEST_RE =
   /(帮我|帮忙|麻烦你|请你|能不能帮我|可以帮我|教我|告诉我|说说|讲讲|发我|给我|推荐|查一下|搜一下|找一下|看一下|写一个|弄一个|来个|整一个)/u;
 const ACK_RE =
@@ -369,6 +383,7 @@ export function classifyText(raw: string, hasMedia = false): MessageKind {
   if (
     QUESTION_TAIL_RE.test(text) ||
     QUESTION_WORD_RE.test(text) ||
+    QUESTION_ASK_RE.test(text) ||
     (QUESTION_CONTAINS_RE.test(text) && length <= 16 && !/[。！!…]$/u.test(text))
   ) {
     return 'question';
@@ -425,10 +440,69 @@ export function readConversation(input: {
         turns: 0,
         sinceLastOtherMinutes: null,
       },
+      rhythm: {
+        peerBurst: 0,
+        peerBurstSameSender: false,
+        peerAvgChars: 0,
+        peerLastChars: 0,
+        selfBurst: 0,
+        selfLastChars: 0,
+        peerRecent: 0,
+        selfRecent: 0,
+      },
       reasons: ['没有可判断的近期对话'],
       advice: '没有正在进行的对话，不用做收尾判断。',
     };
   }
+
+  const peerRecent = others.filter(
+    (message) => now.getTime() - Date.parse(message.sentAt) <= 5 * 60_000,
+  ).length;
+  const selfRecent = selves.filter(
+    (message) => now.getTime() - Date.parse(message.sentAt) <= 5 * 60_000,
+  ).length;
+  let cursor = recent.length - 1;
+  let peerBurst = 0;
+  while (cursor >= 0) {
+    const message = recent[cursor];
+    if (!message || message.isSelf) {
+      break;
+    }
+    peerBurst += 1;
+    cursor -= 1;
+  }
+  let selfBurst = 0;
+  while (cursor >= 0) {
+    const message = recent[cursor];
+    if (!message || !message.isSelf) {
+      break;
+    }
+    selfBurst += 1;
+    cursor -= 1;
+  }
+  const peerTail = peerBurst > 0 ? recent.slice(recent.length - peerBurst) : [];
+  const peerSender = peerTail.at(-1)?.senderId;
+  const peerBurstSameSender =
+    peerTail.length > 0 && peerTail.every((message) => message.senderId === peerSender);
+  const peerAvgChars =
+    peerTail.length > 0
+      ? Math.round(
+          peerTail.reduce((sum, message) => sum + [...normalizeText(message.text)].length, 0) /
+            peerTail.length,
+        )
+      : lastOther
+        ? [...normalizeText(lastOther.text)].length
+        : 0;
+  const rhythm = {
+    peerBurst,
+    peerBurstSameSender,
+    peerAvgChars,
+    peerLastChars: lastOther ? [...normalizeText(lastOther.text)].length : 0,
+    selfBurst,
+    selfLastChars: lastSelf ? [...normalizeText(lastSelf.text)].length : 0,
+    peerRecent,
+    selfRecent,
+  };
 
   const lastOtherKind = lastOther ? classifyMessage(lastOther) : null;
   const lastSelfKind = lastSelf ? classifyMessage(lastSelf) : null;
@@ -566,7 +640,7 @@ export function readConversation(input: {
   else if (interest.score <= 25) reasons.push('话题只是日常寒暄，没碰到你在意的事');
   if (awaitingTheirAnswer) reasons.push('对方明确在提问/求助，还没答');
   if (explicitEnd) reasons.push('对方已经明确道别/收束');
-  if (fatigue >= 0.4) reasons.push('来回节奏已经偏疲');
+  if (fatigue >= 0.4) reasons.push('这段来回有点密');
   if (topicClosure >= 0.8) reasons.push('话题已基本闭环');
   if (theirIntent >= 0.9) reasons.push('对方明显还想继续');
   if (ownIntent >= 0.6) reasons.push('你自己还有想说的');
@@ -599,6 +673,7 @@ export function readConversation(input: {
       sinceLastOtherMinutes:
         sinceLastOtherMs === null ? null : Math.max(0, Math.round(sinceLastOtherMs / 60_000)),
     },
+    rhythm,
     reasons,
     advice,
   };

@@ -362,6 +362,10 @@ export class MindService {
     return this.stickers.list(channelId);
   }
 
+  deleteSticker(channelId: string, id: string): Promise<void> {
+    return this.stickers.remove(id, channelId);
+  }
+
   phoneDevices(): Promise<PhoneDeviceList> {
     return this.phones.devices();
   }

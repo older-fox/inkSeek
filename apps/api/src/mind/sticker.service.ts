@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import type { StickerRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
@@ -226,6 +226,27 @@ export class StickerService implements OnModuleInit {
       where: { id, channelId },
       data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
     });
+  }
+
+  /**
+   * The same image can sit in several channel libraries under one file, so the
+   * blob is only removed after the last row pointing at it is gone.
+   */
+  async remove(id: string, channelId: string): Promise<void> {
+    const row = await this.prisma.stickerAsset.findFirst({ where: { id, channelId } });
+    if (!row) {
+      throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
+    }
+    await this.prisma.stickerAsset.delete({ where: { id: row.id } });
+    const shared = await this.prisma.stickerAsset.count({ where: { filePath: row.filePath } });
+    if (shared > 0) {
+      return;
+    }
+    const absolute = resolve(STICKER_ROOT, row.filePath);
+    if (!absolute.startsWith(resolve(STICKER_ROOT))) {
+      return;
+    }
+    await unlink(absolute).catch(() => undefined);
   }
 
   private async describeImage(buffer: Buffer, mimeType: string, focus?: string): Promise<string> {

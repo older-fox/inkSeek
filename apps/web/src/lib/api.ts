@@ -339,6 +339,11 @@ export const api = {
   mindHeartbeat: (personaId: string) =>
     request<boolean>(`/mind/heartbeat/${encodeURIComponent(personaId)}`, { method: 'POST' }),
   mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
+  mindDeleteSticker: (channelId: string, id: string) =>
+    request<void>(
+      `/mind/stickers/${encodeURIComponent(channelId)}/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
 };
 
 function memoryQueryParams(query: PersonaMemoryQueryInput): URLSearchParams {

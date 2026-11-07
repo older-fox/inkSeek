@@ -589,6 +589,7 @@ export function MindJournalTab({ personaId }: { personaId: string }) {
 }
 
 export function MindStickersTab({ channelId }: { channelId: string }) {
+  const queryClient = useQueryClient();
   const stickersQuery = useQuery({
     queryKey: ['mind', 'stickers', channelId],
     queryFn: () => api.mindStickers(channelId),
@@ -596,6 +597,14 @@ export function MindStickersTab({ channelId }: { channelId: string }) {
     staleTime: 30_000,
   });
   const stickers: StickerRecord[] = stickersQuery.data ?? [];
+  const remove = useMutation({
+    mutationFn: (id: string) => api.mindDeleteSticker(channelId, id),
+    onSuccess: async () => {
+      toast.success('已从表情库删除');
+      await queryClient.invalidateQueries({ queryKey: ['mind', 'stickers', channelId] });
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : '删除失败'),
+  });
 
   if (stickersQuery.isPending) {
     return (
@@ -608,7 +617,7 @@ export function MindStickersTab({ channelId }: { channelId: string }) {
   return (
     <MindSection title={`Sticker Library · ${stickers.length}`} count="TA 自己收藏">
       <p className="mt-1 text-[0.7rem] text-mist-500">
-        只显示 TA 自己收藏进表情库的图片，按描述和标签做向量检索。
+        只显示 TA 自己收藏进表情库的图片，按描述和标签做向量检索。不合适的点卡片右上角删除。
       </p>
       {stickers.length === 0 ? (
         <EmptyState compact text="表情库为空。等 TA 在聊天里收藏表情后会出现在这里。" />
@@ -621,7 +630,7 @@ export function MindStickersTab({ channelId }: { channelId: string }) {
             renderItem={(sticker) => (
               <div
                 key={sticker.id}
-                className="overflow-hidden rounded-xl border border-mist-100/[0.08] bg-ink-950/30"
+                className="group relative overflow-hidden rounded-xl border border-mist-100/[0.08] bg-ink-950/30"
               >
                 <img
                   src={stickerUrl(sticker.filePath)}
@@ -629,6 +638,16 @@ export function MindStickersTab({ channelId }: { channelId: string }) {
                   className="aspect-square w-full object-contain"
                   loading="lazy"
                 />
+                <button
+                  type="button"
+                  onClick={() => remove.mutate(sticker.id)}
+                  disabled={remove.isPending && remove.variables === sticker.id}
+                  className="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-mist-100/[0.12] bg-ink-950/75 p-1 text-mist-400 opacity-70 backdrop-blur-sm transition hover:border-signal-400/30 hover:bg-signal-400/15 hover:text-signal-400 focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100"
+                  aria-label={`从表情库删除：${sticker.description || sticker.tags.join(' ')}`}
+                  title="从表情库删除"
+                >
+                  <Trash2 className="size-3" />
+                </button>
                 <p className="truncate px-1.5 py-1 font-mono text-[0.62rem] text-mist-600">
                   {sticker.description || sticker.tags.join(' / ') || '未标注'}
                 </p>

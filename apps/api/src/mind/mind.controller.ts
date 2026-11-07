@@ -315,4 +315,11 @@ export class MindController {
   stickers(@Param('channelId') channelId: string) {
     return this.mind.listStickers(channelId);
   }
+
+  @Delete('stickers/:channelId/:id')
+  @HttpCode(204)
+  @ApiOperation({ summary: '从表情库删除一张表情' })
+  deleteSticker(@Param('channelId') channelId: string, @Param('id') id: string) {
+    return this.mind.deleteSticker(channelId, id);
+  }
 }
