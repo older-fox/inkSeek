@@ -14,7 +14,7 @@
 # 加速 build args（CI 中同名变量可覆盖）：
 #   NODE_IMAGE            基础镜像，默认 Docker Hub 加速域名
 #   NPM_REGISTRY          npm 源，默认 npmmirror
-#   APT_MIRROR            Debian apt 源，默认清华 http 镜像（Nginx / ffmpeg / adb 安装用）
+#   APT_MIRROR            Debian apt 源，默认阿里云 http 镜像（Nginx / ffmpeg / adb 安装用）
 #   PRISMA_ENGINES_MIRROR Prisma 引擎下载镜像，默认 npmmirror
 #   PNPM_VERSION / PRISMA_VERSION 版本锁定，避免 CI 与本地漂移
 
@@ -84,7 +84,7 @@ RUN --mount=type=cache,target=/pnpm-store \
 
 # ---------- 运行镜像：Nginx + Node API ----------
 FROM ${NODE_IMAGE} AS runtime
-ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn
+ARG APT_MIRROR=http://mirrors.aliyun.com
 # 与本地 `apps/api` 一致：ConfigModule 会从 ../../.env 读取，挂载 /app/.env 也能生效。
 WORKDIR /app/apps/api
 # HOME 指到数据卷：adb 的配对密钥落在 $HOME/.android，容器重建后不用重新配对。
@@ -92,20 +92,37 @@ ENV NODE_ENV=production \
     HOME=/app/data
 
 # Nginx 托管前端，/api 反代 API；ffmpeg 供视频抽帧/照片缩放，adb 供手机焦点使用。
-# Debian bookworm 的 deb822 源逐个替换，避免默认源在受限网络里拖慢或失败。
+# 镜像源不可强依赖单一站点：清华等镜像会对部分机房 IP 返回 403，所以按
+# APT_MIRROR → 阿里云 → 中科大 → 华为云 → Debian 官方 的顺序逐个尝试，第一个
+# apt-get update 成功的源用于后续安装。每次尝试前恢复原始 sources，避免多次 sed 叠加。
 RUN set -eux; \
-    if [ -n "$APT_MIRROR" ]; then \
+    cp /etc/apt/sources.list /tmp/sources.list.orig 2>/dev/null || true; \
+    cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig 2>/dev/null || true; \
+    ok=0; \
+    for base in "${APT_MIRROR:-}" \
+                http://mirrors.aliyun.com \
+                http://mirrors.cloud.tencent.com \
+                http://mirrors.ustc.edu.cn \
+                http://mirrors.163.com \
+                http://repo.huaweicloud.com \
+                http://deb.debian.org; do \
+      [ -n "$base" ] || continue; \
+      echo ">>> trying apt mirror: $base"; \
+      if [ -f /tmp/sources.list.orig ]; then cp /tmp/sources.list.orig /etc/apt/sources.list; fi; \
+      if [ -f /tmp/debian.sources.orig ]; then cp /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources; fi; \
       for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
         [ -f "$f" ] || continue; \
-        sed -i "s|http://security.debian.org/debian-security|${APT_MIRROR}/debian-security|g; \
-                s|https://security.debian.org/debian-security|${APT_MIRROR}/debian-security|g; \
-                s|http://deb.debian.org/debian-security|${APT_MIRROR}/debian-security|g; \
-                s|https://deb.debian.org/debian-security|${APT_MIRROR}/debian-security|g; \
-                s|http://deb.debian.org/debian|${APT_MIRROR}/debian|g; \
-                s|https://deb.debian.org/debian|${APT_MIRROR}/debian|g" "$f"; \
+        sed -i "s|http://security.debian.org/debian-security|${base}/debian-security|g; \
+                s|https://security.debian.org/debian-security|${base}/debian-security|g; \
+                s|http://deb.debian.org/debian-security|${base}/debian-security|g; \
+                s|https://deb.debian.org/debian-security|${base}/debian-security|g; \
+                s|http://deb.debian.org/debian|${base}/debian|g; \
+                s|https://deb.debian.org/debian|${base}/debian|g" "$f"; \
       done; \
-    fi; \
-    apt-get update; \
+      rm -rf /var/lib/apt/lists/*; \
+      if apt-get update; then ok=1; break; fi; \
+    done; \
+    [ "$ok" = 1 ] || { echo "all apt mirrors failed" >&2; exit 1; }; \
     apt-get install -y --no-install-recommends ca-certificates nginx ffmpeg adb; \
     rm -rf /var/lib/apt/lists/*; \
     rm -f /etc/nginx/sites-enabled/default

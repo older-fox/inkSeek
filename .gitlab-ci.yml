@@ -19,7 +19,7 @@ stages:
 variables:
   NODE_IMAGE: docker.1ms.run/library/node:24-bookworm-slim
   NPM_REGISTRY: https://registry.npmmirror.com
-  APT_MIRROR: http://mirrors.tuna.tsinghua.edu.cn
+  APT_MIRROR: http://mirrors.aliyun.com
   PRISMA_ENGINES_MIRROR: https://registry.npmmirror.com/-/binary/prisma
   PNPM_VERSION: "12.11.2"
   PRISMA_VERSION: "7.10.1"
