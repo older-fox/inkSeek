@@ -18,6 +18,7 @@ import {
   mindChangeQuerySchema,
   mindHeartbeatQuerySchema,
   mindJournalQuerySchema,
+  mindLearningQuerySchema,
   mindLongEventQuerySchema,
   mindPhoneFocusStartSchema,
   mindPromptLogQuerySchema,
@@ -29,12 +30,14 @@ import {
   personaMemoryUpdateSchema,
   personaRelationshipUpdateSchema,
   personaStateUpdateSchema,
+  personaStyleNoteUpdateSchema,
   type AgentIntentionCreateInput,
   type AgentTodoCreateInput,
   type AgentTodoUpdateInput,
   type MindChangeQueryInput,
   type MindHeartbeatQueryInput,
   type MindJournalQueryInput,
+  type MindLearningQueryInput,
   type MindLongEventQueryInput,
   type MindPhoneFocusStartInput,
   type MindPromptLogQueryInput,
@@ -46,6 +49,7 @@ import {
   type PersonaMemoryUpdateInput,
   type PersonaRelationshipUpdateInput,
   type PersonaStateUpdateInput,
+  type PersonaStyleNoteUpdateInput,
 } from '@inkseek/shared';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
@@ -308,6 +312,38 @@ export class MindController {
     @Query(new ZodValidationPipe(mindHeartbeatQuerySchema)) query: MindHeartbeatQueryInput,
   ) {
     return this.mind.listHeartbeats(personaId, query);
+  }
+
+  @Get('learning/:personaId')
+  @ApiOperation({ summary: '读取人格自主学习概览' })
+  learning(
+    @Param('personaId') personaId: string,
+    @Query(new ZodValidationPipe(mindLearningQuerySchema)) query: MindLearningQueryInput,
+  ) {
+    return this.mind.learningOverview(personaId, query.channelId, query.limit ?? 12);
+  }
+
+  @Post('learning/:personaId/start')
+  @ApiOperation({ summary: '让 TA 立刻开始一次自主学习' })
+  startLearning(@Param('personaId') personaId: string) {
+    return this.mind.startLearning(personaId);
+  }
+
+  @Patch('style-notes/:id')
+  @ApiOperation({ summary: '修改一条学到的说话方式' })
+  updateStyleNote(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(personaStyleNoteUpdateSchema))
+    input: PersonaStyleNoteUpdateInput,
+  ) {
+    return this.mind.updateStyleNote(id, input);
+  }
+
+  @Delete('style-notes/:id')
+  @HttpCode(204)
+  @ApiOperation({ summary: '删除一条学到的说话方式' })
+  async deleteStyleNote(@Param('id') id: string): Promise<void> {
+    await this.mind.deleteStyleNote(id);
   }
 
   @Get('stickers/:channelId')

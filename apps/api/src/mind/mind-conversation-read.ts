@@ -79,6 +79,8 @@ export interface RepetitionRead {
   repeated: { text: string; count: number }[];
   /** Assistant/service phrasings that leaked into recent replies. */
   assistant: { text: string; count: number }[];
+  /** Playful accounting frames that turn affection or favors into a ledger. */
+  ledger: { text: string; count: number }[];
 }
 
 export interface BoundaryEscalation {
@@ -218,11 +220,24 @@ const SERVICE_TONE_PATTERNS: readonly { label: string; re: RegExp }[] = [
   { label: '总结腔', re: /总的来说|总结一下|根据你的描述|理解你的|感谢你的/gu },
 ];
 
+/**
+ * A money-pressure persona easily turns a kiss or a favor into a joke about
+ * the tab. The frame is fine once; repeated across days it becomes a tic.
+ */
+const LEDGER_PATTERNS: readonly { label: string; re: RegExp }[] = [
+  { label: '记账/记在账上', re: /记账|记在账|账上/gu },
+  { label: '押金', re: /押金/gu },
+  { label: '欠账/还账', re: /欠(?![得揍妥])|还账|赊账|抵账/gu },
+];
+
 export function readRepetition(scene: MindScene): RepetitionRead | null {
   const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-20);
   if (selfMessages.length < 3) {
     return null;
   }
+  // The ledger frame spans days, not a single burst, so it gets a wider window
+  // than the template checks above.
+  const ledgerMessages = scene.messages.filter((message) => message.isSelf).slice(-40);
   const ignored = new Set<string>();
   for (const name of [scene.persona.name, ...scene.cast.map((member) => member.nickname)]) {
     for (const bigram of chineseBigrams(name)) {
@@ -319,12 +334,30 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4)
     .map(([text, count]) => ({ text, count }));
+  const ledgerCounts = new Map<string, number>();
+  for (const message of ledgerMessages) {
+    for (const pattern of LEDGER_PATTERNS) {
+      const matches = message.text.match(pattern.re);
+      if (matches) {
+        ledgerCounts.set(pattern.label, (ledgerCounts.get(pattern.label) ?? 0) + matches.length);
+      }
+    }
+  }
+  const ledgerTotal = [...ledgerCounts.values()].reduce((sum, count) => sum + count, 0);
+  const ledger =
+    ledgerTotal >= 2
+      ? [...ledgerCounts.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 3)
+          .map(([text, count]) => ({ text, count }))
+      : [];
   return topics.length > 0 ||
     identity.length > 0 ||
     openings.length > 0 ||
     repeated.length > 0 ||
-    assistant.length > 0
-    ? { topics, identity, openings, repeated, assistant }
+    assistant.length > 0 ||
+    ledger.length > 0
+    ? { topics, identity, openings, repeated, assistant, ledger }
     : null;
 }
 

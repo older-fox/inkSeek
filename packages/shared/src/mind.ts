@@ -107,6 +107,18 @@ export interface MindSettingsRecord {
   curiosityDailyLimit: number;
   /** Minimum hours between self-reflection passes; 0 disables reflection. */
   reflectionIntervalHours: number;
+  /** Autonomous learning from the web/videos in idle heartbeats. */
+  learningEnabled: boolean;
+  /** Minimum hours between learning sessions; 0 disables scheduled learning. */
+  learningIntervalHours: number;
+  /** Cap on sources read per persona-local day; 0 means unlimited. */
+  learningDailySourceLimit: number;
+  /** Headless browser tools available to the planner. */
+  browserEnabled: boolean;
+  /** Learning may write expression notes. */
+  styleLearningEnabled: boolean;
+  /** Reflection may fold stable expression notes into the persona card. */
+  stylePromotionEnabled: boolean;
   imageDescriptionPrompt: string;
   quietHours: unknown;
   providerId: string | null;
@@ -268,6 +280,77 @@ export interface PersonaMemoryRecord {
   score?: number;
 }
 
+export type PersonaStyleNoteScope = 'SELF' | 'RELATION';
+export type PersonaStyleNoteStatus = 'ACTIVE' | 'PAUSED' | 'PROMOTED';
+
+export interface StyleNoteSource {
+  url: string;
+  title?: string;
+  kind?: string;
+}
+
+export interface PersonaStyleNoteRecord {
+  id: string;
+  personaId: string;
+  channelId: string;
+  scope: PersonaStyleNoteScope;
+  contactId: string;
+  dimension: string;
+  content: string;
+  samples: string[];
+  sources: StyleNoteSource[];
+  confidence: number;
+  evidenceCount: number;
+  status: PersonaStyleNoteStatus;
+  appliedCount: number;
+  lastAppliedAt: string | null;
+  lastSeenAt: string;
+  promotedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MindLearningSourceRecord extends StyleNoteSource {
+  at: string;
+}
+
+export interface MindLearningItemRecord {
+  kind: string;
+  content: string;
+  sourceUrl?: string;
+  memoryId?: string;
+}
+
+export interface MindLearningLogRecord {
+  id: string;
+  personaId: string;
+  channelId: string;
+  trigger: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  reason: string;
+  sources: MindLearningSourceRecord[];
+  learned: MindLearningItemRecord[];
+  styleNotes: MindLearningItemRecord[];
+  summary: string;
+  error: string | null;
+  runId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface MindLearningOverview {
+  enabled: boolean;
+  intervalHours: number;
+  dailySourceLimit: number;
+  browserEnabled: boolean;
+  styleLearningEnabled: boolean;
+  stylePromotionEnabled: boolean;
+  lastRunAt: string | null;
+  sourcesToday: number;
+  logs: MindLearningLogRecord[];
+  notes: PersonaStyleNoteRecord[];
+}
+
 export interface AgentTodoRecord {
   id: string;
   personaId: string;
@@ -415,6 +498,7 @@ export interface MindHeartbeatLogRecord {
   unconsolidated: number;
   lifeEvent: boolean;
   curiosity: boolean;
+  learning: boolean;
   reflection: boolean;
   runId: string | null;
   detail: unknown;
@@ -610,6 +694,16 @@ export interface MemoryDraft {
   structured?: unknown;
 }
 
+export interface StyleNoteDraft {
+  dimension?: string;
+  content: string;
+  samples?: string[];
+  sources?: StyleNoteSource[];
+  confidence?: number;
+  scope?: PersonaStyleNoteScope;
+  contactId?: string;
+}
+
 export interface RelationshipSignal {
   contactId: string;
   kind: string;
@@ -707,6 +801,10 @@ export interface ActionPlan {
   stance: string;
   beats: OutgoingBeat[];
   memoryWrites: MemoryDraft[];
+  /** Ways of speaking learned from chats, videos or pages. */
+  styleNotes?: StyleNoteDraft[];
+  /** Note ids already folded into the card during reflection; they stop being injected. */
+  styleNotePromotions?: string[];
   relationshipSignals: RelationshipSignal[];
   todos: TodoDraft[];
   intentions?: IntentionDraft[];
@@ -761,6 +859,12 @@ export const mindSettingsUpdateSchema = z.object({
   curiosityChancePercent: z.number().int().min(0).max(100).optional(),
   curiosityDailyLimit: z.number().int().min(0).max(500).optional(),
   reflectionIntervalHours: z.number().int().min(0).max(168).optional(),
+  learningEnabled: z.boolean().optional(),
+  learningIntervalHours: z.number().int().min(0).max(720).optional(),
+  learningDailySourceLimit: z.number().int().min(0).max(100).optional(),
+  browserEnabled: z.boolean().optional(),
+  styleLearningEnabled: z.boolean().optional(),
+  stylePromotionEnabled: z.boolean().optional(),
   imageDescriptionPrompt: z.string().max(4000).optional(),
   quietHours: z.unknown().optional(),
   providerId: z.string().max(64).nullable().optional(),
@@ -785,6 +889,21 @@ export const mindSettingsUpdateSchema = z.object({
 export const mindPhoneFocusStartSchema = z.object({
   goal: z.string().trim().max(200).optional(),
 });
+
+export const personaStyleNoteUpdateSchema = z.object({
+  status: z.enum(['ACTIVE', 'PAUSED']).optional(),
+  confidence: z.number().int().min(0).max(100).optional(),
+  content: z.string().trim().min(1).max(600).optional(),
+});
+
+export type PersonaStyleNoteUpdateInput = z.infer<typeof personaStyleNoteUpdateSchema>;
+
+export const mindLearningQuerySchema = z.object({
+  channelId: z.string().trim().max(64).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export type MindLearningQueryInput = z.infer<typeof mindLearningQuerySchema>;
 
 export type MindPhoneFocusStartInput = z.infer<typeof mindPhoneFocusStartSchema>;
 

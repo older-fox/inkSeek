@@ -17,6 +17,7 @@ import {
   formatClock,
   type MindTabKey,
 } from '@/components/mind/mind-format';
+import { MindLearningTab } from '@/components/mind/mind-learning';
 import {
   MindGrowthTab,
   MindJournalTab,
@@ -304,6 +305,9 @@ export function MindPage() {
             {tab === 'groups' ? <MindGroupsTab personaId={persona.id} /> : null}
             {tab === 'memories' ? <MindMemoriesTab personaId={persona.id} /> : null}
             {tab === 'growth' ? <MindGrowthTab personaId={persona.id} /> : null}
+            {tab === 'learning' ? (
+              <MindLearningTab personaId={persona.id} channelId={channelId} />
+            ) : null}
             {tab === 'plans' ? (
               <MindPlansTab
                 personaId={persona.id}

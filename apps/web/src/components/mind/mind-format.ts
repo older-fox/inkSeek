@@ -21,6 +21,7 @@ export const MIND_TABS = [
   { key: 'groups', label: '群关系' },
   { key: 'memories', label: '记忆' },
   { key: 'growth', label: '成长' },
+  { key: 'learning', label: '学习' },
   { key: 'plans', label: '待办与主动' },
   { key: 'journal', label: '日记' },
   { key: 'stickers', label: '表情库' },

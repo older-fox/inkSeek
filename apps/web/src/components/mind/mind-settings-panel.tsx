@@ -48,6 +48,12 @@ export function MindSettingsPanel({
   const [curiosityChance, setCuriosityChance] = useState(15);
   const [curiosityLimit, setCuriosityLimit] = useState(0);
   const [reflectionHours, setReflectionHours] = useState(6);
+  const [learningEnabled, setLearningEnabled] = useState(true);
+  const [learningInterval, setLearningInterval] = useState(12);
+  const [learningSourceLimit, setLearningSourceLimit] = useState(6);
+  const [browserEnabled, setBrowserEnabled] = useState(true);
+  const [styleLearning, setStyleLearning] = useState(true);
+  const [stylePromotion, setStylePromotion] = useState(true);
   const [imagePrompt, setImagePrompt] = useState('');
   const [phoneDevice, setPhoneDevice] = useState('');
   const [phonePlayChance, setPhonePlayChance] = useState(0);
@@ -77,6 +83,12 @@ export function MindSettingsPanel({
     setCuriosityChance(settings.curiosityChancePercent);
     setCuriosityLimit(settings.curiosityDailyLimit);
     setReflectionHours(settings.reflectionIntervalHours);
+    setLearningEnabled(settings.learningEnabled);
+    setLearningInterval(settings.learningIntervalHours);
+    setLearningSourceLimit(settings.learningDailySourceLimit);
+    setBrowserEnabled(settings.browserEnabled);
+    setStyleLearning(settings.styleLearningEnabled);
+    setStylePromotion(settings.stylePromotionEnabled);
     setImagePrompt(settings.imageDescriptionPrompt);
     setPhoneDevice(settings.phoneDevice ?? '');
     setPhonePlayChance(settings.phonePlayChancePercent);
@@ -124,6 +136,12 @@ export function MindSettingsPanel({
     settings.curiosityChancePercent !== curiosityChance ||
     settings.curiosityDailyLimit !== curiosityLimit ||
     settings.reflectionIntervalHours !== reflectionHours ||
+    settings.learningEnabled !== learningEnabled ||
+    settings.learningIntervalHours !== learningInterval ||
+    settings.learningDailySourceLimit !== learningSourceLimit ||
+    settings.browserEnabled !== browserEnabled ||
+    settings.styleLearningEnabled !== styleLearning ||
+    settings.stylePromotionEnabled !== stylePromotion ||
     settings.imageDescriptionPrompt !== imagePrompt ||
     (settings.phoneDevice ?? '') !== phoneDevice ||
     settings.phonePlayChancePercent !== phonePlayChance ||
@@ -345,6 +363,61 @@ export function MindSettingsPanel({
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">自主学习</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          空闲时按间隔自己去读网页、看 B 站视频和评论，把学到的知识、偏好和说话方式留下来。只读：不登录、不发帖、不评论、不购买。
+        </p>
+        <div className="mt-2 space-y-2.5">
+          <ToggleRow
+            label="允许自主学习"
+            hint="关闭后不再按间隔自己上网学东西"
+            checked={learningEnabled}
+            onChange={setLearningEnabled}
+          />
+          <ToggleRow
+            label="浏览器学习"
+            hint="允许 TA 打开无头浏览器读需要滚动、点击的页面；仍只访问公开网页"
+            checked={browserEnabled}
+            onChange={setBrowserEnabled}
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <NumberField
+            label="学习间隔（小时）"
+            hint="0 只保留手动学习"
+            value={learningInterval}
+            min={0}
+            max={720}
+            onChange={setLearningInterval}
+            compact
+          />
+          <NumberField
+            label="每日来源上限"
+            hint="0 表示不限制"
+            value={learningSourceLimit}
+            min={0}
+            max={100}
+            onChange={setLearningSourceLimit}
+            compact
+          />
+        </div>
+        <div className="mt-2 space-y-2.5">
+          <ToggleRow
+            label="学习说话方式"
+            hint="把别人稳定、TA 愿意用的表达记成临时笔记，注入之后的对话"
+            checked={styleLearning}
+            onChange={setStyleLearning}
+          />
+          <ToggleRow
+            label="固化进人格卡"
+            hint="反思时若说话方式足够稳定，允许慢慢写进角色卡的语言风格"
+            checked={stylePromotion}
+            onChange={setStylePromotion}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
         <p className="text-[0.8rem] text-mist-300">手机设备</p>
         <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
           只支持无线 ADB：已连接或无线调试自动发现的设备都会列出。这里选择的是本渠道可以操作的设备；没选或设备离线时，手机工具会拒绝执行。
@@ -434,6 +507,12 @@ export function MindSettingsPanel({
             curiosityChancePercent: curiosityChance,
             curiosityDailyLimit: curiosityLimit,
             reflectionIntervalHours: reflectionHours,
+            learningEnabled,
+            learningIntervalHours: learningInterval,
+            learningDailySourceLimit: learningSourceLimit,
+            browserEnabled,
+            styleLearningEnabled: styleLearning,
+            stylePromotionEnabled: stylePromotion,
             imageDescriptionPrompt: imagePrompt.trim(),
             phoneDevice: phoneDevice || null,
             phonePlayChancePercent: phonePlayChance,

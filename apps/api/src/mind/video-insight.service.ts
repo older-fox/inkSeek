@@ -61,6 +61,32 @@ interface BiliReply {
   like?: number;
 }
 
+interface BiliReplyFull extends BiliReply {
+  member?: { uname?: string };
+  ctime?: number;
+  rcount?: number;
+  reply_control?: { is_up?: boolean };
+}
+
+export interface VideoComment {
+  author: string;
+  content: string;
+  likes: number;
+  replies: number;
+  isUp: boolean;
+  at: string | null;
+}
+
+export interface VideoCommentsResult {
+  videoId: string;
+  title: string;
+  url: string;
+  page: number;
+  sort: 'hot' | 'time';
+  total: number;
+  comments: VideoComment[];
+}
+
 interface BiliShot {
   image?: string[];
   index?: number[];
@@ -120,6 +146,45 @@ export class VideoInsightService {
     const task = this.watchResolved(target, options).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, task);
     return task;
+  }
+
+  /**
+   * Paginated comments from the public reply endpoint. Hot order is the
+   * default; time order is useful when a video's comments are the point.
+   */
+  async comments(
+    input: string,
+    options: { page?: number; sort?: 'hot' | 'time'; limit?: number } = {},
+  ): Promise<VideoCommentsResult> {
+    const target = await this.resolveTarget(input);
+    const view = await this.fetchView(target);
+    const page = Math.max(1, Math.min(50, Math.round(options.page ?? 1)));
+    const sort = options.sort === 'time' ? 'time' : 'hot';
+    const data = await this.api<{
+      page?: { count?: number };
+      replies?: BiliReplyFull[];
+    }>(`/x/v2/reply?type=1&oid=${view.aid}&sort=${sort === 'time' ? 0 : 2}&ps=20&pn=${page}`);
+    const limit = Math.max(1, Math.min(20, Math.round(options.limit ?? 20)));
+    const comments = (data.replies ?? [])
+      .map((reply) => ({
+        author: reply.member?.uname?.trim() ?? '',
+        content: (reply.content?.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
+        likes: reply.like ?? 0,
+        replies: reply.rcount ?? 0,
+        isUp: Boolean(reply.reply_control?.is_up),
+        at: reply.ctime ? new Date(reply.ctime * 1000).toISOString() : null,
+      }))
+      .filter((comment) => comment.content)
+      .slice(0, limit);
+    return {
+      videoId: cacheVideoId(view.bvid, target.page),
+      title: view.title,
+      url: target.url,
+      page,
+      sort,
+      total: data.page?.count ?? 0,
+      comments,
+    };
   }
 
   private async watchResolved(

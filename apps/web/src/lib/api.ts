@@ -23,7 +23,9 @@ import type {
   LoginInput,
   MindFocusOverview,
   MindHeartbeatLogRecord,
+  MindLearningOverview,
   MindSettingsRecord,
+  MindTurnResult,
   MindSettingsUpdateInput,
   ModelProviderInput,
   PersonaChangeRecord,
@@ -38,6 +40,8 @@ import type {
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
+  PersonaStyleNoteRecord,
+  PersonaStyleNoteUpdateInput,
   PhoneConnectInput,
   PhoneDeviceList,
   PhoneDisconnectInput,
@@ -338,6 +342,24 @@ export const api = {
     }),
   mindHeartbeat: (personaId: string) =>
     request<boolean>(`/mind/heartbeat/${encodeURIComponent(personaId)}`, { method: 'POST' }),
+  mindLearning: (personaId: string, channelId?: string, limit = 12) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (channelId) params.set('channelId', channelId);
+    return request<MindLearningOverview>(
+      `/mind/learning/${encodeURIComponent(personaId)}?${params.toString()}`,
+    );
+  },
+  startMindLearning: (personaId: string) =>
+    request<MindTurnResult | null>(`/mind/learning/${encodeURIComponent(personaId)}/start`, {
+      method: 'POST',
+    }),
+  updateMindStyleNote: (id: string, input: PersonaStyleNoteUpdateInput) =>
+    request<PersonaStyleNoteRecord>(`/mind/style-notes/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteMindStyleNote: (id: string) =>
+    request<void>(`/mind/style-notes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
   mindDeleteSticker: (channelId: string, id: string) =>
     request<void>(

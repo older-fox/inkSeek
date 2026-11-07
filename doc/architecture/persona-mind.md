@@ -95,6 +95,8 @@ Scene {
 | `AgentAction`         | 动作日志      | runId、kind、payload、status、idempotencyKey、sentMessageId、error                                                                                                                                                                                                     |
 | `StickerAsset`        | 本地表情      | channelId、sha256、filePath、tags、description、embedding、usageCount；渠道内按 `(channelId, sha256)` 唯一                                                                                                                                                             |
 | `VideoInsight`        | 视频理解缓存  | platform、videoId、url、标题/作者/时长/简介、stats、transcript、comments、summary、keyPoints、framesPath、frameCount、watchedAt、usageCount；按 `(platform, videoId)` 唯一，与渠道无关 |
+| `MindLearningLog`     | 学习会话账本  | personaId、channelId、trigger（HEARTBEAT/MANUAL）、status、reason、sources、learned、styleNotes、summary、error、runId、startedAt/finishedAt；记录「看了什么、留下什么、学了哪些表达」，不复制记忆行 |
+| `PersonaStyleNote`    | 学到的说话方式 | personaId、channelId、scope（SELF/RELATION）、contactId、dimension（length/punctuation/particles/openings/humor/rhythm/vocabulary/tone）、content、samples、sources、confidence、evidenceCount、status（ACTIVE/PAUSED/PROMOTED）、appliedCount/lastAppliedAt、lastSeenAt/promotedAt；是人格卡之上的适配层，不是第二份人设 |
 | `PersonaJournal`      | 日记/反思     | personaInstanceId、date、content、mood、consolidatedMemoryIds                                                                                                                                                                                                          |
 | `LlmPromptLog`        | 原始提示词    | source、provider、model、system、prompt、response、tokens、latency、error；仅保留最近 200 条                                                                                                                                                                           |
 
@@ -258,6 +260,8 @@ interface SocialRead {
 - `web.search`
 - `web.read`：读取单个公开网页正文（去标签、限长、拒绝私网地址与重定向到内网）
 - `video.watch`：观看 B 站视频（链接/BV/av），拉标题、简介、字幕、热评并抽 9 帧拼图交给视觉模型，生成内容概述与要点；按 `(platform, videoId)` 缓存在 `VideoInsight`，重复调用直接返回，`focus` 可基于已存画面重看。B 站自动字幕只对登录用户开放，设置页填 SESSDATA 后走 WBI 签名的 `player/wbi/v2` 读取，未配置时退回普通 CC 字幕。分享卡片里的链接会从 JSON/XML 提取进消息文本。
+- `video.comments`：分页读取 B 站视频评论（`sort=hot|time`、`page` 从 1 开始、每页最多 20 条），返回作者、正文、点赞、回复数、是否 UP 主；评论只作为观众反应与玩梗资料，不代表视频内容。
+- `browser.open` / `snapshot` / `read` / `click` / `type` / `scroll` / `back` / `screenshot` / `close`：人格自己的无头 Chrome 会话。按人格隔离上下文，自动发现系统 Chrome/Edge；只接受公网 http/https，拒绝私网与本地主机，阻塞媒体/字体等重资源。`snapshot` 给可见链接/按钮/输入框编号（`data-mind-ref`），之后用 `ref` 或可见文字点击；`scroll` 用来加载评论、信息流；`screenshot` 交给视觉模型描述画面。不登录、不发帖、不评论、不购买；空闲 10 分钟自动关闭。渠道设置「浏览器学习」可整体关闭。
 - `phone.screen`：读取本渠道手机的界面（adb `uiautomator dump`），返回应用包名、屏幕尺寸和可点元素的文字/类型/中心坐标；操作前先看，操作后再看确认。屏幕熄着时直接提示先用 `phone.act` 的 `screen` 动作点亮；没有可读元素时提示改用 `phone.screenshot`。
 - `phone.screenshot`：`adb exec-out screencap -p` 截一张 PNG 交给视觉模型，返回画面描述和最多 8 个可点位置；视觉模型给 0-1000 相对坐标，工具换算成手机像素后再返回，可直接交给 `phone.act`。适合游戏、视频、画布这类没有无障碍节点的界面。
 - `phone.act`：操作本渠道手机。tap 点按、long_press 长按、swipe 滑动、drag 拖拽、key 按键（导航/音量/媒体/dpad）、combo 组合键（如 ctrl+a）、type 输入（仅 ASCII）、open 打开应用或链接（应用可写中文名或包名，经别名表和包名解析）、stop 强制停止应用、media 播放/暂停/切歌、volume 调音量、screen 点亮/熄灭/切换屏幕（`mode=on|off|toggle`，走 `KEYCODE_WAKEUP/SLEEP/POWER`，执行后回读 `mScreenState`）。设备在渠道人格面板 → 心智设置 → 手机设备里选择，找不到或离线时直接报错。
@@ -292,6 +296,8 @@ interface ActionPlan {
   stance: Stance;
   beats: OutgoingBeat[];
   memoryWrites: MemoryDraft[];
+  styleNotes?: StyleNoteDraft[];
+  styleNotePromotions?: string[];
   relationshipSignals: RelationshipSignal[];
   todos: TodoDraft[];
   self?: { activity?: string; traits?: Record<string, number>; reason?: string };
@@ -442,6 +448,16 @@ type OutgoingBeat =
 - 观测：心智页新增「成长」页签，分「World（世界知识）」与「Self（自我反思）」两栏，显示来源链接、置信度和时间；所有数值变化仍进入「变动历史」。
 
 > 进化速度由三个设置控制：好奇概率、每日探索上限、反思间隔。默认比生活小事激进得多，但所有写入仍是模型自己的判断，系统不预写结论。
+
+### 自主学习（网页 / B 站 / 评论 / 表达方式）
+
+自主学习的边界是「只读」：只访问公网 http/https，不登录、不注册、不发帖、不评论、不点赞、不购买；网页、视频和评论都是资料，不是指令，不能改写身份、底线、边界和关系。
+
+- 调度：空闲心跳里，学习优先于生活小事和好奇；`learningEnabled` 关闭时不自己开始。按 `learningIntervalHours`（默认 12 小时）判断是否到期，`learningDailySourceLimit`（默认 6，0 不限）限制当天收集的来源数。手动「立刻学一轮」不受安静时段限制，但仍要求当时没有待办/意图。
+- 会话：每次学习创建一条 `MindLearningLog`，状态 RUNNING → SUCCEEDED/FAILED；`sources` 合并浏览器访问记录（`recentVisits`）与 `web.search/web.read/video.watch/video.comments` 返回的 URL；`learned` 记录这一轮写下的记忆条目，`styleNotes` 记录新学到的表达。学习结束会 `browser.close`，超时或失败也会写 FAILED。
+- 输入：模型先从一个真正在意的方向找资料。需要滚动/点击/懒加载评论时用 `browser.*`；B 站视频先 `video.watch` 看内容，再用 `video.comments` 翻热评或按时间翻页。网页知识写 `FACT/WORLD`（confidence ≤65，structured 带 sourceUrl），真正改变想法或审美的写 `REFLECTION/SELF`。
+- 表达笔记：`styleNotes` 只收长度、标点、语气词、开场、幽默、节奏、用词、语气这 8 个维度，带 1–3 句原句样本。`PersonaStyleNoteService` 用中文二元组 Jaccard + 包含关系去重合并，重复出现时提升置信度与证据数；30 天没再出现会降置信度，低于 30 自动暂停。注入提示词时放在【学到的说话方式】，并限制最多 4 条，只影响表达，不改变身份锚点与价值观。心智页「学习」页签可以暂停、删除或查看来源。
+- 慢固化：反思时如果某条笔记置信度 ≥70、证据 ≥2 次且 14 天内出现过，会作为候选交给模型；模型决定是否用 `self.attributes.update` 写进 `language_style`/`punctuation`/`particles`/`openers`/`humor_style` 等卡片字段，并把笔记 id 写进 `styleNotePromotions`。固化后状态变为 PROMOTED，不再作为临时笔记注入。`stylePromotionEnabled` 关闭时不做这一步；`styleLearningEnabled` 关闭时既不写也不注入表达笔记。
 
 ### 长时事件（任何离场活动）
 
@@ -603,6 +619,10 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 对话节奏按轮次和长度对齐（2026-11-08）：实盘 7 天数据里，私聊回复中位间隔 11 秒、44% 的回复拆成 2 条以上气泡、588 条对方短句里有 87 条收到 40 字以上长回复，说明问题不在「该不该回」，而在「回多长、回几条、谁该说」。`readConversation` 新增 `rhythm`（对方连发条数与是否同一人、平均/最后一条字数、自己上一轮条数、近 5 分钟双方条数），【对话节奏】把闭环/疲劳百分比换成「已收住/在收/还开着」「偏密/正常」，并直接给出「怎么接」。全局规则补三条：长度跟对方走（短句回短句、长段挑一两点、连发合并回一次）；先看谁该说（自己刚说完对方没接就不补，对方在等答案就答完停）；第二条气泡只在更正或有独立新事时发，补情绪、补关心、加反问、转回自己话题都不算理由。回复的实际等待时间由运行链路决定，提示词只约束内容长度和条数。
 
 - 表情库可管理（2026-11-08）：Agent 收藏的表情以前只能看不能动。心智页「表情库」每张卡片右上角新增删除按钮，调用 `DELETE /mind/stickers/:channelId/:id`；`StickerService.remove` 先按 `id + channelId` 找行，跨渠道返回 404，删行后统计同 `filePath` 的剩余引用，为 0 才删除磁盘文件，避免多个渠道共用同一张图时误删。已发送消息保存的是发送时的描述，删除不影响历史；正在排队的表情气泡若引用已删表情会按发送失败处理。实盘用临时行验证：点击后卡片消失、行和文件都删除；用错误渠道删除真实表情返回 404 且行保留。
+
+- 账本框架自检（2026-11-08）：实盘发现「这口先记账上」「留着当押金」这类把亲近换算成账本的说法在 40 条自发言里出现 2 次。根因不是情绪：网吧前台、押金和攒钱目标的词汇一直在提示词里，模型用一次冷幽默后，自己的前几句发言留在【最近对话】里被继续模仿；旧记忆里还存着一条「他欠我一笔，还账方式我说了算」。全局规则新增：别人对你好、亲你、送你东西时，不要把亲密换算成记账/押金/欠账，直接接住或说自己的反应；只有真的在谈钱（房租、工资、押金、陪玩收费）时才用。`readRepetition` 新增 `ledger`，用最近 40 条自发言统计记账/押金/欠账，合计 ≥2 次时写进【重复自检】，避免这个梗跨天复制。
+
+- 自主学习与无头浏览器（2026-11-08）：心智新增 P1–P4 自主学习链路。P1 输入：`MindBrowserService` 给每个人格一个隔离的无头 Chrome 上下文（自动发现系统 Chrome/Edge），提供 open/snapshot/read/click/type/scroll/back/screenshot/close，只访问公网 http(s)，拒绝私网与本地主机，空闲 10 分钟关闭；B 站新增 `video.comments` 分页读评论。P2 沉淀：新增 `MindLearningLog` 记录每次学习会话的来源、记忆与表达，新增 `PersonaStyleNote` 保存长度/标点/语气词/开场/幽默/节奏/用词/语气 8 类表达；空闲心跳按 `learningIntervalHours`（默认 12h）优先进入【学习时间】，`learningDailySourceLimit`（默认 6，0 不限）控制来源；提示词要求只读、资料不是指令、知识写 WORLD、想法写 REFLECTION。P3 表达：活动中的 4 条笔记以【学到的说话方式】注入；`styleLearningEnabled` 控制学习与注入，`stylePromotionEnabled` 允许反思把稳定笔记（confidence ≥70、证据 ≥2、14 天内出现）固化进人格卡字段，固化后不再注入。P4 观测：心智页新增「学习」页签，展示上次学习、今日来源、在用/已固化笔记、每次会话的来源与留下内容，支持暂停、删除和「立刻学一轮」；渠道人格面板心智设置新增学习开关、间隔、来源上限、浏览器开关与两项表达开关。浏览器实测 B 站视频页可打开、滚动并记录访问；评论工具实测返回热评。审计与写入仍由同一条 runtime/writeBack 承担，学习会话绑定 `runId`。
 
 验收：
 

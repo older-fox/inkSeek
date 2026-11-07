@@ -15,6 +15,7 @@ export interface MindHeartbeatLogInput {
   unconsolidated?: number;
   lifeEvent?: boolean;
   curiosity?: boolean;
+  learning?: boolean;
   reflection?: boolean;
   runId?: string | null;
   detail?: unknown;
@@ -44,6 +45,7 @@ export class MindHeartbeatLogService {
           unconsolidated: input.unconsolidated ?? 0,
           lifeEvent: input.lifeEvent ?? false,
           curiosity: input.curiosity ?? false,
+          learning: input.learning ?? false,
           reflection: input.reflection ?? false,
           runId: input.runId ?? null,
           detail: (input.detail ?? undefined) as object | undefined,
@@ -92,6 +94,7 @@ function toRecord(row: MindHeartbeatLog): MindHeartbeatLogRecord {
     unconsolidated: row.unconsolidated,
     lifeEvent: row.lifeEvent,
     curiosity: row.curiosity,
+    learning: row.learning,
     reflection: row.reflection,
     runId: row.runId,
     detail: row.detail,

@@ -117,6 +117,7 @@ export function HeartbeatLogView({
                     {log.unconsolidated > 0 ? <span>待整理 {log.unconsolidated}</span> : null}
                     {log.lifeEvent ? <span className="text-brass-300">生活小事</span> : null}
                     {log.curiosity ? <span className="text-brass-300">好奇</span> : null}
+                    {log.learning ? <span className="text-brass-300">学习</span> : null}
                     {log.reflection ? <span className="text-brass-300">反思</span> : null}
                     {log.quiet ? <span>安静时段</span> : null}
                     {log.runId ? <span className="text-jade-300">有运行轨迹</span> : null}
@@ -216,6 +217,7 @@ function HeartbeatDetail({
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Chip>{log.lifeEvent ? '触发生活小事' : '没有生活小事'}</Chip>
           <Chip>{log.curiosity ? '触发好奇探索' : '没有好奇探索'}</Chip>
+          <Chip>{log.learning ? '触发自主学习' : '没有自主学习'}</Chip>
           <Chip>{log.reflection ? '触发自我反思' : '没有自我反思'}</Chip>
         </div>
       </DetailBlock>

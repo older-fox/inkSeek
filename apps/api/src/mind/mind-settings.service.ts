@@ -32,6 +32,12 @@ const SETTINGS_DEFAULTS = {
   phoneDevice: null,
   phonePlayChancePercent: 0,
   phonePlayDailyLimit: 0,
+  learningEnabled: true,
+  learningIntervalHours: 12,
+  learningDailySourceLimit: 6,
+  browserEnabled: true,
+  styleLearningEnabled: true,
+  stylePromotionEnabled: true,
   quietHours: null,
 } as const;
 
@@ -125,6 +131,20 @@ export class MindSettingsService {
     if (input.phonePlayDailyLimit !== undefined) {
       data.phonePlayDailyLimit = input.phonePlayDailyLimit;
     }
+    if (input.learningEnabled !== undefined) data.learningEnabled = input.learningEnabled;
+    if (input.learningIntervalHours !== undefined) {
+      data.learningIntervalHours = input.learningIntervalHours;
+    }
+    if (input.learningDailySourceLimit !== undefined) {
+      data.learningDailySourceLimit = input.learningDailySourceLimit;
+    }
+    if (input.browserEnabled !== undefined) data.browserEnabled = input.browserEnabled;
+    if (input.styleLearningEnabled !== undefined) {
+      data.styleLearningEnabled = input.styleLearningEnabled;
+    }
+    if (input.stylePromotionEnabled !== undefined) {
+      data.stylePromotionEnabled = input.stylePromotionEnabled;
+    }
     if (input.quietHours !== undefined) {
       data.quietHours =
         input.quietHours === null ? Prisma.JsonNull : (input.quietHours as Prisma.InputJsonValue);
@@ -161,6 +181,12 @@ export class MindSettingsService {
         phoneDevice: input.phoneDevice?.trim() || null,
         phonePlayChancePercent: input.phonePlayChancePercent ?? 0,
         phonePlayDailyLimit: input.phonePlayDailyLimit ?? 0,
+        learningEnabled: input.learningEnabled ?? true,
+        learningIntervalHours: input.learningIntervalHours ?? 12,
+        learningDailySourceLimit: input.learningDailySourceLimit ?? 6,
+        browserEnabled: input.browserEnabled ?? true,
+        styleLearningEnabled: input.styleLearningEnabled ?? true,
+        stylePromotionEnabled: input.stylePromotionEnabled ?? true,
         quietHours:
           input.quietHours === undefined
             ? undefined
@@ -215,6 +241,12 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     phoneDevice: row.phoneDevice,
     phonePlayChancePercent: row.phonePlayChancePercent,
     phonePlayDailyLimit: row.phonePlayDailyLimit,
+    learningEnabled: row.learningEnabled,
+    learningIntervalHours: row.learningIntervalHours,
+    learningDailySourceLimit: row.learningDailySourceLimit,
+    browserEnabled: row.browserEnabled,
+    styleLearningEnabled: row.styleLearningEnabled,
+    stylePromotionEnabled: row.stylePromotionEnabled,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

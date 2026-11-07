@@ -20,6 +20,7 @@ interface HeartbeatEvent {
   kind: 'heartbeat';
   personaId: string;
   phoneOutcome?: MindPhoneOutcomeBrief;
+  forceLearning?: boolean;
   resolve: (result: MindTurnResult | null) => void;
   reject: (error: unknown) => void;
 }
@@ -88,9 +89,18 @@ export class MindLoopService implements OnModuleInit {
     });
   }
 
-  submitHeartbeat(personaId: string): Promise<MindTurnResult | null> {
+  submitHeartbeat(
+    personaId: string,
+    options: { forceLearning?: boolean } = {},
+  ): Promise<MindTurnResult | null> {
     return new Promise<MindTurnResult | null>((resolve, reject) => {
-      this.push({ kind: 'heartbeat', personaId, resolve, reject });
+      this.push({
+        kind: 'heartbeat',
+        personaId,
+        forceLearning: options.forceLearning,
+        resolve,
+        reject,
+      });
     });
   }
 
@@ -234,6 +244,13 @@ export class MindLoopService implements OnModuleInit {
   private async handleHeartbeat(event: HeartbeatEvent): Promise<MindTurnResult | null> {
     if (event.phoneOutcome) {
       const result = await this.runtime.heartbeat(event.personaId, event.phoneOutcome);
+      await this.continuePhone(event.personaId, 400);
+      return result;
+    }
+    if (event.forceLearning) {
+      const result = await this.runtime.heartbeat(event.personaId, undefined, {
+        forceLearning: true,
+      });
       await this.continuePhone(event.personaId, 400);
       return result;
     }

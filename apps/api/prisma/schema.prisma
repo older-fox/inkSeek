@@ -636,6 +636,19 @@ model ChatMindSettings {
   /// Optional cap on autonomous phone sessions per persona-local day.
   /// 0 means unlimited.
   phonePlayDailyLimit        Int             @default(0)
+  /// Autonomous learning from the web/videos. Enabled by default; the heartbeat
+  /// only spends one session per interval and only while idle.
+  learningEnabled            Boolean         @default(true)
+  /// Minimum hours between learning sessions. 0 disables scheduled learning.
+  learningIntervalHours      Int             @default(12)
+  /// Cap on sources read per persona-local day; 0 means unlimited.
+  learningDailySourceLimit   Int             @default(6)
+  /// Headless browser tools are available to the planner.
+  browserEnabled             Boolean         @default(true)
+  /// Let learning sessions write expression notes (how to talk), not just facts.
+  styleLearningEnabled       Boolean         @default(true)
+  /// Let reflection fold stable expression notes into the persona card.
+  stylePromotionEnabled      Boolean         @default(true)
   createdAt                  DateTime        @default(now())
   updatedAt                  DateTime        @updatedAt
 }
@@ -987,6 +1000,7 @@ model MindHeartbeatLog {
   lifeEvent      Boolean  @default(false)
   curiosity      Boolean  @default(false)
   reflection     Boolean  @default(false)
+  learning       Boolean  @default(false)
   /// AgentRun created by this heartbeat, when the model actually ran.
   runId          String?
   detail         Json?
@@ -995,6 +1009,59 @@ model MindHeartbeatLog {
   @@index([personaId, createdAt])
   @@index([channelId, createdAt])
   @@index([runId])
+}
+
+/// One autonomous learning session: which sources were read and what stuck.
+/// Plain ids so the log survives persona/channel cleanup.
+model MindLearningLog {
+  id         String    @id @default(cuid())
+  personaId  String
+  channelId  String
+  /// HEARTBEAT | MANUAL
+  trigger    String    @default("HEARTBEAT")
+  /// RUNNING | SUCCEEDED | FAILED
+  status     String    @default("RUNNING")
+  reason     String    @default("")
+  sources    Json      @default("[]")
+  learned    Json      @default("[]")
+  styleNotes Json      @default("[]")
+  summary    String    @default("")
+  error      String?
+  runId      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([personaId, startedAt])
+  @@index([channelId, startedAt])
+}
+
+/// A learned way of speaking. SELF is the persona's general voice; RELATION is
+/// an adaptation for one contact. This is not a copy of the persona card.
+model PersonaStyleNote {
+  id            String    @id @default(cuid())
+  personaId     String
+  channelId     String
+  /// SELF | RELATION
+  scope         String    @default("SELF")
+  contactId     String    @default("")
+  /// length | punctuation | particles | openings | humor | rhythm | vocabulary | tone
+  dimension     String    @default("tone")
+  content       String
+  samples       Json      @default("[]")
+  sources       Json      @default("[]")
+  confidence    Int       @default(50)
+  evidenceCount Int       @default(1)
+  /// ACTIVE | PAUSED | PROMOTED
+  status        String    @default("ACTIVE")
+  appliedCount  Int       @default(0)
+  lastAppliedAt DateTime?
+  lastSeenAt    DateTime  @default(now())
+  promotedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([personaId, status])
+  @@index([channelId, contactId, status])
 }
 
 model AgentStep {

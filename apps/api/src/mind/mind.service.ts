@@ -12,9 +12,11 @@ import type {
   MindHeartbeatLogRecord,
   MindFocusOverview,
   MindHeartbeatQueryInput,
+  MindLearningOverview,
   MindPromptLogQueryInput,
   MindSettingsRecord,
   MindSettingsUpdateInput,
+  MindTurnResult,
   PersonaChangeRecord,
   PersonaGroupStanceRecord,
   PersonaGroupStanceUpdateInput,
@@ -25,6 +27,8 @@ import type {
   PersonaRelationshipUpdateInput,
   PersonaStateRecord,
   PersonaStateUpdateInput,
+  PersonaStyleNoteRecord,
+  PersonaStyleNoteUpdateInput,
   PhoneDeviceList,
   StickerRecord,
 } from '@inkseek/shared';
@@ -40,6 +44,7 @@ import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindFocusService } from './mind-focus.service.js';
 import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
+import { MindLearningService } from './mind-learning.service.js';
 import { MindLoopService } from './mind-loop.service.js';
 import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindRuntimeService, toRunSummary } from './mind-runtime.service.js';
@@ -53,6 +58,7 @@ import {
 import { PersonaMemoryService } from './persona-memory.service.js';
 import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
+import { PersonaStyleNoteService } from './persona-style-note.service.js';
 import { StickerService } from './sticker.service.js';
 
 @Injectable()
@@ -75,6 +81,8 @@ export class MindService {
     private readonly phoneFocus: MindPhoneFocusService,
     private readonly loop: MindLoopService,
     private readonly situation: MindSituationService,
+    private readonly learning: MindLearningService,
+    private readonly styleNotes: PersonaStyleNoteService,
   ) {}
 
   listChanges(
@@ -356,6 +364,28 @@ export class MindService {
 
   triggerHeartbeat(personaId: string): Promise<boolean> {
     return this.heartbeat.trigger(personaId);
+  }
+
+  async learningOverview(
+    personaId: string,
+    channelId?: string,
+    limit = 12,
+  ): Promise<MindLearningOverview> {
+    const resolved =
+      channelId?.trim() || (await this.states.persona(personaId)).channelId;
+    return this.learning.overview(personaId, resolved, limit);
+  }
+
+  startLearning(personaId: string): Promise<MindTurnResult | null> {
+    return this.loop.submitHeartbeat(personaId, { forceLearning: true });
+  }
+
+  updateStyleNote(id: string, input: PersonaStyleNoteUpdateInput): Promise<PersonaStyleNoteRecord> {
+    return this.styleNotes.update(id, input);
+  }
+
+  deleteStyleNote(id: string): Promise<void> {
+    return this.styleNotes.remove(id);
   }
 
   listStickers(channelId: string): Promise<StickerRecord[]> {

@@ -5,11 +5,13 @@ import { MediaModule } from '../chat/media.module.js';
 import { PhoneModule } from '../phone/phone.module.js';
 import { RedisModule } from '../redis/redis.module.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
+import { MindBrowserService } from './mind-browser.service.js';
 import { MindController } from './mind.controller.js';
 import { MindDriftService } from './mind-drift.service.js';
 import { MindFocusService } from './mind-focus.service.js';
 import { MindHeartbeatLogService } from './mind-heartbeat-log.service.js';
 import { MindHeartbeatService } from './mind-heartbeat.service.js';
+import { MindLearningService } from './mind-learning.service.js';
 import { MindLoopService } from './mind-loop.service.js';
 import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
@@ -26,6 +28,7 @@ import { PersonaLongEventService } from './persona-long-event.service.js';
 import { PersonaMemoryService } from './persona-memory.service.js';
 import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
+import { PersonaStyleNoteService } from './persona-style-note.service.js';
 import { StickerService } from './sticker.service.js';
 import { VideoInsightService } from './video-insight.service.js';
 import { WebSearchService } from './web-search.service.js';
@@ -40,6 +43,8 @@ import { WebSearchService } from './web-search.service.js';
     PersonaGroupStanceService,
     PersonaLongEventService,
     PersonaMemoryService,
+    PersonaStyleNoteService,
+    MindLearningService,
     MindFocusService,
     MindSituationService,
     MindSceneService,
@@ -54,6 +59,7 @@ import { WebSearchService } from './web-search.service.js';
     StickerService,
     VideoInsightService,
     WebSearchService,
+    MindBrowserService,
     MindActionExecutor,
     MindRuntimeService,
     MindHeartbeatService,
@@ -66,6 +72,8 @@ import { WebSearchService } from './web-search.service.js';
     PersonaGroupStanceService,
     PersonaLongEventService,
     PersonaMemoryService,
+    PersonaStyleNoteService,
+    MindLearningService,
     MindRuntimeService,
     MindService,
     MindActionExecutor,
@@ -74,6 +82,7 @@ import { WebSearchService } from './web-search.service.js';
     MindPhoneFocusService,
     MindLoopService,
     StickerService,
+    MindBrowserService,
   ],
 })
 export class MindModule {}

@@ -16,12 +16,14 @@ import { PrismaService } from '../database/prisma.service.js';
 import type { AgentIntention, AgentStep, PersonaState } from '../generated/prisma/client.js';
 import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
+import { MindBrowserService } from './mind-browser.service.js';
 import { classifyText, readConversation } from './mind-conversation-read.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
 import {
   MindHeartbeatLogService,
   type MindHeartbeatLogInput,
 } from './mind-heartbeat-log.service.js';
+import { MindLearningService } from './mind-learning.service.js';
 import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
@@ -34,6 +36,7 @@ import { PersonaLongEventService } from './persona-long-event.service.js';
 import { PersonaMemoryService } from './persona-memory.service.js';
 import { PersonaRelationshipService } from './persona-relationship.service.js';
 import { PersonaStateService } from './persona-state.service.js';
+import { PersonaStyleNoteService } from './persona-style-note.service.js';
 import {
   clamp,
   isMindTurnInterrupted,
@@ -98,6 +101,9 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly heartbeatLogs: MindHeartbeatLogService,
     private readonly situation: MindSituationService,
     private readonly phoneFocus: MindPhoneFocusService,
+    private readonly browser: MindBrowserService,
+    private readonly learning: MindLearningService,
+    private readonly styleNotes: PersonaStyleNoteService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -518,6 +524,17 @@ export class MindRuntimeService implements OnModuleInit {
       )
       .catch(() => undefined);
 
+    const contactId =
+      decision.target?.contactId ?? scene.anchor.senderId ?? scene.cast[0]?.contactId ?? '';
+    const styleNotes = settings.styleLearningEnabled
+      ? await this.styleNotes.activeFor(
+          scene.persona.id,
+          scene.persona.channelId,
+          contactId,
+          4,
+        )
+      : [];
+
     let plannerResult;
     try {
       plannerResult = await this.planner.plan({
@@ -536,6 +553,7 @@ export class MindRuntimeService implements OnModuleInit {
         mode,
         trigger: input.trigger ?? 'MESSAGE',
         sleepBrief,
+        styleNotes,
         situation: await this.situation.describe(scene.persona.id),
         signal,
       });
@@ -592,6 +610,16 @@ export class MindRuntimeService implements OnModuleInit {
     }
 
     const plan = plannerResult.plan;
+    if (settings.styleLearningEnabled && plan.styleNotes?.length) {
+      await this.styleNotes.addDrafts(
+        scene.persona.id,
+        scene.persona.channelId,
+        plan.styleNotes,
+      );
+    }
+    if (plan.engage && styleNotes.length > 0) {
+      await this.styleNotes.markApplied(styleNotes.map((note) => note.id));
+    }
     if (signal?.aborted) {
       return finishInterruptedTurn('规划完成', plan);
     }
@@ -707,6 +735,7 @@ export class MindRuntimeService implements OnModuleInit {
   async heartbeat(
     personaId: string,
     phoneOutcome?: MindPhoneOutcomeBrief,
+    options: { forceLearning?: boolean } = {},
   ): Promise<MindTurnResult | null> {
     const persona = await this.states.persona(personaId);
     const settings = await this.settings.get(persona.channelId);
@@ -854,15 +883,27 @@ export class MindRuntimeService implements OnModuleInit {
     // Reflection is scheduled by time and takes priority over both.
     const idle =
       dueTodos.length === 0 && dueIntentions.length === 0 && unconsolidated < 2 && !phoneOutcome;
-    const reflection = !phoneOutcome && !quiet && (await this.reflectionDue(personaId, settings));
+    const learningDecision =
+      !phoneOutcome && idle
+        ? options.forceLearning
+          ? { due: true, reason: '手动开始学习' }
+          : !quiet
+            ? await this.learning.isDue(personaId, settings, now)
+            : { due: false, reason: '安静时段，不自己开始学习' }
+        : { due: false, reason: '当前不是学习时间' };
+    const learning = learningDecision.due;
+    const reflection =
+      !phoneOutcome && !quiet && !learning && (await this.reflectionDue(personaId, settings));
     const lifeEvent =
       !phoneOutcome &&
+      !learning &&
       !reflection &&
       idle &&
       !quiet &&
       (await this.rollLifeEvent(personaId, settings, timeZone));
     const curiosity =
       !phoneOutcome &&
+      !learning &&
       !reflection &&
       !lifeEvent &&
       idle &&
@@ -876,6 +917,7 @@ export class MindRuntimeService implements OnModuleInit {
       lifeEvent,
       curiosity,
       reflection,
+      learning,
     };
 
     // A wake is an opportunity, not a duty. Layered budgets cap how many
@@ -901,7 +943,7 @@ export class MindRuntimeService implements OnModuleInit {
 
     // Idle time can be spent with the phone. It becomes its own focus, so it
     // keeps running when nobody writes, and a message only pauses it.
-    if (idle && !quiet && !lifeEvent && !curiosity && !reflection) {
+    if (idle && !quiet && !lifeEvent && !curiosity && !reflection && !learning) {
       const started = await this.phoneFocus.startAutonomous(personaId, settings, timeZone);
       if (started) {
         await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '自己玩手机');
@@ -913,10 +955,10 @@ export class MindRuntimeService implements OnModuleInit {
       }
     }
 
-    if (!lifeEvent && !curiosity && !reflection && idle) {
+    if (!lifeEvent && !curiosity && !reflection && !learning && idle) {
       await this.reviewStaleActivity(personaId, persona, state, sleepBrief, settings, timeZone);
       await this.reschedule(personaId, effectiveWakeMinutes(settings, quiet), '无到期事项');
-      await log('IDLE', '空闲心跳：没有到期事项，也未触发生活小事、好奇或反思', {
+      await log('IDLE', '空闲心跳：没有到期事项，也未触发生活小事、好奇、学习或反思', {
         ...heartbeatBase,
         detail: { ...heartbeatBase, wakeReason: state.wakeReason },
       });
@@ -1018,11 +1060,12 @@ export class MindRuntimeService implements OnModuleInit {
         personaId,
         channelId: persona.channelId,
         conversationId,
-        trigger:
-          dueIntentions.length > 0 ||
-          dueTodos.length > 0 ||
-          phoneOutcome?.status === 'FAILED' ||
-          Boolean(phoneOutcome?.problem)
+        trigger: options.forceLearning
+          ? 'MANUAL'
+          : dueIntentions.length > 0 ||
+              dueTodos.length > 0 ||
+              phoneOutcome?.status === 'FAILED' ||
+              Boolean(phoneOutcome?.problem)
             ? 'PROACTIVE'
             : 'HEARTBEAT',
         mode,
@@ -1082,9 +1125,46 @@ export class MindRuntimeService implements OnModuleInit {
         0,
       );
     }
+    if (learning) {
+      await this.step(
+        run.id,
+        'ATTENTION',
+        '自主学习',
+        {
+          intervalHours: settings.learningIntervalHours,
+          dailySourceLimit: settings.learningDailySourceLimit,
+        },
+        { due: true, reason: learningDecision.reason },
+        0,
+      );
+    }
     if (decayed > 0) {
       await this.step(run.id, 'CONSOLIDATION', '记忆衰减', { staleAfterDays: 30 }, { decayed }, 0);
     }
+    const learningLogId = learning
+      ? await this.learning
+          .start({
+            personaId,
+            channelId: persona.channelId,
+            trigger: options.forceLearning ? 'MANUAL' : 'HEARTBEAT',
+            reason: learningDecision.reason,
+            runId: run.id,
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(`学习会话创建失败：${error instanceof Error ? error.message : String(error)}`);
+            return null;
+          })
+      : null;
+    const learningSince = new Date();
+    const contactId = scene.anchor.senderId || scene.cast[0]?.contactId || '';
+    const [styleNotes, stylePromotion] = await Promise.all([
+      settings.styleLearningEnabled
+        ? this.styleNotes.activeFor(personaId, persona.channelId, contactId, 4)
+        : Promise.resolve([]),
+      settings.stylePromotionEnabled && reflection
+        ? this.styleNotes.promotionCandidates(personaId, 3)
+        : Promise.resolve([]),
+    ]);
 
     try {
       const plannerResult = await this.planner.plan({
@@ -1100,16 +1180,21 @@ export class MindRuntimeService implements OnModuleInit {
         activeIntentions,
         settings,
         mode,
-        trigger:
-          phoneOutcome?.status === 'FAILED' || Boolean(phoneOutcome?.problem)
+        trigger: options.forceLearning
+          ? 'MANUAL'
+          : phoneOutcome?.status === 'FAILED' || Boolean(phoneOutcome?.problem)
             ? 'PROACTIVE'
             : 'HEARTBEAT',
         wakeBrief,
         sleepBrief,
         lifeEvent,
         curiosity,
+        learning,
+        learningReason: learningDecision.reason,
         reflection,
         reflectionBrief,
+        styleNotes,
+        stylePromotion,
         phoneOutcome,
         situation: await this.situation.describe(personaId),
       });
@@ -1137,6 +1222,66 @@ export class MindRuntimeService implements OnModuleInit {
         );
       }
       const plan = plannerResult.plan;
+      const learningSources = learningLogId
+        ? await this.collectLearningSources(
+            personaId,
+            learningSince,
+            plannerResult.toolCalls,
+            settings.learningDailySourceLimit,
+          )
+        : [];
+      // A learning turn is research first. If nothing was actually read or
+      // watched, silence is better than letting a chat message replace it.
+      if (learningLogId && learningSources.length === 0 && plan.engage) {
+        await this.step(
+          run.id,
+          'EXPRESSION',
+          '学习轮没有来源',
+          { sources: 0 },
+          { suppressed: true },
+          0,
+        );
+        plan.engage = false;
+        plan.beats = [];
+        plan.reason = `${plan.reason}；这一轮没有实际来源，不发消息`.slice(0, 300);
+      }
+      const createdStyleNotes =
+        settings.styleLearningEnabled && plan.styleNotes?.length
+          ? await this.styleNotes.addDrafts(
+              personaId,
+              persona.channelId,
+              plan.styleNotes,
+              learningSources,
+            )
+          : [];
+      if (plan.engage && styleNotes.length > 0) {
+        await this.styleNotes.markApplied(styleNotes.map((note) => note.id));
+      }
+      if (reflection && plan.styleNotePromotions?.length) {
+        await this.styleNotes.markPromoted(plan.styleNotePromotions);
+      }
+      if (reflection) {
+        await this.styleNotes.decay(personaId).catch(() => undefined);
+      }
+      if (learningLogId) {
+        await this.styleNotes.decay(personaId).catch(() => undefined);
+        await this.learning.finish(learningLogId, {
+          status: 'SUCCEEDED',
+          sources: learningSources,
+          learned: plan.memoryWrites.map((draft) => ({
+            kind: draft.kind,
+            content: draft.content,
+          })),
+          styleNotes: createdStyleNotes.map((note) => ({
+            kind: note.dimension,
+            content: note.content,
+          })),
+          summary:
+            learningSources.length === 0
+              ? `${plan.reason}（没有收集到来源）`
+              : plan.reason,
+        });
+      }
       if (plan.engage && plan.beats.length > 0 && mode !== 'SHADOW' && isGroup) {
         const acquired = await this.replyLock.acquire({
           conversationId,
@@ -1280,6 +1425,11 @@ export class MindRuntimeService implements OnModuleInit {
         await this.recordProtocolFailure(run.id, error);
       }
       this.logger.warn(`心跳规划失败：${message}`);
+      if (learningLogId) {
+        await this.learning
+          .finish(learningLogId, { status: 'FAILED', summary: '学习中断', error: message })
+          .catch(() => undefined);
+      }
       await this.finishRun(run.id, 'FAILED', {
         startedAt,
         decision: null,
@@ -1368,6 +1518,14 @@ export class MindRuntimeService implements OnModuleInit {
     const memories = [...recall.core, ...recall.relevant];
     const decision = this.social.buildDecision({ scene, state, memories });
     const conversationRead = readConversation({ scene, memories });
+    const styleNotes = settings.styleLearningEnabled
+      ? await this.styleNotes.activeFor(
+          persona.id,
+          persona.channelId,
+          scene.anchor.senderId ?? '',
+          4,
+        )
+      : [];
     const plannerResult = await this.planner.plan({
       scene,
       state,
@@ -1383,6 +1541,7 @@ export class MindRuntimeService implements OnModuleInit {
       mode,
       trigger: 'MANUAL',
       sleepBrief,
+      styleNotes,
       dryRun: true,
       capturePrompts: true,
     });
@@ -1888,6 +2047,63 @@ export class MindRuntimeService implements OnModuleInit {
       }
     }
     return Math.random() * 100 < chance;
+  }
+
+  /**
+   * Sources actually touched during a learning session: browser visits plus
+   * URLs returned by read/search/video tools. Deduped and capped by the daily
+   * source budget.
+   */
+  private collectLearningSources(
+    personaId: string,
+    since: Date,
+    toolCalls: readonly { name: string; output: unknown }[],
+    limit: number,
+  ): { url: string; title?: string; kind?: string; at: string }[] {
+    const cap = limit > 0 ? limit : 40;
+    const out = new Map<string, { url: string; title?: string; kind?: string; at: string }>();
+    for (const visit of this.browser.recentVisits(personaId, since)) {
+      if (!visit.url) {
+        continue;
+      }
+      out.set(visit.url, {
+        url: visit.url,
+        title: visit.title,
+        kind: visit.kind,
+        at: visit.at,
+      });
+    }
+    const allowed = new Set(['video.watch', 'video.comments', 'web.read', 'web.search', 'browser.open']);
+    for (const call of toolCalls) {
+      if (!allowed.has(call.name) || call.output === undefined || call.output === null) {
+        continue;
+      }
+      let text: string;
+      try {
+        text = typeof call.output === 'string' ? call.output : JSON.stringify(call.output);
+      } catch {
+        continue;
+      }
+      for (const match of text.matchAll(/https?:\/\/[^\s"'<>()[\]{}]+/gu)) {
+        const url = match[0].replace(/[.,;:!?，。；：！？]+$/u, '');
+        if (!url || out.has(url)) {
+          continue;
+        }
+        out.set(url, {
+          url,
+          title: '',
+          kind: call.name.startsWith('video.') ? 'video' : 'web',
+          at: new Date().toISOString(),
+        });
+        if (out.size >= cap) {
+          break;
+        }
+      }
+      if (out.size >= cap) {
+        break;
+      }
+    }
+    return [...out.values()].slice(0, cap);
   }
 
   private async reflectionDue(personaId: string, settings: MindSettingsRecord): Promise<boolean> {

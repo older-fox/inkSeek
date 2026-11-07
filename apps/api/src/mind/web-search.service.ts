@@ -209,7 +209,7 @@ function normalizeResults(payload: unknown): WebSearchResult[] {
   return [];
 }
 
-function normalizePublicUrl(value: string): URL {
+export function normalizePublicUrl(value: string): URL {
   let url: URL;
   try {
     url = new URL(value.trim());
@@ -229,7 +229,7 @@ function normalizePublicUrl(value: string): URL {
   return url;
 }
 
-async function assertPublicHost(url: URL): Promise<void> {
+export async function assertPublicHost(url: URL): Promise<void> {
   const host = url.hostname.trim().toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost')) {
     throw new Error('不能读取本地地址');
