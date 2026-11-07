@@ -580,12 +580,17 @@ export class PersonaMemoryService {
     const timeZone = normalizeTimeZone(
       readString((input.scene.persona.values as Record<string, unknown> | null)?.['time_zone']),
     );
+    // Only the other side's lines. Storing the persona's own replies turns the
+    // episode into a script she later replays almost verbatim.
     const transcript = formatSceneForPrompt(
-      input.scene.messages.slice(-8).map((message) => ({
-        ...message,
-        text: truncate(message.text, 160),
-        images: message.images.slice(0, 1),
-      })),
+      input.scene.messages
+        .filter((message) => !message.isSelf)
+        .slice(-8)
+        .map((message) => ({
+          ...message,
+          text: truncate(message.text, 160),
+          images: message.images.slice(0, 1),
+        })),
       timeZone,
     );
     const reply = input.engage
@@ -704,6 +709,7 @@ export class PersonaMemoryService {
       `你在整理人格「${persona.name}」最近的情景记忆，并把它们沉淀进长期知识库。写多少条由你判断，只保留真正值得长期保留的内容。`,
       '只保留会影响未来行为的事实、偏好、承诺、边界、关系变化或反思。不要编造。',
       '记忆要具体：保留人名、时间、偏好细节和因果，不要写成“聊了天”“关系变好了”这种空话。',
+      '边界和情景只写以后怎么做、当时发生了什么：BOUNDARY 不要抄当时的原话或固定台词，EPISODE 不要抄自己的回复原文；要留的是处理原则，不是复读稿。',
       '已有长期记忆不要重复。如果新经历补充或修正了旧事实，输出合并后的完整内容，而不是另起一条。',
       '输出 JSON 数组，每项字段：kind(FACT/PREFERENCE/PROMISE/BOUNDARY/REFLECTION)、scope(SELF/RELATION/GROUP/SCENE/WORLD/PROCEDURE)、subjectType(PERSON/GROUP/SELF/WORLD/TOPIC)、subjectName、content、importance(0-100)、confidence(0-100)、visibility(PRIVATE/SCENE/CHANNEL/PUBLIC)。',
       '直接输出 JSON，不要解释。',

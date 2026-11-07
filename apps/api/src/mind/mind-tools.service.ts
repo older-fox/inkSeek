@@ -240,7 +240,7 @@ export const MIND_TOOL_CATALOG = [
   {
     name: 'memory.create',
     description:
-      '写入一条长期记忆。subjectType=PERSON 时用 subjectId 指认联系人；不填则默认当前对话对象。',
+      '写入一条长期记忆。subjectType=PERSON 时用 subjectId 指认联系人；不填则默认当前对话对象。BOUNDARY 写处理原则，EPISODE 写发生过什么，都不要存固定台词或自己的原话。写完不用在回复里报备，也不要说「我记下了/已记录」。',
     input: {
       content: 'string',
       kind: 'EPISODE|FACT|PREFERENCE|PROMISE|BOUNDARY|REFLECTION|PROCEDURE',
@@ -548,6 +548,26 @@ export class MindToolsService {
     private readonly phoneFocus: MindPhoneFocusService,
     private readonly llm: LlmService,
   ) {}
+
+  /**
+   * Compact sticker catalog for the planner prompt. Showing ids up front
+   * removes the extra sticker.search round that used to discourage sending.
+   */
+  async stickerBrief(channelId: string, limit = 12): Promise<string> {
+    const rows = await this.stickers.list(channelId);
+    if (rows.length === 0) {
+      return '';
+    }
+    const top = rows.slice(0, Math.max(1, limit));
+    return [
+      `共 ${rows.length} 张，下面是最近/常用的 ${top.length} 张：`,
+      ...top.map((sticker) => {
+        const tags = sticker.tags.slice(0, 5).join('/') || '无标签';
+        const description = sticker.description.replace(/\s+/gu, ' ').trim().slice(0, 80);
+        return `- ${sticker.id}｜${tags}｜${description}`;
+      }),
+    ].join('\n');
+  }
 
   async execute(name: string, input: unknown, context: MindToolContext): Promise<ToolExecution> {
     const startedAt = Date.now();

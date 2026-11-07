@@ -61,6 +61,10 @@ export interface RepetitionRead {
   identity: { text: string; count: number }[];
   /** Recurring sentence openings, the clearest tell of template speech. */
   openings: { text: string; count: number }[];
+  /** Long stretches that came out almost identical across separate replies. */
+  repeated: { text: string; count: number }[];
+  /** Assistant/service phrasings that leaked into recent replies. */
+  assistant: { text: string; count: number }[];
 }
 
 export interface BoundaryEscalation {
@@ -185,8 +189,23 @@ const REPETITION_STOP_BIGRAMS = new Set([
   '男生',
 ]);
 
+/**
+ * Assistant/service phrasings that make a reply sound like a support agent.
+ * They are counted, not rewritten: the planner decides how to speak.
+ */
+const SERVICE_TONE_PATTERNS: readonly { label: string; re: RegExp }[] = [
+  { label: '你这边', re: /你这边/gu },
+  { label: '我这边', re: /我这边/gu },
+  { label: '我认', re: /我认(?![得识真为同可])/gu },
+  { label: '我记下了', re: /我记下了|我记住了|已记录|记录一下/gu },
+  { label: '收到/了解', re: /^(?:收到|了解|明白了|知道了)(?:[呀哦呢～~。！!，,\s]*)$/u },
+  { label: '为你/帮你', re: /为你|帮你/gu },
+  { label: '需要我', re: /需要我|有什么可以帮/gu },
+  { label: '总结腔', re: /总的来说|总结一下|根据你的描述|理解你的|感谢你的/gu },
+];
+
 export function readRepetition(scene: MindScene): RepetitionRead | null {
-  const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-12);
+  const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-20);
   if (selfMessages.length < 3) {
     return null;
   }
@@ -198,7 +217,28 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
   }
   const counts = new Map<string, number>();
   const openingCounts = new Map<string, number>();
+  const replayCounts = new Map<string, { text: string; count: number }>();
+  const serviceCounts = new Map<string, number>();
   for (const message of selfMessages) {
+    for (const pattern of SERVICE_TONE_PATTERNS) {
+      const matches = message.text.match(pattern.re);
+      if (matches) {
+        serviceCounts.set(pattern.label, (serviceCounts.get(pattern.label) ?? 0) + matches.length);
+      }
+    }
+    // A long identical opening across separate replies is the strongest
+    // template tell; a repeated 3-character greeting alone is not.
+    const replay = [...normalizeText(message.text).replace(/[^\u3400-\u9fffA-Za-z0-9]/gu, '')]
+      .slice(0, 14)
+      .join('');
+    if ([...replay].length >= 12) {
+      const current = replayCounts.get(replay);
+      if (current) {
+        current.count += 1;
+      } else {
+        replayCounts.set(replay, { text: replay, count: 1 });
+      }
+    }
     const seen = new Set<string>();
     // Split at punctuation so "刷锅，炒饭" does not produce the fake "锅炒".
     for (const clause of normalizeText(message.text).split(/[^\u3400-\u9fff]+/u)) {
@@ -222,21 +262,32 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     }
   }
   // Identity words are allowed to come up once; twice in twelve messages reads
-  // as repeating a self-introduction.
-  const identityWords = new Set(chineseBigrams(scene.persona.identity));
+  // as repeating a self-introduction. They need their own count: the generic
+  // topic loop drops 网吧 because 吧 looks like a sentence particle.
+  const identityTerms = new Set(
+    chineseBigrams(scene.persona.identity).filter(
+      (term) =>
+        !ignored.has(term) &&
+        !REPETITION_STOP_BIGRAMS.has(term) &&
+        !hasStopParticle(term),
+    ),
+  );
+  const identityCounts = new Map<string, number>();
+  for (const message of selfMessages) {
+    const normalized = normalizeText(message.text);
+    for (const term of identityTerms) {
+      if (normalized.includes(term)) {
+        identityCounts.set(term, (identityCounts.get(term) ?? 0) + 1);
+      }
+    }
+  }
   const topics = [...counts.entries()]
-    .filter(([text, count]) => count >= 3 && !identityWords.has(text))
+    .filter(([text, count]) => count >= 3 && !identityTerms.has(text))
     .sort((left, right) => right[1] - left[1])
     .slice(0, 3)
     .map(([text, count]) => ({ text, count }));
-  const identity = [...counts.entries()]
-    .filter(
-      ([text, count]) =>
-        count >= 2 &&
-        identityWords.has(text) &&
-        !REPETITION_STOP_BIGRAMS.has(text) &&
-        ![...text].some((char) => REPETITION_STOP_CHARS.has(char)),
-    )
+  const identity = [...identityCounts.entries()]
+    .filter(([, count]) => count >= 2)
     .sort((left, right) => right[1] - left[1])
     .slice(0, 2)
     .map(([text, count]) => ({ text, count }));
@@ -245,8 +296,21 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     .sort((left, right) => right[1] - left[1])
     .slice(0, 2)
     .map(([text, count]) => ({ text, count }));
-  return topics.length > 0 || identity.length > 0 || openings.length > 0
-    ? { topics, identity, openings }
+  const repeated = [...replayCounts.values()]
+    .filter((item) => item.count >= 2)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 2);
+  const assistant = [...serviceCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4)
+    .map(([text, count]) => ({ text, count }));
+  return topics.length > 0 ||
+    identity.length > 0 ||
+    openings.length > 0 ||
+    repeated.length > 0 ||
+    assistant.length > 0
+    ? { topics, identity, openings, repeated, assistant }
     : null;
 }
 
@@ -257,6 +321,20 @@ function chineseBigrams(text: string): string[] {
     bigrams.push(`${chars[index]}${chars[index + 1]}`);
   }
   return bigrams;
+}
+
+/**
+ * Generic repetition filters treat 吧 as a sentence particle, but it is part of
+ * the persona's actual noun 网吧. Without this exception the identity word is
+ * filtered out before the repetition check ever sees it.
+ */
+function hasStopParticle(text: string): boolean {
+  return [...text].some((char, index) => {
+    if (!REPETITION_STOP_CHARS.has(char)) {
+      return false;
+    }
+    return !(char === '吧' && index > 0 && '网酒书茶泡'.includes(text[index - 1] ?? ''));
+  });
 }
 
 const KIND_LABEL: Record<MessageKind, string> = {
@@ -390,7 +468,7 @@ export function readConversation(input: {
     default:
       theirIntent = 0.1;
   }
-  if (lastOther?.mentionedSelf) theirIntent += 0.15;
+  if (lastOther?.mentionedSelf || lastOther?.replyToSelf) theirIntent += 0.15;
   if (isPrivate && lastOther && !lastSelf) theirIntent += 0.05;
   if (
     others.filter((message) => now.getTime() - Date.parse(message.sentAt) <= 5 * 60_000).length >= 3
@@ -448,6 +526,7 @@ export function readConversation(input: {
   const directAddress =
     isPrivate ||
     Boolean(lastOther?.mentionedSelf) ||
+    Boolean(lastOther?.replyToSelf) ||
     lastOtherKind === 'question' ||
     lastOtherKind === 'request';
 

@@ -62,6 +62,8 @@ export interface SceneMessage {
   imageCount: number;
   /** At-segment or poke targeting the persona's own account. */
   mentionedSelf: boolean;
+  /** This message quotes one of the persona's own messages. */
+  replyToSelf: boolean;
 }
 
 export interface SceneCastMember {
@@ -795,7 +797,9 @@ export function formatSceneForPrompt(
         previousDay = day;
         previousAt = at.getTime();
       }
-      const sender = message.isSelf ? '我' : message.senderName;
+      const sender = message.isSelf
+        ? '我'
+        : `${message.senderName}${message.replyToSelf ? '（回复我）' : ''}`;
       const images =
         message.images.length > 0
           ? `[图片：${message.images.join('；')}]`

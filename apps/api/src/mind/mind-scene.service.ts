@@ -40,6 +40,7 @@ type MessageWithAssets = ChatMessageRecord & {
     externalId: string;
     isSelf: boolean;
   };
+  replyTo: { isSelf: boolean } | null;
 };
 
 @Injectable()
@@ -88,6 +89,7 @@ export class MindSceneService {
         },
         voices: { orderBy: { position: 'asc' }, select: { description: true } },
         sender: { select: { id: true, nickname: true, externalId: true, isSelf: true } },
+        replyTo: { select: { isSelf: true } },
       },
     });
     await this.describeMissingImages(rows, message.messageId, imageDescriptionPrompt);
@@ -182,6 +184,7 @@ export class MindSceneService {
         },
         voices: { orderBy: { position: 'asc' }, select: { description: true } },
         sender: { select: { id: true, nickname: true, externalId: true, isSelf: true } },
+        replyTo: { select: { isSelf: true } },
       },
     });
     const messages = rows.reverse().map((row) => toSceneMessage(row, accountId));
@@ -214,6 +217,7 @@ export class MindSceneService {
         images: [],
         imageCount: 0,
         mentionedSelf: false,
+        replyToSelf: false,
       });
     }
     const anchor: ChatMessageSnapshot = {
@@ -246,6 +250,7 @@ export class MindSceneService {
       images: [],
       imageCount: 0,
       mentionedSelf: false,
+      replyToSelf: false,
     });
     const cast = await this.loadCast(conversation, persona);
     const stance =
@@ -324,6 +329,7 @@ export class MindSceneService {
         },
         voices: { orderBy: { position: 'asc' }, select: { description: true } },
         sender: { select: { id: true, nickname: true, externalId: true, isSelf: true } },
+        replyTo: { select: { isSelf: true } },
       },
     });
     return rows.reverse().map((row) => toSceneMessage(row, accountId));
@@ -352,20 +358,36 @@ export class MindSceneService {
     if (names.some((name) => message.text.includes(name))) {
       return true;
     }
-    if (!message.messageId) {
-      return false;
-    }
     const [record, channel] = await Promise.all([
-      this.prisma.chatMessageRecord.findUnique({
-        where: { id: message.messageId },
-        select: { segments: true },
-      }),
+      message.messageId
+        ? this.prisma.chatMessageRecord.findUnique({
+            where: { id: message.messageId },
+            select: {
+              segments: true,
+              replySnapshot: true,
+              replyTo: { select: { isSelf: true } },
+            },
+          })
+        : null,
       this.prisma.chatChannel.findUnique({
         where: { id: message.channelId },
         select: { accountId: true },
       }),
     ]);
-    return Boolean(channel?.accountId && mentionsAccount(record?.segments, channel.accountId));
+    const accountId = channel?.accountId ?? '';
+    if (!accountId) {
+      return false;
+    }
+    if (message.quote?.authorId?.trim() === accountId) {
+      return true;
+    }
+    if (record?.replyTo?.isSelf) {
+      return true;
+    }
+    if (replySnapshotAuthorIsSelf(record?.replySnapshot ?? null, accountId)) {
+      return true;
+    }
+    return mentionsAccount(record?.segments, accountId);
   }
 
   /**
@@ -690,7 +712,22 @@ function toSceneMessage(row: MessageWithAssets, accountId: string): SceneMessage
     images,
     imageCount: row.images.length,
     mentionedSelf: accountId.length > 0 && mentionsAccount(row.segments, accountId),
+    replyToSelf:
+      Boolean(row.replyTo?.isSelf) ||
+      replySnapshotAuthorIsSelf(row.replySnapshot, accountId),
   };
+}
+
+/** The local reply row may be gone; its stored snapshot still names the author. */
+function replySnapshotAuthorIsSelf(
+  value: Prisma.JsonValue | null,
+  accountId: string,
+): boolean {
+  if (!accountId || !value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const authorId = (value as Record<string, unknown>)['authorId'];
+  return typeof authorId === 'string' && authorId.trim() === accountId;
 }
 
 /**
