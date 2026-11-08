@@ -40,7 +40,7 @@ export const ADVANCED_GROUPS: readonly AdvancedGroup[] = [
     id: 'boundaries',
     title: '边界与底线',
     caption: '角色自身可承载的尺度、拒绝方式与事后照护需求。',
-    keys: ['explicit_level_char', 'aftercare_need_base', 'decline_response_style'],
+    keys: ['explicit_level_char', 'scene_style', 'aftercare_need_base', 'decline_response_style'],
   },
   {
     id: 'body',
@@ -49,6 +49,11 @@ export const ADVANCED_GROUPS: readonly AdvancedGroup[] = [
     keys: ['sensitivity_map', 'touch_preference'],
   },
 ];
+
+export const ADVANCED_FIELD_COUNT = ADVANCED_GROUPS.reduce(
+  (sum, group) => sum + group.keys.length,
+  0,
+);
 
 export function PersonaAdvancedPanel({
   value,
@@ -182,6 +187,18 @@ export function PersonaAdvancedPanel({
                 hint="一句话描述角色自身可承载的内容尺度，不改变同意规则。"
               />
             </div>
+            <div className="sm:col-span-2">
+              <TextAreaControl
+                id="advanced-scene-style"
+                label="场景写法"
+                value={value.scene_style}
+                onChange={(next) => onChange('scene_style', next)}
+                max={2000}
+                rows={5}
+                placeholder="以第一人称贴近角色本人写；动作、身体反应和感官写细，台词交给对话；节奏放慢，不用比喻代替过程。"
+                hint="详细场景模式下扩写场景与动作的依据；留空使用默认写法。"
+              />
+            </div>
             <SliderControl
               label="事后照护基线"
               value={value.aftercare_need_base}
@@ -237,8 +254,8 @@ export function PersonaAdvancedPanel({
     <div className="space-y-3">
       <div className="rounded-xl border border-mist-100/[0.07] bg-ink-950/25 px-4 py-3">
         <p className="text-[0.72rem] leading-6 text-mist-400">
-          这 15 项只描述 TA 的行为方式，不随对话变化。未改动的项使用推荐默认，保存后与{' '}
-          {TOTAL_STEPS} 步内容一起生成新版本。
+          这 {ADVANCED_FIELD_COUNT} 项只描述 TA 的行为方式，不随对话变化。未改动的项使用推荐默认，
+          保存后与 {TOTAL_STEPS} 步内容一起生成新版本。
         </p>
       </div>
 

@@ -33,6 +33,7 @@ import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
 import { MindSceneService } from './mind-scene.service.js';
+import { MindSceneWriterService } from './mind-scene-writer.service.js';
 import { MindSituationService } from './mind-situation.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import { MindSocialService } from './mind-social.service.js';
@@ -100,6 +101,7 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly scenes: MindSceneService,
     private readonly social: MindSocialService,
     private readonly planner: MindPlannerService,
+    private readonly sceneWriter: MindSceneWriterService,
     private readonly drift: MindDriftService,
     private readonly executor: MindActionExecutor,
     private readonly replyLock: MindReplyLockService,
@@ -635,7 +637,12 @@ export class MindRuntimeService implements OnModuleInit {
       return finishInterruptedTurn('规划完成', plan);
     }
     let lockAcquired = false;
-    if (plan.engage && plan.beats.length > 0 && mode !== 'SHADOW' && avoidWindow) {
+    if (
+      plan.engage &&
+      (plan.beats.length > 0 || plan.sceneCue) &&
+      mode !== 'SHADOW' &&
+      avoidWindow
+    ) {
       const acquired = await this.replyLock.acquire({
         conversationId: scene.conversation.id,
         runId: run.id,
@@ -696,6 +703,15 @@ export class MindRuntimeService implements OnModuleInit {
         await this.replyLock.release(scene.conversation.id, run.id);
       }
       return finishInterruptedTurn('表达前', plan);
+    }
+    if (mode !== 'SHADOW') {
+      await this.expandScene(plan, scene, state, settings, { runId: run.id, signal });
+    }
+    if (signal?.aborted) {
+      if (lockAcquired) {
+        await this.replyLock.release(scene.conversation.id, run.id);
+      }
+      return finishInterruptedTurn('场景扩写后', plan);
     }
     await this.writeBack(run.id, scene, plan, decision.read, state, settings, conversationRead);
     void this.consolidateIfNeeded(scene.persona.id, scene, state);
@@ -1294,7 +1310,12 @@ export class MindRuntimeService implements OnModuleInit {
               : plan.reason,
         });
       }
-      if (plan.engage && plan.beats.length > 0 && mode !== 'SHADOW' && isGroup) {
+      if (
+        plan.engage &&
+        (plan.beats.length > 0 || plan.sceneCue) &&
+        mode !== 'SHADOW' &&
+        isGroup
+      ) {
         const acquired = await this.replyLock.acquire({
           conversationId,
           runId: run.id,
@@ -1350,6 +1371,9 @@ export class MindRuntimeService implements OnModuleInit {
             suppressed: true,
           });
         }
+      }
+      if (mode !== 'SHADOW') {
+        await this.expandScene(plan, scene, state, settings, { runId: run.id });
       }
       await this.writeBack(run.id, scene, plan, decision.read, state, settings);
       const actions = await this.executor.execute({
@@ -1558,6 +1582,9 @@ export class MindRuntimeService implements OnModuleInit {
       dryRun: true,
       capturePrompts: true,
     });
+    if (settings.sceneDetail === 'EXPLICIT' && plannerResult.plan.sceneCue) {
+      await this.expandScene(plannerResult.plan, scene, state, settings, { dryRun: true });
+    }
     notes.push(
       '只读试跑：没有创建运行轨迹、没有写记忆/关系/待办，也没有留下提示词日志和测试消息。',
     );
@@ -1854,6 +1881,52 @@ export class MindRuntimeService implements OnModuleInit {
         error: input.error ?? null,
       },
     });
+  }
+
+  /** EXPLICIT scene mode: turn the planner's cue into one narration beat. */
+  private async expandScene(
+    plan: ActionPlan,
+    scene: MindScene,
+    state: PersonaState,
+    settings: MindSettingsRecord,
+    options: { runId?: string; signal?: AbortSignal; dryRun?: boolean } = {},
+  ): Promise<void> {
+    const cue = plan.sceneCue?.trim();
+    if (!cue || settings.sceneDetail !== 'EXPLICIT') {
+      return;
+    }
+    try {
+      const result = await this.sceneWriter.write({
+        scene,
+        state,
+        settings,
+        cue,
+        runId: options.runId,
+        signal: options.signal,
+        dryRun: options.dryRun,
+      });
+      if (!result) {
+        return;
+      }
+      plan.beats = [
+        { kind: 'text' as const, text: result.text, delayMs: settings.minBeatDelayMs },
+        ...plan.beats,
+      ].slice(0, Math.max(2, settings.maxBeats));
+      plan.sceneCue = undefined;
+      if (options.runId) {
+        await this.step(
+          options.runId,
+          'EXPRESSION',
+          '场景扩写',
+          { cue },
+          { chars: result.text.length, providerId: result.providerId, model: result.model },
+          result.latencyMs,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`场景扩写失败：${message}`);
+    }
   }
 
   private async step(

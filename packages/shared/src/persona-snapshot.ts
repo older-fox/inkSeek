@@ -107,6 +107,7 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
   put('sensitivity_map', advanced.sensitivity_map);
   put('touch_preference', advanced.touch_preference);
   put('explicit_level_char', advanced.explicit_level_char);
+  put('scene_style', advanced.scene_style);
   put('aftercare_need_base', advanced.aftercare_need_base);
   put('decline_response_style', advanced.decline_response_style);
 

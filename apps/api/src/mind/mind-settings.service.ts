@@ -17,6 +17,7 @@ const SETTINGS_DEFAULTS = {
   proactiveWakeDailyLimit: 0,
   proactiveWakeMinGapSeconds: 0,
   maxBeats: 3,
+  sceneDetail: 'OFF',
   minBeatDelayMs: 800,
   maxBeatDelayMs: 4000,
   replyAvoidSeconds: 180,
@@ -94,6 +95,8 @@ export class MindSettingsService {
       data.proactiveWakeMinGapSeconds = input.proactiveWakeMinGapSeconds;
     }
     if (input.maxBeats !== undefined) data.maxBeats = input.maxBeats;
+    // Per-channel so normal chat keeps the chat-only rule; only intimate scenes expand.
+    if (input.sceneDetail !== undefined) data.sceneDetail = input.sceneDetail;
     if (input.minBeatDelayMs !== undefined) data.minBeatDelayMs = input.minBeatDelayMs;
     if (input.maxBeatDelayMs !== undefined) data.maxBeatDelayMs = input.maxBeatDelayMs;
     if (input.replyAvoidSeconds !== undefined) {
@@ -166,6 +169,7 @@ export class MindSettingsService {
         proactiveWakeDailyLimit: input.proactiveWakeDailyLimit ?? 0,
         proactiveWakeMinGapSeconds: input.proactiveWakeMinGapSeconds ?? 0,
         maxBeats: input.maxBeats ?? 3,
+        sceneDetail: input.sceneDetail ?? 'OFF',
         minBeatDelayMs: input.minBeatDelayMs ?? 800,
         maxBeatDelayMs: input.maxBeatDelayMs ?? 4000,
         replyAvoidSeconds: input.replyAvoidSeconds ?? 180,
@@ -225,6 +229,7 @@ function toRecord(row: ChatMindSettings): MindSettingsRecord {
     proactiveWakeDailyLimit: row.proactiveWakeDailyLimit,
     proactiveWakeMinGapSeconds: row.proactiveWakeMinGapSeconds,
     maxBeats: row.maxBeats,
+    sceneDetail: row.sceneDetail,
     minBeatDelayMs: row.minBeatDelayMs,
     maxBeatDelayMs: row.maxBeatDelayMs,
     replyAvoidSeconds: row.replyAvoidSeconds,

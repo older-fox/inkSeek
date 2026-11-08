@@ -854,6 +854,13 @@ export const PERSONA_GROUPS: readonly PersonaGroup[] = [
             wide: true,
           },
           {
+            key: 'scene_style',
+            label: '场景写法',
+            hint: '详细场景模式下的视角、详略、节奏与用词；留空用默认写法',
+            kind: 'paragraph',
+            wide: true,
+          },
+          {
             key: 'experience_level',
             label: '经验等级',
             hint: '相关互动的经验程度，不改变同意规则',

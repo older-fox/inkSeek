@@ -477,6 +477,14 @@ enum PersonaMindMode {
   LIVE
 }
 
+/// OFF keeps replies chat-only; ACTION allows short stage directions in text;
+/// EXPLICIT asks the planner for a scene cue and expands it in a second call.
+enum MindSceneDetail {
+  OFF
+  ACTION
+  EXPLICIT
+}
+
 enum PersonaMemoryScope {
   SELF
   RELATION
@@ -617,6 +625,9 @@ model ChatMindSettings {
   /// Minimum seconds between two proactive/heartbeat wakes. 0 disables the gap.
   proactiveWakeMinGapSeconds Int             @default(0)
   maxBeats                   Int             @default(3)
+  /// OFF keeps replies chat-only; ACTION allows short stage directions in text;
+  /// EXPLICIT lets the runtime expand a scene cue into detailed prose.
+  sceneDetail                MindSceneDetail @default(OFF)
   minBeatDelayMs             Int             @default(800)
   maxBeatDelayMs             Int             @default(4000)
   /// After the model decides to reply, other reply tasks in the same

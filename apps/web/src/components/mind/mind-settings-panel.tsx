@@ -1,4 +1,8 @@
-import type { MindSettingsUpdateInput, PhoneDeviceInfo } from '@inkseek/shared';
+import type {
+  MindSceneDetail,
+  MindSettingsUpdateInput,
+  PhoneDeviceInfo,
+} from '@inkseek/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -8,6 +12,12 @@ import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { MODES } from './mind-format';
 import { EmptyState, NumberField, TextAreaField, ToggleRow } from './mind-ui';
+
+const SCENE_DETAILS: { value: MindSceneDetail; label: string; hint: string }[] = [
+  { value: 'OFF', label: '关闭', hint: '只写说出口的话' },
+  { value: 'ACTION', label: '动作', hint: '允许简短动作和场景' },
+  { value: 'EXPLICIT', label: '详细场景', hint: '二次扩写场景与动作' },
+];
 
 export function MindSettingsPanel({
   channelId,
@@ -33,6 +43,7 @@ export function MindSettingsPanel({
   const [heartbeat, setHeartbeat] = useState(true);
   const [proactive, setProactive] = useState(false);
   const [maxBeats, setMaxBeats] = useState(3);
+  const [sceneDetail, setSceneDetail] = useState<MindSceneDetail>('OFF');
   const [messageBudget, setMessageBudget] = useState(30);
   const [proactiveWakeLimit, setProactiveWakeLimit] = useState(0);
   const [proactiveWakeGap, setProactiveWakeGap] = useState(0);
@@ -68,6 +79,7 @@ export function MindSettingsPanel({
     setHeartbeat(settings.heartbeatEnabled);
     setProactive(settings.proactiveEnabled);
     setMaxBeats(settings.maxBeats);
+    setSceneDetail(settings.sceneDetail);
     setMessageBudget(settings.dailyMessageBudget);
     setProactiveWakeLimit(settings.proactiveWakeDailyLimit);
     setProactiveWakeGap(settings.proactiveWakeMinGapSeconds);
@@ -121,6 +133,7 @@ export function MindSettingsPanel({
     settings.heartbeatEnabled !== heartbeat ||
     settings.proactiveEnabled !== proactive ||
     settings.maxBeats !== maxBeats ||
+    settings.sceneDetail !== sceneDetail ||
     settings.dailyMessageBudget !== messageBudget ||
     settings.proactiveWakeDailyLimit !== proactiveWakeLimit ||
     settings.proactiveWakeMinGapSeconds !== proactiveWakeGap ||
@@ -241,6 +254,33 @@ export function MindSettingsPanel({
           max={30}
           onChange={setPrivateBurst}
         />
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
+        <p className="text-[0.8rem] text-mist-300">场景描写</p>
+        <p className="mt-1 text-[0.64rem] leading-4 text-mist-600">
+          详细场景模式下，亲密场景会先由规划器给出简短动作提示，再扩写成场景与动作正文；日常对话仍只写说出口的话。角色卡里的「场景写法」会作为扩写依据。
+        </p>
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          {SCENE_DETAILS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setSceneDetail(item.value)}
+              className={cn(
+                'rounded-xl border px-2.5 py-2 text-left transition',
+                sceneDetail === item.value
+                  ? 'border-brass-400/40 bg-brass-400/10'
+                  : 'border-mist-100/[0.07] bg-ink-950/30 hover:border-mist-100/[0.14]',
+              )}
+            >
+              <span className="block text-[0.74rem] text-mist-200">{item.label}</span>
+              <span className="mt-0.5 block text-[0.58rem] leading-4 text-mist-600">
+                {item.hint}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-4 rounded-xl border border-mist-100/[0.06] bg-ink-950/25 p-3">
@@ -492,6 +532,7 @@ export function MindSettingsPanel({
             heartbeatEnabled: heartbeat,
             proactiveEnabled: proactive,
             maxBeats,
+            sceneDetail,
             dailyMessageBudget: messageBudget,
             proactiveWakeDailyLimit: proactiveWakeLimit,
             proactiveWakeMinGapSeconds: proactiveWakeGap,

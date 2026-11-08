@@ -89,6 +89,7 @@ export const PERSONA_AI_SYSTEM_PROMPT = `你是「墨寻」平台的人格卡撰
     "sensitivity_map": ["敏感点，每条 ≤40 字，最多 20 条"],
     "touch_preference": "一句话描述 TA 喜欢、排斥或需要确认的接触，≤200 字",
     "explicit_level_char": "一句话描述角色自身可承载的内容尺度，≤200 字",
+    "scene_style": "亲密或动作场景的写法偏好（视角、详略、节奏、用词），≤2000 字",
     "aftercare_need_base": "事后安抚需求，0-100",
     "decline_response_style": "拒绝不合意请求时的模板话术，≤500 字"
   }

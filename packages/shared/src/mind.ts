@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const personaMindModes = ['OFF', 'SHADOW', 'APPROVAL', 'LIVE'] as const;
+export const mindSceneDetails = ['OFF', 'ACTION', 'EXPLICIT'] as const;
 export const personaMemoryScopes = [
   'SELF',
   'RELATION',
@@ -61,6 +62,7 @@ export const agentActionKinds = ['MESSAGE', 'STICKER', 'FACE', 'TYPING', 'MEMORY
 export const agentActionStatuses = ['PENDING', 'APPROVED', 'SENT', 'FAILED', 'SKIPPED'] as const;
 
 export type PersonaMindMode = (typeof personaMindModes)[number];
+export type MindSceneDetail = (typeof mindSceneDetails)[number];
 export type PersonaMemoryScope = (typeof personaMemoryScopes)[number];
 export type PersonaMemoryKind = (typeof personaMemoryKinds)[number];
 export type PersonaMemorySubjectType = (typeof personaMemorySubjectTypes)[number];
@@ -93,6 +95,8 @@ export interface MindSettingsRecord {
   /** Minimum seconds between proactive/heartbeat wakes; 0 = off. */
   proactiveWakeMinGapSeconds: number;
   maxBeats: number;
+  /** OFF keeps chat-only replies; ACTION allows short stage directions; EXPLICIT expands scene cues. */
+  sceneDetail: MindSceneDetail;
   minBeatDelayMs: number;
   maxBeatDelayMs: number;
   replyAvoidSeconds: number;
@@ -802,6 +806,8 @@ export interface ActionPlan {
   reason: string;
   stance: string;
   beats: OutgoingBeat[];
+  /** EXPLICIT scene mode: short cue the runtime expands into a narration beat. */
+  sceneCue?: string;
   memoryWrites: MemoryDraft[];
   /** Ways of speaking learned from chats, videos or pages. */
   styleNotes?: StyleNoteDraft[];
@@ -852,6 +858,7 @@ export const mindSettingsUpdateSchema = z.object({
   proactiveWakeDailyLimit: z.number().int().min(0).max(500).optional(),
   proactiveWakeMinGapSeconds: z.number().int().min(0).max(86400).optional(),
   maxBeats: z.number().int().min(1).max(8).optional(),
+  sceneDetail: z.enum(mindSceneDetails).optional(),
   minBeatDelayMs: z.number().int().min(0).max(30_000).optional(),
   maxBeatDelayMs: z.number().int().min(0).max(60_000).optional(),
   replyAvoidSeconds: z.number().int().min(0).max(7200).optional(),

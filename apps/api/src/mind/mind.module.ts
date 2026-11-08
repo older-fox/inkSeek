@@ -17,6 +17,7 @@ import { MindLoopService } from './mind-loop.service.js';
 import { MindPhoneFocusService } from './mind-phone-focus.service.js';
 import { MindPlannerService } from './mind-planner.service.js';
 import { MindReplyLockService } from './mind-reply-lock.service.js';
+import { MindSceneWriterService } from './mind-scene-writer.service.js';
 import { MindRuntimeService } from './mind-runtime.service.js';
 import { MindSceneService } from './mind-scene.service.js';
 import { MindService } from './mind.service.js';
@@ -54,6 +55,7 @@ import { WebSearchService } from './web-search.service.js';
     MindDriftService,
     MindPlannerService,
     MindReplyLockService,
+    MindSceneWriterService,
     MindClosureService,
     MindHeartbeatLogService,
     MindPhoneFocusService,

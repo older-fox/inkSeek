@@ -35,6 +35,7 @@ export const personaAdvancedSchema = z.object({
   sensitivity_map: listSchema(20, 40).default([]),
   touch_preference: sentenceField('触碰偏好'),
   explicit_level_char: sentenceField('角色尺度上限', '不主动展开相关话题，保持克制。'),
+  scene_style: z.string().max(2000, '场景写法最多 2000 个字符').default(''),
   aftercare_need_base: numberField.default(50),
   decline_response_style: z
     .string()
@@ -59,6 +60,7 @@ export function createDefaultPersonaAdvanced(): PersonaAdvanced {
     sensitivity_map: [],
     touch_preference: '',
     explicit_level_char: '不主动展开相关话题，保持克制。',
+    scene_style: '',
     aftercare_need_base: 50,
     decline_response_style: '直接说明不方便，并给出一个可接受的替代。',
   };

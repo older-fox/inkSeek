@@ -120,6 +120,7 @@ export function normalizePersonaDraft(input: unknown): PersonaDraft {
       touch_preference: text(advancedInput.touch_preference, 200),
       explicit_level_char:
         text(advancedInput.explicit_level_char, 200) || advancedDefaults.explicit_level_char,
+      scene_style: text(advancedInput.scene_style, 2000),
       aftercare_need_base: slider(
         advancedInput.aftercare_need_base,
         advancedDefaults.aftercare_need_base,

@@ -25,7 +25,10 @@ import {
   type PersonaSummary,
 } from '@inkseek/shared';
 import { GhostButton, PrimaryButton } from '@/components/button';
-import { PersonaAdvancedPanel } from '@/components/persona-advanced-panel';
+import {
+  ADVANCED_FIELD_COUNT,
+  PersonaAdvancedPanel,
+} from '@/components/persona-advanced-panel';
 import { PersonaAiWriter } from '@/components/persona-ai-writer';
 import {
   ChoiceControl,
@@ -1433,7 +1436,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                           className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-brass-400/30 bg-brass-400/[0.07] px-6 text-[0.8rem] font-medium text-brass-200 transition hover:border-brass-400/50 hover:bg-brass-400/[0.12] sm:w-auto"
                         >
                           <SlidersHorizontal className="size-4 text-brass-300 transition group-hover:rotate-6" />
-                          进阶档案 · 15 项
+                          进阶档案 · {ADVANCED_FIELD_COUNT} 项
                         </button>
                       )}
                       {!editing && (
@@ -1727,7 +1730,7 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <span className="font-mono text-[0.55rem] uppercase tracking-[0.2em] text-brass-400/75">
-                          Advanced Dossier · 15 Fields
+                          Advanced Dossier · {ADVANCED_FIELD_COUNT} Fields
                         </span>
                         <h2
                           id="persona-wizard-title"

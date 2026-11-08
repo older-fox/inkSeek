@@ -132,6 +132,7 @@ export const PERSONA_ATTRIBUTE_META: Record<string, { label: string; group: stri
   ...group(GROUP_BOUNDARIES, {
     hard_limits_global: '全局硬限制',
     explicit_level_char: '角色尺度上限',
+    scene_style: '场景写法',
     experience_level: '经验等级',
     aftercare_need_base: '事后照护基线',
     decline_response_style: '拒绝行为模板',

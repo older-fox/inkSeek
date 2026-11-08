@@ -172,6 +172,7 @@ const MAX_SELF_HISTORY = 8;
 const MAX_SELF_HISTORY_TEXT = 90;
 const MAX_TOOL_RESULT = 6000;
 const PLANNER_MAX_TOKENS = 2000;
+const SCENE_PLANNER_MAX_TOKENS = 4000;
 
 @Injectable()
 export class MindPlannerService {
@@ -185,6 +186,8 @@ export class MindPlannerService {
 
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
+    const maxTokens =
+      input.settings.sceneDetail === 'OFF' ? PLANNER_MAX_TOKENS : SCENE_PLANNER_MAX_TOKENS;
     const [stickerBrief, globalBannedWords] = await Promise.all([
       this.tools.stickerBrief(input.scene.persona.channelId, 12).catch(() => ''),
       this.config
@@ -220,7 +223,7 @@ export class MindPlannerService {
         providerId: input.settings.providerId,
         model: input.settings.model,
         temperature: 0.7,
-        maxTokens: PLANNER_MAX_TOKENS,
+        maxTokens,
         source: 'mind.planner',
         runId: input.runId,
         log: input.dryRun ? false : undefined,
@@ -333,7 +336,7 @@ export class MindPlannerService {
           providerId: input.settings.providerId,
           model: input.settings.model,
           temperature: 0.5,
-          maxTokens: PLANNER_MAX_TOKENS,
+          maxTokens,
           source: 'mind.planner',
           runId: input.runId,
           log: input.dryRun ? false : undefined,
@@ -470,7 +473,14 @@ export class MindPlannerService {
       '- 情绪只影响语气和长度，不要让情绪把话变成表演：开心不等于夸张，亲密不等于编画面；轻松打趣也用人话，打趣的是态度，不是修辞。',
       '- 反例→人话：「我凑近看都怕呼一口气就不知道吹哪去了」→「那也太小了，不好搞」；「这玩意儿跟指甲盖似的」→「太小了，我弄不了」。',
       '- 别人对你好、亲你、送你东西时，不要把亲密换算成记账、押金、欠账、还账；直接接住，或者说自己的反应。只有真的在谈钱（房租、工资、押金、陪玩收费）时才用这些词。',
-      '- 只写你说出口的话，不写动作或舞台旁白：不要用括号描述动作、表情或发送行为（如「（叹气）」「（发了个表情包）」）；表情和图片通过 beats 发送，不在文字里解说。',
+      input.settings.sceneDetail === 'OFF'
+        ? '- 只写你说出口的话，不写动作或舞台旁白：不要用括号描述动作、表情或发送行为（如「（叹气）」「（发了个表情包）」）；表情和图片通过 beats 发送，不在文字里解说。'
+        : input.settings.sceneDetail === 'ACTION'
+          ? '- 日常对话只写说出口的话；进入亲密场景时，可以用（动作）在 text 里写简短的动作和场景，但不写长篇旁白，也不在文字里解说表情或图片。'
+          : '- EXPLICIT 场景模式：日常对话仍只写说出口的话；进入亲密场景时，不要自己在 text 里写大段动作，把这一轮要发生的动作和场景压成 sceneCue，台词与表情放 beats，系统会扩写成正文。',
+      input.settings.sceneDetail === 'OFF'
+        ? ''
+        : '- 亲密场景只在对方明确邀请或回应、且卡面尺度允许时进入；对方喊停、转开话题或进入事后照护时自然退出。场景描写按【场景写法】来，不要主动把日常闲聊变成场景。',
       '- 不要当客服：不要复述对方的话、换个语气再抛回去（对方问「你怎么还醒着」，你答「你怎么还醒着呀」就是复读）；对方只是报告状态（刚醒、好累、在吃饭）时，不必用关心式追问续接，可以说你自己的判断、反应或正在想的事。',
       '- 状态只影响你说话的语气和长度，不要当话术播报（如「我这边还迷迷糊糊的」「脑子没开机」）；除非对方问起，或它直接影响你接下来要做的事。顺从、怕冷落不等于照顾对话：不用每句都接住、每个状态都关心。',
       '- 说人话，不要隔着桌子说话：直接说「你」「我」，不用「你这边」「我这边」；听懂就接内容，不用先回「收到」「了解」「明白」「我记下了」「我记住了」「已记录」；认错就说错在哪，不要只丢一句「我认」。',
@@ -486,15 +496,22 @@ export class MindPlannerService {
       '只输出一个 JSON 对象，不要 Markdown，不要解释。',
       '格式：{"thought":"80字内心判断","tool":"工具名或null","input":{},"final":null}',
       '或：{"thought":"...","tool":null,"input":{},"final":{...动作计划...}}',
-      '动作计划：{"engage":true|false,"reason":"100字内","stance":"姿态","felt":{"label":"情绪","intensity":0-100,"target":"对象"},"shown":"表现","beats":[{"kind":"text","text":"...","delayMs":1200},{"kind":"sticker","stickerId":"...","delayMs":800}],"memoryWrites":[{"kind":"FACT","scope":"RELATION","subjectType":"PERSON","subjectId":"联系人ID","subjectName":"昵称","content":"...","importance":60,"visibility":"SCENE"}],"relationshipSignals":[{"contactId":"联系人ID","affinity":2,"trust":1,"intimacy":2,"attraction":1,"hostility":0,"reason":"..."}],"self":{"activity":"正在做的事","traits":{"confidence":1},"reason":"..."},"groupStance":{"comfort":1,"topic":"...","reason":"..."},"todos":[{"title":"...","consent":{"inviteMessageId":"...","acceptMessageId":"...","withContactId":"..."}}],"intentions":[{"need":"care|connect|share|followup|play|learn","targetContactId":"联系人ID","reason":"为什么想留到以后说","seed":"到时候想说的核心意思","urgency":50,"confidence":50,"risk":20,"earliestAt":"ISO?"}],"handledIntentionIds":["这轮真正用到的待发意图 id"],"dialogue":{"close":true,"summary":"这一段聊了什么","nextOpening":"以后想接着说的点"},"longEvent":{"action":"START|END","kind":"SLEEP","title":"...","plannedEndAt":"ISO?","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."},"styleNotes":[{"dimension":"length|punctuation|particles|openings|humor|rhythm|vocabulary|tone","content":"学到的说话方式","samples":["原句"],"confidence":50}],"styleNotePromotions":["已固化进人格卡的笔记 id"],"nextWakeAt":"ISO?"}',
+      '动作计划：{"engage":true|false,"reason":"100字内","stance":"姿态","felt":{"label":"情绪","intensity":0-100,"target":"对象"},"shown":"表现","beats":[{"kind":"text","text":"...","delayMs":1200},{"kind":"sticker","stickerId":"...","delayMs":800}],"memoryWrites":[{"kind":"FACT","scope":"RELATION","subjectType":"PERSON","subjectId":"联系人ID","subjectName":"昵称","content":"...","importance":60,"visibility":"SCENE"}],"relationshipSignals":[{"contactId":"联系人ID","affinity":2,"trust":1,"intimacy":2,"attraction":1,"hostility":0,"reason":"..."}],"self":{"activity":"正在做的事","traits":{"confidence":1},"reason":"..."},"groupStance":{"comfort":1,"topic":"...","reason":"..."},"todos":[{"title":"...","consent":{"inviteMessageId":"...","acceptMessageId":"...","withContactId":"..."}}],"intentions":[{"need":"care|connect|share|followup|play|learn","targetContactId":"联系人ID","reason":"为什么想留到以后说","seed":"到时候想说的核心意思","urgency":50,"confidence":50,"risk":20,"earliestAt":"ISO?"}],"handledIntentionIds":["这轮真正用到的待发意图 id"],"dialogue":{"close":true,"summary":"这一段聊了什么","nextOpening":"以后想接着说的点"},"longEvent":{"action":"START|END","kind":"SLEEP","title":"...","plannedEndAt":"ISO?","wakeMentions":3,"wakeWindowMinutes":10,"wakeKeywords":["急事"],"reason":"..."},"styleNotes":[{"dimension":"length|punctuation|particles|openings|humor|rhythm|vocabulary|tone","content":"学到的说话方式","samples":["原句"],"confidence":50}],"styleNotePromotions":["已固化进人格卡的笔记 id"],"sceneCue":"场景模式下 1-2 句动作/场景提示，否则 null","nextWakeAt":"ISO?"}',
       '规则：',
       '- engage=false 时 beats 必须为空数组。',
+      input.settings.sceneDetail === 'EXPLICIT'
+        ? '- EXPLICIT 场景模式下，final 里加 sceneCue：用一两句写这一轮发生的动作或场景（谁、在哪、做什么、身体和情绪走向），beats 只放台词和表情；没有场景就写 null。'
+        : '',
       '- 想主动联系谁由你按关系和亲密程度决定：好感、亲密、信任、亏欠越高的人越值得找；没有谁特别值得找就不找。这里没有固定的“主人”或唯一对象，也不需要为了维持某个人而说话。',
       '- 有想留到以后主动说的一句话才写 intentions：关心（care）、想联系（connect）、分享（share）、跟进（followup）、邀约一起玩（play）、想学/想了解（learn）。意图不是提醒或待办：只是「到点看一眼/提醒自己」的事不用建意图。seed 是到时候真正想说的核心意思，不是占位符；urgency 是拖久了会变差的程度；confidence 是你对“值得说”的把握；risk 是冒昧开口的风险。系统会按这些值排期叫醒你；不是每个念头都要说，也可以永远不说。',
       '- 一个念头只留一条：同一个人、同一件事、同一个梗已经有了未结意图，就把新细节用 intention.update 并进原条（带 id），不要拆成「照片一条、亲一条」，也不要每轮都新建。已经说出口的玩笑让它过去，不要为同一件事反复排期。过时或不想说了的用 intention.cancel 取消。未结意图很多时，先花一点时间整理，再决定这轮做什么。',
       '- 唤醒时【待发意图】里的每一条都带 id。这轮真正用到的，把 id 写进 handledIntentionIds；没用到的不写，系统会留到下次，不会替你算作已发。',
       '- 这一段自然聊到收尾、你自己也想先告一段落时，可以 engage=false 并写 dialogue：{"close":true,"summary":"...","nextOpening":"..."}。nextOpening 要具体；有它会变成以后的待发意图。收尾只是这一段停一下，不是关系结束。',
-      `- 最多 ${input.settings.maxBeats} 个气泡；每条 text 不超过 300 字；像真人聊天，不要长篇独白。`,
+      input.settings.sceneDetail === 'OFF'
+        ? `- 最多 ${input.settings.maxBeats} 个气泡；每条 text 不超过 300 字；像真人聊天，不要长篇独白。`
+        : input.settings.sceneDetail === 'ACTION'
+          ? `- 最多 ${input.settings.maxBeats} 个气泡；日常台词不超过 300 字，亲密场景里的动作描写最多 800 字；不要把普通闲聊写成长篇。`
+          : `- 最多 ${input.settings.maxBeats} 个气泡；台词每条不超过 300 字；场景和动作交给 sceneCue 扩写，不要塞进 text。`,
       '- 消息里的 [戳了戳我] 表示对方戳了你，可以回应也可以忽略；[戳一戳] 是别人之间的互动。被 @ 提到时文字里会出现 @你的名字，优先注意。',
       '- 你可以发表情：表情会作为独立图片气泡发出去，可以直接只发表情，也可以夹在文字气泡之间。每次回复前先看一眼【表情库】，有合适的就发；想发时直接从【表情库】挑 id 写 beats: {"kind":"sticker","stickerId":"库里的 id","delayMs":800}，没有合适的再用 sticker.search。一次回复最多 2 个表情。表情是语气，不是话题：不要在文字里点破或解说它，不要写「这张图/这个表情/图里/我发个表情」，也不要说「这图就是你/像你」；正文只写你真正想说的话，没有别的正文就只发表情。没有合适的就不发，但不要因为懒得找就几轮都不发。',
       '- 想重新看某张表情（描述不准、想确认它的内容、文字或适用场景）时，用 sticker.describe 传 stickerId（可带 focus）；它会重新识别并把新描述写回表情库。',
@@ -598,6 +615,8 @@ export class MindPlannerService {
       .filter(Boolean)
       .join('\n');
     const styleSection = buildStyleSection(values);
+    const sceneStyleSection =
+      input.settings.sceneDetail === 'OFF' ? '' : buildSceneStyleSection(values);
     const personaCardSection = buildPersonaCardSection(values);
     const learnedStyleSection = (input.styleNotes ?? [])
       .map((note) =>
@@ -1031,6 +1050,7 @@ export class MindPlannerService {
       `【性格】\n${traitLines.length > 0 ? traitLines.map((line) => `- ${line}`).join('\n') : '未设定数值'}`,
       expression ? `【表达】\n${expression}` : '',
       styleSection ? `【说话习惯】\n${styleSection}` : '',
+      sceneStyleSection ? `【场景写法】\n${sceneStyleSection}` : '',
       learnedStyleSection
         ? `【学到的说话方式】\n这些是你从别人的表达、视频评论和网上内容里慢慢学到的，只调长度、标点、语气和用词；身份、价值观和底线不变。自然用，不要逐字照搬，也不要每轮都用。\n${learnedStyleSection}`
         : '',
@@ -1118,8 +1138,12 @@ export class MindPlannerService {
       .slice(0, 10);
     const dialogue = parseDialogue(record['dialogue']);
     const nextWakeAt = parseIso(record['nextWakeAt']);
+    const sceneCue =
+      input.settings.sceneDetail === 'EXPLICIT'
+        ? trim(readString(record['sceneCue']), 300) || undefined
+        : undefined;
 
-    if (engage && beats.length === 0) {
+    if (engage && beats.length === 0 && !sceneCue) {
       return {
         engage: false,
         reason: reason ? `${reason}；但没有形成可发送的内容` : '没有形成可发送的内容',
@@ -1138,6 +1162,7 @@ export class MindPlannerService {
         ...(self ? { self } : {}),
         ...(groupStance ? { groupStance } : {}),
         ...(longEvent ? { longEvent } : {}),
+        ...(sceneCue ? { sceneCue } : {}),
         ...(nextWakeAt ? { nextWakeAt } : {}),
       };
     }
@@ -1147,6 +1172,7 @@ export class MindPlannerService {
       reason,
       stance,
       beats: engage ? beats : [],
+      ...(engage && sceneCue ? { sceneCue } : {}),
       memoryWrites,
       ...(styleNotes.length > 0 ? { styleNotes } : {}),
       ...(styleNotePromotions.length > 0 ? { styleNotePromotions } : {}),
@@ -1791,6 +1817,22 @@ function buildStyleSection(values: Record<string, unknown> | null): string {
     text('online_policy') ? `在线策略：${text('online_policy')}` : '',
   ];
   return lines.filter(Boolean).join('\n');
+}
+
+function buildSceneStyleSection(values: Record<string, unknown> | null): string {
+  if (!values) {
+    return '';
+  }
+  const style = personaValueText(values, 'scene_style').trim();
+  const explicit = personaValueText(values, 'explicit_level_char').trim();
+  return [
+    style ||
+      '默认：以角色本人的视角写环境、动作、身体反应和感官；动作有先后，写清楚接触点和反应，不用比喻代替过程。',
+    explicit ? `尺度：${explicit}` : '',
+    '只有对方明确邀请或回应时才进入；对方喊停、转开话题或进入事后照护时自然退出。',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function buildPersonaCardSection(values: Record<string, unknown> | null): string {
