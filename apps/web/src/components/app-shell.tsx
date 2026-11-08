@@ -8,6 +8,7 @@ import {
   Compass,
   LoaderCircle,
   LogOut,
+  MessagesSquare,
   Settings2,
   UsersRound,
   Waypoints,
@@ -28,7 +29,7 @@ interface AppShellProps {
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  to?: '/' | '/personas' | '/connections' | '/mind';
+  to?: '/' | '/personas' | '/connections' | '/mind' | '/direct';
   soon?: boolean;
 }
 
@@ -37,6 +38,7 @@ const navItems: NavItem[] = [
   { label: '人格中心', icon: UsersRound, to: '/personas' },
   { label: '互联中心', icon: Waypoints, to: '/connections' },
   { label: '人格心智', icon: Brain, to: '/mind' },
+  { label: '直接对话', icon: MessagesSquare, to: '/direct' },
   { label: '数据洞察', icon: BarChart3, soon: true },
 ];
 
@@ -48,7 +50,9 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
   const sectionLabel =
     pathname === '/mind'
       ? '人格心智'
-      : pathname.startsWith('/connections')
+      : pathname === '/direct'
+        ? '直接对话'
+        : pathname.startsWith('/connections')
         ? pathname === '/connections/private'
           ? '互联中心 · 私聊'
           : pathname === '/connections/groups'

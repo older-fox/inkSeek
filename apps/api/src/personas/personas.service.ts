@@ -213,6 +213,20 @@ export class PersonasService {
 
     return toRecord(row);
   }
+
+  /** Removes the card and its version history; channel snapshots stay frozen. */
+  async remove(id: string): Promise<void> {
+    const existing = await this.prisma.personaCard.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw personaNotFound();
+    }
+
+    await this.prisma.personaCard.delete({ where: { id } });
+  }
 }
 
 function createProfile(

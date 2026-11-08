@@ -11,6 +11,15 @@ export type MindState = PersonaState;
 export type MindGroupStance = PersonaGroupStance & { conversation: ChatConversation };
 export type MindConversation = ChatConversation;
 
+/** Where the persona last let this conversation end, and whether the person reopened it. */
+export interface ConversationClosureRecord {
+  closedAt: Date;
+  reason: string | null;
+  summary: string | null;
+  nextOpening: string | null;
+  reopenedAt: Date | null;
+}
+
 /** How long a reply keeps the same sender in an active exchange. */
 export const MIND_ACTIVE_EXCHANGE_MINUTES = 10;
 

@@ -12,6 +12,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { PrimaryButton } from '@/components/button';
 import { ConnectionsLayout } from '@/components/connections-layout';
 import { ConnectionsPage } from '@/pages/connections-page';
+import { DirectChatPage } from '@/pages/direct-chat-page';
 import { GroupChatsPage } from '@/pages/group-chats-page';
 import { HomePage } from '@/pages/home-page';
 import { LoginPage } from '@/pages/login-page';
@@ -129,6 +130,24 @@ const mindRoute = createRoute({
   component: MindPage,
 });
 
+const directChatRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/direct',
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { channelId?: string; identityId?: string } => ({
+    channelId:
+      typeof search.channelId === 'string' && search.channelId.length > 0
+        ? search.channelId
+        : undefined,
+    identityId:
+      typeof search.identityId === 'string' && search.identityId.length > 0
+        ? search.identityId
+        : undefined,
+  }),
+  component: DirectChatPage,
+});
+
 const connectionsLayoutRoute = createRoute({
   getParentRoute: () => appRoute,
   id: 'connections',
@@ -200,6 +219,7 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     personasRoute,
     mindRoute,
+    directChatRoute,
     connectionsLayoutRoute.addChildren([connectionsRoute, privateChatsRoute, groupChatsRoute]),
     settingsRoute,
   ]),

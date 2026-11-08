@@ -1,16 +1,31 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, UserRoundSearch, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import type { PersonaSummary } from '@inkseek/shared';
 import { InputShell } from '@/components/field';
 import { NewPersonaCard, PersonaCard } from '@/components/persona-card';
 import { PersonaWizard } from '@/components/persona-wizard';
+import { ApiError, api } from '@/lib/api';
 import { matchesPersona, personaViewOf } from '@/lib/personas';
-import { personasQuery } from '@/lib/queries';
+import { chatChannelsQuery, personasQuery } from '@/lib/queries';
 
 export function PersonasPage() {
+  const queryClient = useQueryClient();
   const query = useQuery(personasQuery);
+  const channelsQuery = useQuery(chatChannelsQuery);
+  const channels = channelsQuery.data ?? [];
+  const deleteMutation = useMutation({
+    mutationFn: (record: PersonaSummary) => api.deletePersona(record.id),
+    onSuccess: (_data, record) => {
+      void queryClient.invalidateQueries({ queryKey: ['personas'] });
+      toast.success(`已删除人格卡「${record.name}」`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : '删除人格卡失败，请稍后重试');
+    },
+  });
   const [search, setSearch] = useState('');
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editing, setEditing] = useState<PersonaSummary | null>(null);
@@ -162,7 +177,15 @@ export function PersonasPage() {
                 ease: [0.22, 1, 0.36, 1],
               }}
             >
-              <PersonaCard persona={view} onEdit={() => setEditing(record)} />
+              <PersonaCard
+                persona={view}
+                onEdit={() => setEditing(record)}
+                onDelete={() => deleteMutation.mutate(record)}
+                deleting={deleteMutation.isPending && deleteMutation.variables?.id === record.id}
+                boundChannelCount={
+                  channels.filter((channel) => channel.persona?.cardId === record.id).length
+                }
+              />
             </motion.div>
           ))}
 

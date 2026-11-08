@@ -5,6 +5,8 @@ import { MindModule } from '../mind/mind.module.js';
 import { PersonasModule } from '../personas/personas.module.js';
 import { RedisModule } from '../redis/redis.module.js';
 import { ChatController } from './chat.controller.js';
+import { ChatDirectController } from './chat-direct.controller.js';
+import { ChatDirectService } from './chat-direct.service.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatForwardService } from './chat-forward.service.js';
 import { ChatMessageProcessor } from './chat-message-processor.service.js';
@@ -17,9 +19,10 @@ import { VoiceTranscriptionService } from './voice-transcription.service.js';
 
 @Module({
   imports: [AuthModule, PersonasModule, AiModule, RedisModule, MindModule, MediaModule],
-  controllers: [ChatController],
+  controllers: [ChatController, ChatDirectController],
   providers: [
     ChatService,
+    ChatDirectService,
     ChatRuntimeService,
     ChatMessagesService,
     ChatForwardService,

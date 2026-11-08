@@ -17,7 +17,12 @@ import type { AgentIntention, AgentStep, PersonaState } from '../generated/prism
 import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindBrowserService } from './mind-browser.service.js';
-import { classifyText, readConversation } from './mind-conversation-read.js';
+import { MindClosureService } from './mind-closure.service.js';
+import {
+  classifyText,
+  readConversation,
+  type ConversationRead,
+} from './mind-conversation-read.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
 import {
   MindHeartbeatLogService,
@@ -104,6 +109,7 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly browser: MindBrowserService,
     private readonly learning: MindLearningService,
     private readonly styleNotes: PersonaStyleNoteService,
+    private readonly closure: MindClosureService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -379,6 +385,8 @@ export class MindRuntimeService implements OnModuleInit {
       return skipped(INTERRUPTED_REASON);
     }
 
+    await this.closure.markReopened(scene.conversation.id, input.message.sentAt).catch(() => undefined);
+
     await this.applyInboundFeedback(
       scene.persona.id,
       input.message.senderId,
@@ -535,6 +543,8 @@ export class MindRuntimeService implements OnModuleInit {
         )
       : [];
 
+    const closure = await this.closure.load(scene.conversation.id).catch(() => null);
+
     let plannerResult;
     try {
       plannerResult = await this.planner.plan({
@@ -547,6 +557,7 @@ export class MindRuntimeService implements OnModuleInit {
         staleMemories: recall.stale,
         memoryStats: recall.stats,
         conversationRead,
+        closure,
         intentionFeedback,
         activeIntentions,
         settings,
@@ -686,7 +697,7 @@ export class MindRuntimeService implements OnModuleInit {
       }
       return finishInterruptedTurn('表达前', plan);
     }
-    await this.writeBack(run.id, scene, plan, decision.read, state, settings);
+    await this.writeBack(run.id, scene, plan, decision.read, state, settings, conversationRead);
     void this.consolidateIfNeeded(scene.persona.id, scene, state);
     await this.executor.execute({
       plan,
@@ -1178,6 +1189,7 @@ export class MindRuntimeService implements OnModuleInit {
         memoryStats: recall.stats,
         intentionFeedback,
         activeIntentions,
+        closure: await this.closure.load(scene.conversation.id).catch(() => null),
         settings,
         mode,
         trigger: options.forceLearning
@@ -1535,6 +1547,7 @@ export class MindRuntimeService implements OnModuleInit {
       staleMemories: recall.stale,
       memoryStats: recall.stats,
       conversationRead,
+      closure: await this.closure.load(scene.conversation.id).catch(() => null),
       intentionFeedback,
       activeIntentions: await this.activeIntentionsBrief(persona.id),
       settings,
@@ -1621,6 +1634,7 @@ export class MindRuntimeService implements OnModuleInit {
     social: import('@inkseek/shared').SocialRead,
     state: PersonaState,
     settings: MindSettingsRecord,
+    conversationRead?: ConversationRead,
   ): Promise<void> {
     resolveSceneRefs(scene, plan);
     await this.states.applyEmotion(scene.persona.id, plan.felt ?? social.felt, { runId });
@@ -1688,7 +1702,7 @@ export class MindRuntimeService implements OnModuleInit {
         },
       });
     }
-    await this.persistPlanIntentions(runId, scene, plan);
+    await this.persistPlanIntentions(runId, scene, plan, conversationRead);
     if (plan.longEvent) {
       const result = await this.longEvents.applyDraft(scene.persona.id, plan.longEvent, {
         runId,
@@ -2589,6 +2603,7 @@ export class MindRuntimeService implements OnModuleInit {
     runId: string,
     scene: MindScene,
     plan: ActionPlan,
+    conversationRead?: ConversationRead,
   ): Promise<void> {
     const drafts = [...(plan.intentions ?? [])];
     if (plan.dialogue?.close) {
@@ -2600,6 +2615,11 @@ export class MindRuntimeService implements OnModuleInit {
         { close: true },
         0,
       );
+      await this.closure.recordClose(scene.conversation.id, {
+        reason: closureReasonOf(plan, conversationRead),
+        summary: plan.dialogue.summary ?? null,
+        nextOpening: plan.dialogue.nextOpening ?? null,
+      });
       if (plan.dialogue.nextOpening) {
         const nextOpening = plan.dialogue.nextOpening.trim();
         // The model often writes both an explicit intention and the same point
@@ -3272,6 +3292,25 @@ function localMinute(date: Date, timeZone: string | null): number {
 
 function minutesUntilLocalMidnight(now: Date, timeZone: string | null): number {
   return Math.max(1, 24 * 60 - (localHour(now, timeZone) * 60 + localMinute(now, timeZone)));
+}
+
+function closureReasonOf(plan: ActionPlan, read?: ConversationRead): string {
+  if (plan.longEvent?.action === 'START') {
+    return 'busy';
+  }
+  if (!read) {
+    return 'natural';
+  }
+  if (read.signals.explicitEnd) {
+    return 'explicit-end';
+  }
+  if (read.signals.topicClosure >= 0.8) {
+    return 'topic-done';
+  }
+  if (read.signals.fatigue >= 0.5) {
+    return 'tired';
+  }
+  return 'natural';
 }
 
 function clampWakeAt(settings: MindSettingsRecord, requested: Date): Date {

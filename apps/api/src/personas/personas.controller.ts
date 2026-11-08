@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -56,6 +57,13 @@ export class PersonasController {
     @Body(new ZodValidationPipe(savePersonaSchema)) input: SavePersonaInput,
   ): Promise<PersonaRecord> {
     return this.personas.update(id, input);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: '删除人格卡及全部版本历史，渠道快照不受影响' })
+  remove(@Param('id') id: string): Promise<void> {
+    return this.personas.remove(id);
   }
 
   @Get(':id/versions/:version')

@@ -66,7 +66,7 @@ export class ChatService {
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.chatConversation.groupBy({
-        by: ['channelId', 'kind'],
+        by: ['channelId', 'kind', 'isDirect'],
         _count: { _all: true },
       }),
       this.prisma.chatMessageRecord.groupBy({
@@ -77,6 +77,9 @@ export class ChatService {
 
     const stats = new Map<string, ChatChannelStats>();
     conversationCounts.forEach((entry) => {
+      if (entry.isDirect) {
+        return;
+      }
       const current = stats.get(entry.channelId) ?? { ...EMPTY_STATS };
       if (entry.kind === 'PRIVATE') {
         current.private = entry._count._all;
@@ -261,7 +264,7 @@ export class ChatService {
 
   async listConversations(kind: ChatConversationKind): Promise<ChatConversationSummary[]> {
     const records = await this.prisma.chatConversation.findMany({
-      where: { kind },
+      where: { kind, ...(kind === 'PRIVATE' ? { isDirect: false } : {}) },
       include: {
         channel: {
           select: {
@@ -280,6 +283,7 @@ export class ChatService {
       id: record.id,
       channelId: record.channelId,
       kind: record.kind,
+      isDirect: record.isDirect,
       externalId: record.externalId,
       name: record.name,
       avatarUrl: record.avatarUrl,
@@ -436,6 +440,15 @@ export class ChatService {
       });
     }
 
+    if (conversation.isDirect) {
+      return this.messages.appendLocal(conversation.channel, conversation, {
+        isSelf: true,
+        text: input.text,
+        images: input.images,
+        imageDescriptions: input.imageDescriptions,
+      });
+    }
+
     if (conversation.channel.status !== 'ONLINE') {
       throw new ServiceUnavailableException({
         code: 'CHANNEL_OFFLINE',
@@ -484,7 +497,9 @@ export class ChatService {
     }
 
     const [privateCount, groupCount, messageCount] = await Promise.all([
-      this.prisma.chatConversation.count({ where: { channelId: id, kind: 'PRIVATE' } }),
+      this.prisma.chatConversation.count({
+        where: { channelId: id, kind: 'PRIVATE', isDirect: false },
+      }),
       this.prisma.chatConversation.count({ where: { channelId: id, kind: 'GROUP' } }),
       this.prisma.chatMessageRecord.count({ where: { channelId: id } }),
     ]);

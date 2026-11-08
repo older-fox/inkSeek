@@ -1,14 +1,19 @@
 import {
   AtSign,
+  LoaderCircle,
   MessageSquareQuote,
   Plus,
   Quote,
   RotateCw,
   ShieldAlert,
+  Trash2,
+  TriangleAlert,
   UserRound,
+  X,
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
 import { TOTAL_STEPS } from '@/lib/persona-draft';
 import { formatPersonaTimestamp } from '@/lib/persona-metadata';
@@ -75,12 +80,14 @@ function CardFooter({
   personaName,
   active,
   onEdit,
+  onDelete,
 }: {
   hint: string;
 
   personaName: string;
   active: boolean;
   onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-3">
@@ -106,6 +113,24 @@ function CardFooter({
             编辑角色卡
           </button>
         )}
+        {onDelete && (
+          <button
+            type="button"
+            tabIndex={active ? 0 : -1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            aria-label={`删除 ${personaName} 的角色卡`}
+            title="删除人格卡"
+            className={cn(
+              'shrink-0 rounded-sm text-mist-600 transition hover:text-signal-400 focus-visible:outline-none focus-visible:text-signal-400 focus-visible:ring-2 focus-visible:ring-signal-400/40',
+              active ? 'pointer-events-auto' : 'pointer-events-none',
+            )}
+          >
+            <Trash2 className="size-3.5" strokeWidth={1.7} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -115,11 +140,13 @@ function PersonaFront({
   persona,
   active,
   onEdit,
+  onDelete,
   onExpand,
 }: {
   persona: Persona;
   active: boolean;
   onEdit?: () => void;
+  onDelete?: () => void;
   onExpand: (title: string, text: string) => void;
 }) {
   const quote = useClampedOverflow<HTMLParagraphElement>(persona.quote);
@@ -259,6 +286,7 @@ function PersonaFront({
         personaName={persona.name}
         active={active}
         onEdit={onEdit}
+        onDelete={onDelete}
       />
     </div>
   );
@@ -268,11 +296,13 @@ function PersonaBack({
   persona,
   active,
   onEdit,
+  onDelete,
   onExpand,
 }: {
   persona: Persona;
   active: boolean;
   onEdit?: () => void;
+  onDelete?: () => void;
   onExpand: (title: string, text: string) => void;
 }) {
   const story = useClampedOverflow<HTMLParagraphElement>(persona.story);
@@ -374,15 +404,170 @@ function PersonaBack({
         personaName={persona.name}
         active={active}
         onEdit={onEdit}
+        onDelete={onDelete}
       />
     </div>
   );
 }
 
-export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: () => void }) {
+function PersonaDeleteDialog({
+  open,
+  personaName,
+  boundChannelCount,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  personaName: string;
+  boundChannelCount: number;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !deleting) {
+        onCancel();
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    panelRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, [open, deleting, onCancel]);
+
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="persona-delete-dialog"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={() => {
+            if (!deleting) {
+              onCancel();
+            }
+          }}
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-[#05090e]/70 p-4 backdrop-blur-sm"
+        >
+          <motion.div
+            ref={panelRef}
+            tabIndex={-1}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            onClick={(event) => event.stopPropagation()}
+            initial={{ opacity: 0, y: 16, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.99 }}
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="glass-panel relative w-full max-w-md overflow-hidden rounded-[1.4rem] border border-mist-100/10 shadow-[0_40px_120px_-30px_rgba(0,0,0,0.75)] outline-none"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-mist-100/[0.07] px-5 py-4">
+              <div className="min-w-0">
+                <p className="font-mono text-[0.52rem] uppercase tracking-[0.22em] text-signal-400/80">
+                  Persona Center · Delete
+                </p>
+                <h3
+                  id={titleId}
+                  className="mt-1 truncate font-display text-[1.05rem] font-semibold tracking-tight text-mist-100"
+                >
+                  删除「{personaName}」？
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={deleting}
+                aria-label="关闭删除确认"
+                className="rounded-lg p-1.5 text-mist-500 transition hover:bg-mist-100/5 hover:text-mist-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass-400/40 disabled:opacity-50"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-5">
+              <div className="flex gap-3 rounded-xl border border-signal-400/20 bg-signal-400/[0.05] p-3">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-signal-400" strokeWidth={1.7} />
+                <div className="min-w-0 space-y-2 text-[0.76rem] leading-6 text-mist-400">
+                  <p>人格卡和它的全部版本历史会被永久删除，无法恢复。</p>
+                  {boundChannelCount > 0 ? (
+                    <p className="text-mist-500">
+                      有 {boundChannelCount} 个渠道正在使用这张卡的快照。删除不会影响已绑定的渠道人格，
+                      它们会继续保留自己的副本。
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-mist-100/[0.07] px-5 py-3.5">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={deleting}
+                className="rounded-lg border border-mist-100/10 px-3 py-1.5 text-[0.72rem] text-mist-400 transition hover:border-mist-100/20 hover:text-mist-200 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-signal-400/30 bg-signal-400/10 px-3 py-1.5 text-[0.72rem] text-signal-400 transition hover:bg-signal-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-400/40 disabled:opacity-60"
+              >
+                {deleting && <LoaderCircle className="size-3.5 animate-spin" />}
+                确认删除
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
+export function PersonaCard({
+  persona,
+  onEdit,
+  onDelete,
+  deleting = false,
+  boundChannelCount = 0,
+}: {
+  persona: Persona;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
+  boundChannelCount?: number;
+}) {
   const [flipped, setFlipped] = useState(false);
   const [expanded, setExpanded] = useState<{ title: string; text: string } | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const handleExpand = (title: string, text: string) => setExpanded({ title, text });
+  const handleDelete = onDelete ? () => setConfirmingDelete(true) : undefined;
 
   return (
     <>
@@ -416,6 +601,7 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
                 persona={persona}
                 active={!flipped}
                 onEdit={onEdit}
+                onDelete={handleDelete}
                 onExpand={handleExpand}
               />
             </motion.div>
@@ -429,6 +615,7 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
                 persona={persona}
                 active={flipped}
                 onEdit={onEdit}
+                onDelete={handleDelete}
                 onExpand={handleExpand}
               />
             </motion.div>
@@ -440,6 +627,14 @@ export function PersonaCard({ persona, onEdit }: { persona: Persona; onEdit?: ()
         title={expanded?.title ?? ''}
         text={expanded?.text ?? ''}
         onClose={() => setExpanded(null)}
+      />
+      <PersonaDeleteDialog
+        open={confirmingDelete}
+        personaName={persona.name}
+        boundChannelCount={boundChannelCount}
+        deleting={deleting}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => onDelete?.()}
       />
     </>
   );

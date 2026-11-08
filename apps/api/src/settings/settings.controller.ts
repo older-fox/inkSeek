@@ -12,6 +12,7 @@ import {
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   bilibiliSettingsSchema,
+  mindBannedWordsSchema,
   modelProviderSchema,
   phoneConnectSchema,
   phoneDisconnectSchema,
@@ -19,6 +20,8 @@ import {
   redisSettingsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
+  type MindBannedWordsInput,
+  type MindBannedWordsResult,
   type ModelProviderInput,
   type PhoneConnectInput,
   type PhoneDisconnectInput,
@@ -63,6 +66,15 @@ export class SettingsController {
     @Body(new ZodValidationPipe(bilibiliSettingsSchema)) input: BilibiliSettingsInput,
   ): Promise<BilibiliSettingsResult> {
     return this.settings.updateBilibili(input);
+  }
+
+  @Put('mind-banned-words')
+  @HttpCode(200)
+  @ApiOperation({ summary: '保存全局禁用词，对所有渠道的心智提示词生效（管理员）' })
+  updateMindBannedWords(
+    @Body(new ZodValidationPipe(mindBannedWordsSchema)) input: MindBannedWordsInput,
+  ): Promise<MindBannedWordsResult> {
+    return this.settings.updateMindBannedWords(input);
   }
 
   @Post('phone/connect')

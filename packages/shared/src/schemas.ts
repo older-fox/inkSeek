@@ -48,6 +48,12 @@ export const bilibiliSettingsSchema = z.object({
   clearCookie: z.boolean().optional().default(false),
 });
 
+export const mindBannedWordsSchema = z.object({
+  words: z
+    .array(z.string().trim().min(1, '禁用词不能为空').max(60, '单条禁用词最多 60 个字符'))
+    .max(500, '最多 500 条禁用词'),
+});
+
 export const phoneConnectSchema = z.object({
   address: z.string().trim().min(1, '请填写 IP:端口').max(120, '地址过长'),
 });
@@ -132,6 +138,16 @@ export const chatConversationQuerySchema = z.object({
   kind: z.enum(['PRIVATE', 'GROUP']),
 });
 
+export const chatDirectConversationSchema = z.object({
+  channelId: z.string().trim().min(1).max(64),
+  /** Private conversation whose participant should speak on the direct line. */
+  privateConversationId: z.string().trim().min(1).max(64).optional(),
+});
+
+export const chatDirectMessageSchema = z.object({
+  text: z.string().trim().min(1, '请输入消息内容').max(4000, '消息最多 4000 个字符'),
+});
+
 export const chatMessageQuerySchema = z.object({
   cursor: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int('数量必须是整数').min(1).max(200).default(50),
@@ -167,6 +183,7 @@ export interface PersonaAiProviderOption {
 export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type BilibiliSettingsInput = z.infer<typeof bilibiliSettingsSchema>;
+export type MindBannedWordsInput = z.infer<typeof mindBannedWordsSchema>;
 export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
 export type PhonePairInput = z.infer<typeof phonePairSchema>;
 export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;
@@ -177,5 +194,7 @@ export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
+export type ChatDirectConversationInput = z.infer<typeof chatDirectConversationSchema>;
+export type ChatDirectMessageInput = z.infer<typeof chatDirectMessageSchema>;
 export type SaveChannelPersonaInput = z.infer<typeof saveChannelPersonaSchema>;
 export type PersonaAiGenerateInput = z.infer<typeof personaAiGenerateSchema>;

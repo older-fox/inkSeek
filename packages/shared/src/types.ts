@@ -77,6 +77,12 @@ export interface SettingsOverview {
   bilibili: BilibiliSettings | null;
   phone: PhoneSettings;
   providers: ModelProviderSummary[];
+  /** Global banned words applied to every channel's mind prompt. */
+  mindBannedWords: string[];
+}
+
+export interface MindBannedWordsResult {
+  words: string[];
 }
 
 export interface PhoneSettingsResult {
@@ -200,6 +206,8 @@ export interface ChatConversationSummary {
   id: string;
   channelId: string;
   kind: ChatConversationKind;
+  /** A direct line that bypasses the QQ transport but keeps the real mind. */
+  isDirect: boolean;
   externalId: string;
   name: string;
   avatarUrl: string | null;

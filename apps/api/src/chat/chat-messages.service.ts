@@ -407,6 +407,138 @@ export class ChatMessagesService {
     });
   }
 
+  /**
+   * Persists a message that has no QQ transport behind it (direct lines).
+   * Inbound and outbound both use this path, so the mind sees ordinary records.
+   */
+  async appendLocal(
+    channel: ChatChannel,
+    conversation: ChatConversation,
+    input: {
+      isSelf: boolean;
+      contact?: ChatContact | null;
+      text: string;
+      images?: string[];
+      imageDescriptions?: string[];
+      sentAt?: Date;
+    },
+  ): Promise<ChatMessageSummary> {
+    const text = input.text.trim();
+    const segments: OneBotSegment[] = [];
+    const pendingImages: { dataUrl: string; position: number }[] = [];
+
+    if (text.length > 0) {
+      segments.push({ type: 'text', data: { text } });
+    }
+    (input.images ?? []).forEach((dataUrl) => {
+      const parsed = parseImageDataUrl(dataUrl);
+      if (parsed) {
+        const position = segments.length;
+        segments.push({ type: 'image', data: { file: `base64://${parsed.base64}` } });
+        pendingImages.push({ dataUrl, position });
+      }
+    });
+
+    if (segments.length === 0) {
+      throw new Error('消息内容为空');
+    }
+
+    const now = input.sentAt ?? new Date();
+    const contact = input.isSelf
+      ? await this.ensureContact(channel, {
+          externalId: channel.accountId,
+          nickname: channel.displayName,
+          avatarUrl: channel.avatarUrl ?? userAvatarUrl(channel.accountId),
+          isSelf: true,
+          seenAt: now,
+        })
+      : input.contact;
+    if (!contact) {
+      throw new Error('这条直连消息缺少说话人');
+    }
+
+    const imageAssets = (
+      await Promise.all(
+        pendingImages.map(async ({ dataUrl, position }, index) => {
+          const asset = await this.media.saveDataUrl(
+            channel.id,
+            dataUrl,
+            input.imageDescriptions?.[index],
+          );
+          return asset ? { ...asset, position } : null;
+        }),
+      )
+    ).filter((item): item is PositionedMedia => item !== null);
+    const assetsByPosition = new Map(imageAssets.map((asset) => [asset.position, asset]));
+    const storedSegments = segments.map((segment, position) => {
+      if (segment.type !== 'image') {
+        return segment;
+      }
+      const asset = assetsByPosition.get(position);
+      return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+    });
+    const kind: ChatMessageKind =
+      imageAssets.length > 0 ? (text.length > 0 ? 'MIXED' : 'IMAGE') : 'TEXT';
+    const senderName = input.isSelf ? channel.displayName : contact.nickname;
+
+    const { id } = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.chatMessageRecord.create({
+        data: {
+          channelId: channel.id,
+          conversationId: conversation.id,
+          externalId: null,
+          senderId: contact.id,
+          senderName,
+          senderCard: null,
+          isSelf: input.isSelf,
+          kind,
+          text,
+          segments: storedSegments as unknown as Prisma.InputJsonValue,
+          sentAt: now,
+          images: {
+            create: imageAssets.map((asset) => ({
+              mediaId: asset.mediaId,
+              url: asset.url,
+              fileName: asset.fileName,
+              mimeType: asset.mimeType,
+              byteSize: asset.byteSize,
+              width: asset.width,
+              height: asset.height,
+              remoteUrl: asset.remoteUrl,
+              position: asset.position,
+            })),
+          },
+        },
+        select: { id: true },
+      });
+
+      await tx.chatConversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: now,
+          lastMessagePreview: previewOf(text, kind, imageAssets.length, 0),
+          lastMessageSender: senderName,
+        },
+      });
+
+      return created;
+    });
+
+    const message = await this.loadMessageView(id);
+    this.events.emit({
+      type: 'message.created',
+      channelId: channel.id,
+      conversationId: conversation.id,
+      messageId: message.id,
+    });
+    this.events.emit({
+      type: 'conversation.updated',
+      channelId: channel.id,
+      conversationId: conversation.id,
+    });
+    return toMessageSummary(message);
+  }
+
   async send(
     channel: ChatChannel,
     conversation: ChatConversation,

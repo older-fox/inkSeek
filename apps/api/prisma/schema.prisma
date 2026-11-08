@@ -222,9 +222,21 @@ model ChatConversation {
   name               String
   avatarUrl          String?
   memberCount        Int?
+  /// A direct line that bypasses the QQ transport but still runs the real mind.
+  isDirect           Boolean              @default(false)
+  /// Contact speaking on this direct line; shared with its QQ identity when one exists.
+  directContactId    String?
   lastMessageAt      DateTime?
   lastMessagePreview String?
   lastMessageSender  String?
+  /// Persona mind: the last time it intentionally let this exchange end.
+  closureClosedAt    DateTime?
+  /// explicit-end | topic-done | tired | busy | natural
+  closureReason      String?
+  closureSummary     String?
+  closureNextOpening String?
+  /// First incoming message after the close; null once a new close lands.
+  closureReopenedAt  DateTime?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -236,6 +248,7 @@ model ChatConversation {
 
   @@unique([channelId, kind, externalId])
   @@index([channelId, kind, lastMessageAt])
+  @@index([channelId, isDirect])
 }
 
 model ChatGroupMember {

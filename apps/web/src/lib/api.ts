@@ -9,6 +9,8 @@ import type {
   ChatChannelSummary,
   ChatConversationKind,
   ChatConversationSummary,
+  ChatDirectConversationInput,
+  ChatDirectMessageInput,
   ChatForwardDetail,
   ChatMessagePage,
   ChatMessageSummary,
@@ -21,6 +23,8 @@ import type {
   AgentTodoUpdateInput,
   LlmPromptLogRecord,
   LoginInput,
+  MindBannedWordsInput,
+  MindBannedWordsResult,
   MindFocusOverview,
   MindHeartbeatLogRecord,
   MindLearningOverview,
@@ -140,6 +144,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
+  updateMindBannedWords: (input: MindBannedWordsInput) =>
+    request<MindBannedWordsResult>('/settings/mind-banned-words', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   connectPhone: (input: PhoneConnectInput) =>
     request<PhoneSettingsResult>('/settings/phone/connect', {
       method: 'POST',
@@ -186,6 +195,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
+  deletePersona: (id: string) =>
+    request<void>(`/personas/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   personaAiProviders: () => request<PersonaAiProviderOption[]>('/ai/persona-providers'),
   generatePersonaDraft: (input: PersonaAiGenerateInput) =>
     request<PersonaAiGeneration>('/ai/persona-draft', {
@@ -360,6 +371,19 @@ export const api = {
     }),
   deleteMindStyleNote: (id: string) =>
     request<void>(`/mind/style-notes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  ensureDirectConversation: (input: ChatDirectConversationInput) =>
+    request<ChatConversationSummary>('/chat/direct/conversations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  sendDirectMessage: (conversationId: string, input: ChatDirectMessageInput) =>
+    request<ChatMessageSummary>(
+      `/chat/direct/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
   mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
   mindDeleteSticker: (channelId: string, id: string) =>
     request<void>(

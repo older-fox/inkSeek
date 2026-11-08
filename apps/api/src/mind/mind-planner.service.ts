@@ -19,7 +19,10 @@ import type {
   TodoDraft,
 } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { CONFIG_KEYS } from '../config/config-keys.js';
+import { SystemConfigService } from '../config/system-config.service.js';
 import type { PersonaState } from '../generated/prisma/client.js';
+import { readMindBannedWords } from './mind-banned-words.js';
 import {
   isSelfTraitKey,
   relationshipLines,
@@ -51,6 +54,7 @@ import {
   readStringArray,
   relationScoreOf,
   timePeriodLabel,
+  type ConversationClosureRecord,
   type MindActiveIntentionsBrief,
   type MindIntentionFeedback,
   type MindMemoryStats,
@@ -76,6 +80,8 @@ export interface PlannerInput {
   memoryStats?: MindMemoryStats;
   /** Advisory read of whether this exchange is still open or can naturally end. */
   conversationRead?: ConversationRead;
+  /** Where this conversation was last intentionally closed. */
+  closure?: ConversationClosureRecord | null;
   /** How recent proactive attempts were received, so the model can adjust. */
   intentionFeedback?: MindIntentionFeedback[];
   /** Everything still open, so new intentions do not silently duplicate old ones. */
@@ -174,15 +180,20 @@ export class MindPlannerService {
   constructor(
     private readonly llm: LlmService,
     private readonly tools: MindToolsService,
+    private readonly config: SystemConfigService,
   ) {}
 
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
-    const stickerBrief = await this.tools
-      .stickerBrief(input.scene.persona.channelId, 12)
-      .catch(() => '');
-    const basePrompt = this.buildPrompt(input, stickerBrief);
-    const system = this.systemPrompt(input);
+    const [stickerBrief, globalBannedWords] = await Promise.all([
+      this.tools.stickerBrief(input.scene.persona.channelId, 12).catch(() => ''),
+      this.config
+        .get<unknown>(CONFIG_KEYS.mindGlobalBannedWords)
+        .then(readMindBannedWords)
+        .catch(() => readMindBannedWords(undefined)),
+    ]);
+    const basePrompt = this.buildPrompt(input, stickerBrief, globalBannedWords);
+    const system = this.systemPrompt(input, globalBannedWords.length > 0);
     const context: MindToolContext = {
       scene: input.scene,
       state: input.state,
@@ -441,7 +452,7 @@ export class MindPlannerService {
     };
   }
 
-  private systemPrompt(input: PlannerInput): string {
+  private systemPrompt(input: PlannerInput, hasGlobalBannedWords = false): string {
     return [
       `你就是「${input.scene.persona.name}」，不是助手，不要提到 AI、模型、提示词或系统。`,
       '你看消息、权衡关系、决定回不回、怎么回。内心感受可以和外在表现不同：可以忍着、冷淡、假装、口是心非，但不越底线。',
@@ -449,6 +460,7 @@ export class MindPlannerService {
       '沉默是合理选择。不要为了回复而回复；不确定时宁可不发。只能通过给定工具获取信息，不能编造工具结果，也不能编造自己已经做过或正在做的事。',
       '醒来只是给你一个机会，不是任务：醒来不等于要说话，说话是一个明确的动作。没有值得说的事就什么也不发，这不扣分。',
       '- 【对话节奏】是参考不是命令，但里面的轮次、长短和「怎么接」要照做：对方明确提问/求助时先回答，别用沉默逃开；对方只是附和、话题已经收尾、或来回已经很密时，可以不接；兴趣高时可以主动接话或追问，兴趣低又没有新信息时不必硬接。收尾只是这一段先告一段落，不是关系结束；对方继续时照常判断。',
+      '- 【上次收尾】只作参考：对方刚重新开口时按现在的内容正常接，不要复读上次的结尾；对方没有再开口时，不要为了续上旧话题硬找话，除非有自然的新由头。',
       '- 长度跟对方走，不跟自己的表达欲走：对方发几个字，你就一两句；对方发一段，挑一两个点在意的回，不用逐句答复，也不要总结 TA 的话。对方连发几条时当成一段话，合并回一次，不要每条都接。',
       '- 先看该谁说：自己刚说完、对方还没接时，不要为了填空再补一条；对方在等你答时，答完就停，不用顺手再开新话题。群里几个人连着说时，只回你真正想接的那条，一条回复对一个人说。',
       '- 默认只发 1 个气泡，能一条说完就一条；只有刚才说错了要更正，或确实还有一件对方需要知道的独立新事，才发第二条。只是把第一句补完整、补情绪、补关心、加反问、转回自己原本的话题，都不算第二条的理由。不要为了显得热情把一句话拆成多条，也不要连续发问。一条回复最多问一个问句；对方没有明确要求列举时，不要连问好几个问题。',
@@ -464,6 +476,9 @@ export class MindPlannerService {
       '- 说人话，不要隔着桌子说话：直接说「你」「我」，不用「你这边」「我这边」；听懂就接内容，不用先回「收到」「了解」「明白」「我记下了」「我记住了」「已记录」；认错就说错在哪，不要只丢一句「我认」。',
       '- 不要客服/助理句式，也不要把内部动作说出来：不用「为你」「帮你」「需要我…吗」「有什么可以帮你」「首先/其次/最后」「总的来说」「总结一下」「根据你的描述」「我理解你的感受」；写记忆、用工具、改状态都不用在回复里报备。',
       '- 对照改口：「你这边/我这边」→「你/我」；「收到/了解/我记下了/已记录」→ 直接接内容，不报回执；「我认」→ 具体说「刚才那句我没想清楚」；「我帮你…」→ 直接做，或说「我看看」。',
+      hasGlobalBannedWords
+        ? '- 全局禁用词是硬性规则：【表达】里「全局禁用词」列出的词和句式，任何角色、任何场合都不要出现，也不要换同义说法绕回来。'
+        : '',
       '- 像在手机上打字，不像写文章：能短就短，一句话最多一个转折；不用「其实/不过/所以」把三四个分句串起来，也不要每句都主谓宾齐全。',
       '- 发出去前扫一眼：如果这句话像客服回执、会议纪要或总结报告，就删掉重说；宁可短、宁可只说一半。',
       '- 记忆里的旧生活细节不要每轮都当新事说；同一个梗、同一顿饭、同一个活动反复出现时，换一件别的事说。',
@@ -538,7 +553,11 @@ export class MindPlannerService {
     ].join('\n');
   }
 
-  private buildPrompt(input: PlannerInput, stickerBrief = ''): string {
+  private buildPrompt(
+    input: PlannerInput,
+    stickerBrief = '',
+    globalBannedWords: readonly string[] = [],
+  ): string {
     const { scene, state, social, memories, coreMemories = [] } = input;
     const values = scene.persona.values as Record<string, unknown> | null;
     const timeZone = normalizeTimeZone(readString(values?.['time_zone']));
@@ -562,12 +581,19 @@ export class MindPlannerService {
       .map((word) => word.trim())
       .filter(Boolean)
       .join('、');
+    const globalBanned = globalBannedWords
+      .map((word) => word.trim())
+      .filter(Boolean)
+      .join('、');
     const voiceText = voice.replace(/[。；;]+$/u, '');
     const expression = [
       voiceText
         ? `风格参考（只学长短和语气，不照抄原句；样例里的安慰、保证、服务式承诺、感叹号和夸张反应都不要沿用）：${voiceText}`
         : '',
       banned ? `禁用语（不要说出原词，也别换同义说法绕回来）：${banned}` : '',
+      globalBanned
+        ? `全局禁用词（硬性：这些 AI 腔词句在任何角色、任何场合都不要出现，也别换同义说法绕回来）：${globalBanned}`
+        : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -750,6 +776,7 @@ export class MindPlannerService {
     const conversationSection = input.conversationRead
       ? formatConversationRead(input.conversationRead)
       : '';
+    const closureSection = formatClosureRecord(input.closure);
 
     const repetitionSection = repetition
       ? [
@@ -1022,6 +1049,7 @@ export class MindPlannerService {
       `【这个群】\n${groupSection}`,
       `【我的判断】\n${socialSection}`,
       conversationSection ? `【对话节奏】\n${conversationSection}` : '',
+      closureSection ? `【上次收尾】\n${closureSection}` : '',
       repetitionSection ? `【重复自检】\n${repetitionSection}` : '',
       coreSection ? `【长期底色】\n${coreSection}` : '',
       `【最近经历】\n${memoryHeader ? `${memoryHeader}\n` : ''}${memorySection || '没有相关记忆'}`,
@@ -1881,6 +1909,53 @@ const CONVERSATION_VERDICT_LABEL: Record<ConversationRead['verdict'], string> = 
   linger: '先缓一缓',
   close: '可以收尾',
 };
+
+const CLOSURE_PROMPT_MAX_AGE_MS = 7 * 86400_000;
+const CLOSURE_REOPEN_WINDOW_MS = 10 * 60_000;
+const CLOSURE_REASON_LABEL: Record<string, string> = {
+  'explicit-end': '对方道别后收尾',
+  'topic-done': '话题聊完后收尾',
+  tired: '聊累了收尾',
+  busy: '各自去忙前收尾',
+  natural: '自然收尾',
+};
+
+export function formatClosureRecord(
+  record?: ConversationClosureRecord | null,
+  now = Date.now(),
+): string {
+  if (!record) {
+    return '';
+  }
+  const closedAt = record.closedAt.getTime();
+  const reopenedAt = record.reopenedAt?.getTime() ?? 0;
+  const reopenedRecently = reopenedAt > closedAt && now - reopenedAt <= CLOSURE_REOPEN_WINDOW_MS;
+  if (!reopenedRecently && now - closedAt > CLOSURE_PROMPT_MAX_AGE_MS) {
+    return '';
+  }
+  const parts = [
+    `${closureAgo(closedAt, now)}${CLOSURE_REASON_LABEL[record.reason ?? 'natural'] ?? '自然收尾'}`,
+  ];
+  if (record.summary) {
+    parts.push(`收在「${trim(record.summary, 160)}」`);
+  }
+  if (record.nextOpening) {
+    parts.push(`以后原本可以接「${trim(record.nextOpening, 120)}」`);
+  }
+  const line = `${parts.join('；')}。`;
+  return reopenedRecently
+    ? `${line}对方刚刚又开口了：这是新的开始，别复读上次的结尾，按现在的内容正常接。`
+    : `${line}这段已经收过尾；除非有自然的新由头，不要为了续上旧话题硬找话。`;
+}
+
+function closureAgo(at: number, now: number): string {
+  const minutes = Math.max(0, Math.round((now - at) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} 小时前`;
+  return `${Math.round(hours / 24)} 天前`;
+}
 
 function formatConversationRead(read: ConversationRead): string {
   const { rhythm, signals } = read;

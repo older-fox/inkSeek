@@ -6,6 +6,7 @@ import { PhoneModule } from '../phone/phone.module.js';
 import { RedisModule } from '../redis/redis.module.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindBrowserService } from './mind-browser.service.js';
+import { MindClosureService } from './mind-closure.service.js';
 import { MindController } from './mind.controller.js';
 import { MindDriftService } from './mind-drift.service.js';
 import { MindFocusService } from './mind-focus.service.js';
@@ -53,6 +54,7 @@ import { WebSearchService } from './web-search.service.js';
     MindDriftService,
     MindPlannerService,
     MindReplyLockService,
+    MindClosureService,
     MindHeartbeatLogService,
     MindPhoneFocusService,
     MindLoopService,

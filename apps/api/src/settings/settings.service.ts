@@ -11,6 +11,8 @@ import {
   type ModelProviderProtocol,
   type ModelProviderSaveResult,
   type ModelProviderSummary,
+  type MindBannedWordsInput,
+  type MindBannedWordsResult,
   type RedisConnectionInput,
   type RedisSettings,
   type RedisSettingsInput,
@@ -22,6 +24,10 @@ import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider, Prisma } from '../generated/prisma/client.js';
+import {
+  normalizeMindBannedWords,
+  readMindBannedWords,
+} from '../mind/mind-banned-words.js';
 import { PhoneService } from '../phone/phone.service.js';
 import { RedisProbeService } from '../redis/redis-probe.service.js';
 import { ModelProviderProbeService } from './model-provider-probe.service.js';
@@ -41,11 +47,14 @@ export class SettingsService {
   ) {}
 
   async getOverview(): Promise<SettingsOverview> {
-    const [redisRecord, providers, bilibili, phone] = await Promise.all([
+    const [redisRecord, providers, bilibili, phone, bannedRecord] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
       this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
       this.bilibili.overview(),
       this.phone.status(),
+      this.prisma.systemConfig.findUnique({
+        where: { key: CONFIG_KEYS.mindGlobalBannedWords },
+      }),
     ]);
 
     return {
@@ -53,7 +62,14 @@ export class SettingsService {
       bilibili,
       phone,
       providers: providers.map(toProviderSummary),
+      mindBannedWords: readMindBannedWords(bannedRecord?.value),
     };
+  }
+
+  async updateMindBannedWords(input: MindBannedWordsInput): Promise<MindBannedWordsResult> {
+    const words = normalizeMindBannedWords(input.words) ?? [];
+    await this.config.set(CONFIG_KEYS.mindGlobalBannedWords, words);
+    return { words };
   }
 
   async updateBilibili(input: BilibiliSettingsInput): Promise<BilibiliSettingsResult> {
