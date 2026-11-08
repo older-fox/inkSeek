@@ -187,8 +187,8 @@ function MessageBubble({
   return (
     <>
       <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
         transition={{ duration: 0.24, ease: EASE }}
         data-message-id={message.id}
         className={cn('flex items-end gap-2', message.self ? 'justify-end' : 'justify-start')}
@@ -667,6 +667,9 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  // Auto-pinning pauses briefly after wheel/touch input so it never fights an
+  // active scroll gesture, which reads as the transcript trembling.
+  const scrollHoldUntilRef = useRef(0);
 
   const conversations = useMemo(
     () => (conversationsQuery.data ?? []).map(toSourcedConversation),
@@ -747,7 +750,8 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     }
   }, []);
 
-  // Stick to the bottom while media lazy-loads and grows the transcript.
+  // Stick to the bottom while media lazy-loads and grows the transcript, but
+  // never fight an active scroll: coalesce resize pins into one frame.
   useEffect(() => {
     const element = scrollRef.current;
     const content = scrollContentRef.current;
@@ -756,14 +760,27 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       return;
     }
 
+    let frame = 0;
     const observer = new ResizeObserver(() => {
-      if (stickToBottomRef.current) {
-        element.scrollTop = element.scrollHeight;
+      if (!stickToBottomRef.current || performance.now() < scrollHoldUntilRef.current) {
+        return;
       }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (
+          stickToBottomRef.current &&
+          performance.now() >= scrollHoldUntilRef.current
+        ) {
+          element.scrollTop = element.scrollHeight;
+        }
+      });
     });
     observer.observe(content);
 
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [selectedId]);
 
   useEffect(() => {
@@ -777,15 +794,37 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       stickToBottomRef.current =
         element.scrollHeight - element.scrollTop - element.clientHeight < 32;
     };
+    const holdAutoPin = () => {
+      scrollHoldUntilRef.current = performance.now() + 180;
+    };
     element.addEventListener('scroll', handleScroll, { passive: true });
+    element.addEventListener('wheel', holdAutoPin, { passive: true });
+    element.addEventListener('touchmove', holdAutoPin, { passive: true });
+    element.addEventListener('pointerdown', holdAutoPin);
 
-    return () => element.removeEventListener('scroll', handleScroll);
+    return () => {
+      element.removeEventListener('scroll', handleScroll);
+      element.removeEventListener('wheel', holdAutoPin);
+      element.removeEventListener('touchmove', holdAutoPin);
+      element.removeEventListener('pointerdown', holdAutoPin);
+    };
   }, [selectedId]);
 
   useLayoutEffect(() => {
     stickToBottomRef.current = true;
     scrollToBottom();
-  }, [selectedId, lastMessageId, scrollToBottom]);
+  }, [selectedId, scrollToBottom]);
+
+  // A new message should only pull the view down when the reader is already
+  // near the bottom; scrolling back through history must stay put.
+  useLayoutEffect(() => {
+    if (
+      stickToBottomRef.current &&
+      performance.now() >= scrollHoldUntilRef.current
+    ) {
+      scrollToBottom();
+    }
+  }, [lastMessageId, scrollToBottom]);
 
   useEffect(() => {
     setAttachments([]);
@@ -1074,7 +1113,10 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
               <SyncPill label="实时同步" className="hidden sm:inline-flex" />
             </header>
 
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+            <div
+              ref={scrollRef}
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 [scrollbar-gutter:stable]"
+            >
               <div ref={scrollContentRef}>
                 <div className="mb-5 text-center">
                   <span className="rounded-full border border-mist-100/[0.07] bg-ink-950/30 px-3 py-1 font-mono text-[0.5rem] uppercase tracking-[0.16em] text-mist-600">
