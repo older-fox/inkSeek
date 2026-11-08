@@ -28,7 +28,6 @@ import {
   VISIBILITIES,
   VISIBILITY_LABELS,
   formatTime,
-  stickerUrl,
 } from './mind-format';
 import { EmptyState, LazyList, MindDrawer, MindSection } from './mind-ui';
 
@@ -633,7 +632,7 @@ export function MindStickersTab({ channelId }: { channelId: string }) {
                 className="group relative overflow-hidden rounded-xl border border-mist-100/[0.08] bg-ink-950/30"
               >
                 <img
-                  src={stickerUrl(sticker.filePath)}
+                  src={sticker.url}
                   alt={sticker.description || sticker.tags.join(' ')}
                   className="aspect-square w-full object-contain"
                   loading="lazy"

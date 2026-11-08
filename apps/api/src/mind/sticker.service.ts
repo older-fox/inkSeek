@@ -1,15 +1,21 @@
-import { Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, resolve } from 'node:path';
+import { dirname, extname } from 'node:path';
 import type { StickerRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
-import { CHAT_MEDIA_ROOT, CHAT_MEDIA_URL_PREFIX, CHAT_STICKER_ROOT } from '../chat/chat-paths.js';
+import {
+  channelMediaPath,
+  channelMediaUrl,
+  splitChannelMediaUrl,
+} from '../chat/chat-paths.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatMediaObject, StickerAsset } from '../generated/prisma/client.js';
 import { embedText, cosineSimilarity } from './mind-vector.js';
 
-const STICKER_ROOT = CHAT_STICKER_ROOT;
+/** New imports keep the `received/ab/<sha>` tail inside the channel sticker root. */
+const STICKER_PATH_PATTERN =
+  /^received\/[0-9a-f]{2}\/[0-9a-f]{64}\.(?:jpg|jpeg|png|gif|webp|bmp|avif)$/;
 const MAX_DATA_URL_BYTES = 12_000_000;
 
 export interface StickerCollectInput {
@@ -20,15 +26,11 @@ export interface StickerCollectInput {
 }
 
 @Injectable()
-export class StickerService implements OnModuleInit {
+export class StickerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    await mkdir(STICKER_ROOT, { recursive: true }).catch(() => undefined);
-  }
 
   async list(channelId: string): Promise<StickerRecord[]> {
     const rows = await this.prisma.stickerAsset.findMany({
@@ -43,17 +45,14 @@ export class StickerService implements OnModuleInit {
     input: StickerCollectInput,
     channelId: string,
   ): Promise<StickerRecord> {
-    const media = await this.findReceivedMedia(input.mediaId, input.imageUrl);
-    if (!media) {
+    const found = await this.findReceivedMedia(input.mediaId, input.imageUrl, channelId);
+    if (!found) {
       throw new NotFoundException({ code: 'IMAGE_NOT_FOUND', message: '找不到这张图片' });
     }
-    const source = resolve(CHAT_MEDIA_ROOT, ...media.storagePath.split('/'));
-    if (!source.startsWith(resolve(CHAT_MEDIA_ROOT))) {
-      throw new NotFoundException({ code: 'IMAGE_NOT_FOUND', message: '图片路径非法' });
-    }
+    const { media } = found;
     let buffer: Buffer;
     try {
-      buffer = await readFile(source);
+      buffer = await readFile(channelMediaPath(found.channelId, 'images', media.storagePath));
     } catch {
       throw new NotFoundException({ code: 'IMAGE_NOT_FOUND', message: '图片文件已被清理' });
     }
@@ -69,7 +68,7 @@ export class StickerService implements OnModuleInit {
       .filter(Boolean)
       .slice(0, 12);
     const filePath = `received/${sha256.slice(0, 2)}/${sha256}${extension}`;
-    const target = resolve(STICKER_ROOT, ...filePath.split('/'));
+    const target = channelMediaPath(channelId, 'stickers', filePath);
     if (!(await exists(target))) {
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, buffer);
@@ -107,38 +106,32 @@ export class StickerService implements OnModuleInit {
   private async findReceivedMedia(
     mediaId: string | undefined,
     imageUrl: string | undefined,
-  ): Promise<ChatMediaObject | null> {
+    channelId: string,
+  ): Promise<{ media: ChatMediaObject; channelId: string } | null> {
+    const url = (imageUrl ?? '').trim();
+    const parsed = url ? splitChannelMediaUrl(url) : null;
+    if (parsed?.kind === 'images') {
+      const asset = await this.prisma.chatImageAsset.findFirst({
+        where: { url },
+        include: { media: true },
+      });
+      if (asset?.media) {
+        return { media: asset.media, channelId: parsed.channelId };
+      }
+      const media = await this.prisma.chatMediaObject.findFirst({
+        where: { storagePath: parsed.storagePath },
+      });
+      if (media) {
+        return { media, channelId: parsed.channelId };
+      }
+    }
     if (mediaId) {
       const media = await this.prisma.chatMediaObject.findUnique({ where: { id: mediaId } });
       if (media) {
-        return media;
+        return { media, channelId };
       }
     }
-    const url = (imageUrl ?? '').trim();
-    if (!url) {
-      return null;
-    }
-    const asset = await this.prisma.chatImageAsset.findFirst({
-      where: { url },
-      include: { media: true },
-    });
-    if (asset?.media) {
-      return asset.media;
-    }
-    if (!url.startsWith(`${CHAT_MEDIA_URL_PREFIX}/`)) {
-      return null;
-    }
-    const encoded = url.slice(CHAT_MEDIA_URL_PREFIX.length + 1).split('?')[0] ?? '';
-    let storagePath: string;
-    try {
-      storagePath = decodeURIComponent(encoded);
-    } catch {
-      return null;
-    }
-    if (!/^[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(storagePath)) {
-      return null;
-    }
-    return this.prisma.chatMediaObject.findFirst({ where: { storagePath } });
+    return null;
   }
 
   async search(query: string, channelId: string, limit = 5): Promise<StickerRecord[]> {
@@ -170,8 +163,8 @@ export class StickerService implements OnModuleInit {
     if (!row) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
     }
-    const absolute = resolve(STICKER_ROOT, row.filePath);
-    if (!absolute.startsWith(resolve(STICKER_ROOT))) {
+    const absolute = stickerPath(row);
+    if (!absolute) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情路径非法' });
     }
     const info = await stat(absolute).catch(() => null);
@@ -200,8 +193,8 @@ export class StickerService implements OnModuleInit {
     if (!row) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
     }
-    const absolute = resolve(STICKER_ROOT, row.filePath);
-    if (!absolute.startsWith(resolve(STICKER_ROOT))) {
+    const absolute = stickerPath(row);
+    if (!absolute) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情路径非法' });
     }
     const info = await stat(absolute);
@@ -228,25 +221,17 @@ export class StickerService implements OnModuleInit {
     });
   }
 
-  /**
-   * The same image can sit in several channel libraries under one file, so the
-   * blob is only removed after the last row pointing at it is gone.
-   */
+  /** Sticker bytes live under the owning channel, so deleting the row owns the file. */
   async remove(id: string, channelId: string): Promise<void> {
     const row = await this.prisma.stickerAsset.findFirst({ where: { id, channelId } });
     if (!row) {
       throw new NotFoundException({ code: 'STICKER_NOT_FOUND', message: '表情不存在' });
     }
     await this.prisma.stickerAsset.delete({ where: { id: row.id } });
-    const shared = await this.prisma.stickerAsset.count({ where: { filePath: row.filePath } });
-    if (shared > 0) {
-      return;
+    const absolute = stickerPath(row);
+    if (absolute) {
+      await unlink(absolute).catch(() => undefined);
     }
-    const absolute = resolve(STICKER_ROOT, row.filePath);
-    if (!absolute.startsWith(resolve(STICKER_ROOT))) {
-      return;
-    }
-    await unlink(absolute).catch(() => undefined);
   }
 
   private async describeImage(buffer: Buffer, mimeType: string, focus?: string): Promise<string> {
@@ -289,12 +274,19 @@ function mimeForExtension(extension: string): string {
   }
 }
 
+function stickerPath(row: { channelId: string; filePath: string }): string | null {
+  return STICKER_PATH_PATTERN.test(row.filePath)
+    ? channelMediaPath(row.channelId, 'stickers', row.filePath)
+    : null;
+}
+
 function toRecord(row: StickerAsset): StickerRecord {
   return {
     id: row.id,
     channelId: row.channelId,
     sha256: row.sha256,
     filePath: row.filePath,
+    url: channelMediaUrl(row.channelId, 'stickers', row.filePath),
     mimeType: row.mimeType,
     byteSize: row.byteSize,
     width: row.width,

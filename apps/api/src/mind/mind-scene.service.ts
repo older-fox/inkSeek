@@ -92,7 +92,12 @@ export class MindSceneService {
         replyTo: { select: { isSelf: true } },
       },
     });
-    await this.describeMissingImages(rows, message.messageId, imageDescriptionPrompt);
+    await this.describeMissingImages(
+      rows,
+      message.messageId,
+      imageDescriptionPrompt,
+      message.channelId,
+    );
     const messages = rows.reverse().map((row) => toSceneMessage(row, accountId));
     const cast = await this.loadCast(conversation, persona);
     const stance =
@@ -467,6 +472,7 @@ export class MindSceneService {
     rows: MessageWithAssets[],
     anchorId: string,
     prompt: string,
+    channelId: string,
   ): Promise<void> {
     const anchor = rows.find((row) => row.id === anchorId);
     const ordered = anchor ? [anchor, ...rows.filter((row) => row !== anchor)] : rows;
@@ -500,7 +506,11 @@ export class MindSceneService {
       const results = await Promise.all(
         batch.map(async (url) => {
           try {
-            const result = await this.imageDescriptions.describeForScene(url, prompt);
+            const result = await this.imageDescriptions.describeForScene(
+              channelId,
+              url,
+              prompt,
+            );
             return { url, description: result.description.trim() };
           } catch (error) {
             this.logger.warn(

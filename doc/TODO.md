@@ -65,6 +65,12 @@
   拒收 SVG、临时文件 rename、已存在跳过），`ChatMediaObject` 以哈希去重并保存元数据与空描述，
   `ChatImageAsset` / `ChatForwardNodeImage` 通过 `mediaId` 关联；消息改为先入库、再处理媒体与转发。
   仍待：视觉描述任务、历史图片回填、blob GC 与渠道级隐私开关。
+- 进度（2026-11-08）：磁盘按渠道隔离完成。图片、语音、表情统一落在
+  `data/chat/channels/<channelId>/{images,voices,stickers}`，静态 URL 为
+  `/api/v1/media/channels/<channelId>/...`；`ChatMediaObject` 仍是全局内容元数据与描述缓存。
+  一次性迁移脚本 `apps/api/scripts/migrate-media-to-channels.mjs` 会先备份相关表到
+  `data/backup/media-channels-<时间>/`，复制旧文件并重写资产/转发节点/引用快照/归档消息段中的本地 URL；
+  旧共享目录保留不删。仍待：旧文件与孤儿文件 GC、存量表情目录清理。
 - 未定项：
   - 视觉描述使用哪个 provider/model，是否提供渠道级开关。
   - 历史图片是否回填到哈希路径（复制 → 校验哈希 → 建映射 → 清理旧文件），或旧数据继续使用扁平路径。

@@ -566,6 +566,8 @@ export interface StickerRecord {
   channelId: string;
   sha256: string;
   filePath: string;
+  /** Channel-scoped media URL served from `data/chat/channels/<channelId>/stickers`. */
+  url: string;
   mimeType: string | null;
   byteSize: number;
   width: number | null;

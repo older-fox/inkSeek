@@ -63,6 +63,7 @@ interface NormalizedNode {
 }
 
 interface ExpansionBudget {
+  channelId: string;
   nodesLeft: number;
   mediaLeft: number;
   fetchesLeft: number;
@@ -83,11 +84,16 @@ export class ChatForwardService {
    * MAX_FORWARD_DEPTH. Failures never throw: whatever was read is archived and
    * the card is marked TRUNCATED (or FAILED when nothing could be read).
    */
-  async expand(client: OneBotRequester, segment: OneBotSegment): Promise<ForwardWrite> {
+  async expand(
+    client: OneBotRequester,
+    segment: OneBotSegment,
+    channelId: string,
+  ): Promise<ForwardWrite> {
     const forwardId = readForwardId(segment.data['id']);
     const inlineNodes = readNodeArray(segment.data['content']);
     const source: ChatForwardSource = inlineNodes.length > 0 ? 'INLINE' : 'FETCHED';
     const budget: ExpansionBudget = {
+      channelId,
       nodesLeft: MAX_FORWARD_TOTAL_NODES,
       mediaLeft: MAX_FORWARD_MEDIA,
       fetchesLeft: MAX_FORWARD_FETCHES,
@@ -205,12 +211,12 @@ export class ChatForwardService {
       budget.mediaLeft -= 1;
 
       if (isImage) {
-        const stored = await this.media.saveSegment(segment);
+        const stored = await this.media.saveSegment(budget.channelId, segment);
         if (stored) {
           images.push({ ...stored, position });
         }
       } else {
-        const stored = await this.media.saveVoiceSegment(segment, client);
+        const stored = await this.media.saveVoiceSegment(budget.channelId, segment, client);
         if (stored) {
           voices.push({ ...stored, position });
         }

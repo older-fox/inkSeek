@@ -429,9 +429,3 @@ export function formatClock(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-export function stickerUrl(filePath: string): string {
-  return `/api/v1/media/stickers/${filePath
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/')}`;
-}

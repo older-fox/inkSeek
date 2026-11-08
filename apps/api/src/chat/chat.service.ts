@@ -372,7 +372,7 @@ export class ChatService {
       });
     }
 
-    const forward = await this.forwards.expand(client, segment);
+    const forward = await this.forwards.expand(client, segment, record.channelId);
 
     if (forward.nodes.length === 0) {
       return {

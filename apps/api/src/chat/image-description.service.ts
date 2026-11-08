@@ -4,6 +4,8 @@ import { LlmService } from '../ai/llm.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { ChatMediaService } from './chat-media.service.js';
 export interface ImageDescriptionInput {
+  /** Channel that owns the referenced image; storage and reads are channel-scoped. */
+  channelId: string;
   /** Stored media reference or data URL carried by an image port. */
   reference: string;
   prompt: string;
@@ -51,7 +53,7 @@ export class ImageDescriptionService {
       throw new BadGatewayException(`图片描述提示词不能超过 ${MAX_PROMPT_LENGTH} 个字符`);
     }
 
-    const dataUrl = await this.media.toDataUrl(input.reference);
+    const dataUrl = await this.media.toDataUrl(input.channelId, input.reference);
     const image = parseImageDataUrl(dataUrl);
     const sha256 = createHash('sha256').update(image.buffer).digest('hex');
     const existing = await this.prisma.chatMediaObject.findUnique({
@@ -72,7 +74,7 @@ export class ImageDescriptionService {
     // first so the generated description has somewhere to live.
     let mediaId = existing?.id ?? null;
     if (!mediaId) {
-      const stored = await this.media.saveDataUrl(dataUrl);
+      const stored = await this.media.saveDataUrl(input.channelId, dataUrl);
       mediaId = stored?.mediaId ?? null;
     }
 
@@ -95,6 +97,7 @@ export class ImageDescriptionService {
 
   /** Describes an image for the persona mind and persists the result. */
   async describeForScene(
+    channelId: string,
     reference: string,
     prompt?: string,
   ): Promise<{
@@ -103,6 +106,7 @@ export class ImageDescriptionService {
     cached: boolean;
   }> {
     const result = await this.describe({
+      channelId,
       reference,
       prompt: prompt?.trim() || SCENE_DESCRIPTION_PROMPT,
       source: 'mind.image-description',

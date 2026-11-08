@@ -182,12 +182,15 @@ export class ChatMessagesService {
       try {
         // These three may each call NapCat or the network; run them together so
         // ingest is bounded by the slowest one, and isolate individual failures.
-        const quotePromise = this.resolveQuote(conversation.id, parsed.segments, client).catch(
-          () => null,
-        );
+        const quotePromise = this.resolveQuote(
+          channel.id,
+          conversation.id,
+          parsed.segments,
+          client,
+        ).catch(() => null);
         const forwardSegment = findForwardSegment(parsed.segments);
         const forwardPromise = forwardSegment
-          ? this.forwards.expand(client, forwardSegment).catch((error: unknown) => {
+          ? this.forwards.expand(client, forwardSegment, channel.id).catch((error: unknown) => {
               this.logger.warn(
                 `转发展开失败，保留基础消息：${error instanceof Error ? error.message : String(error)}`,
               );
@@ -197,13 +200,15 @@ export class ChatMessagesService {
         const [storedImages, storedVoices, forward, quote] = await Promise.all([
           Promise.all(
             imageSegments.map(async ({ segment, position }) => {
-              const media = await this.media.saveSegment(segment).catch(() => null);
+              const media = await this.media.saveSegment(channel.id, segment).catch(() => null);
               return media ? { ...media, position } : null;
             }),
           ),
           Promise.all(
             voiceSegments.map(async ({ segment, position }) => {
-              const media = await this.media.saveVoiceSegment(segment, client).catch(() => null);
+              const media = await this.media
+                .saveVoiceSegment(channel.id, segment, client)
+                .catch(() => null);
               return media ? { ...media, position } : null;
             }),
           ),
@@ -471,7 +476,11 @@ export class ChatMessagesService {
     const imageAssets = (
       await Promise.all(
         pendingImages.map(async ({ dataUrl, position }, index) => {
-          const asset = await this.media.saveDataUrl(dataUrl, input.imageDescriptions?.[index]);
+          const asset = await this.media.saveDataUrl(
+            channel.id,
+            dataUrl,
+            input.imageDescriptions?.[index],
+          );
           return asset ? { ...asset, position } : null;
         }),
       )
@@ -966,6 +975,7 @@ export class ChatMessagesService {
    * to an UNAVAILABLE snapshot when the target was recalled or is unreachable.
    */
   private async resolveQuote(
+    channelId: string,
     conversationId: string,
     segments: readonly OneBotSegment[],
     client: OneBotRequester,
@@ -1008,7 +1018,7 @@ export class ChatMessagesService {
       };
     }
 
-    const fetched = await this.fetchQuotedMessage(client, replyId);
+    const fetched = await this.fetchQuotedMessage(channelId, client, replyId);
 
     return {
       replyToExternalId: replyId,
@@ -1018,6 +1028,7 @@ export class ChatMessagesService {
   }
 
   private async fetchQuotedMessage(
+    channelId: string,
     client: OneBotRequester,
     messageId: string,
   ): Promise<ChatQuoteSummary | null> {
@@ -1035,7 +1046,7 @@ export class ChatMessagesService {
         await Promise.all(
           segments
             .filter((segment) => this.media.isMediaSegment(segment))
-            .map((segment) => this.media.saveSegment(segment).catch(() => null)),
+            .map((segment) => this.media.saveSegment(channelId, segment).catch(() => null)),
         )
       )
         .filter((media): media is StoredMedia => media !== null)

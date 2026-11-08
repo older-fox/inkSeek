@@ -13,7 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "db:backfill-media": "node scripts/backfill-media-objects.mjs",
+    "db:migrate-media-channels": "node scripts/migrate-media-to-channels.mjs",
     "db:seed-personas": "node scripts/seed-personas.mjs",
     "test:dialogue": "node scripts/generate-test-dialogue.mjs",
     "test:mind": "node scripts/simulate-mind-dialogue.mjs"

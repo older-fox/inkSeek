@@ -292,13 +292,14 @@ model ChatMessageRecord {
   @@index([replyToExternalId])
 }
 
-/// One blob on disk, keyed by the SHA-256 of its decoded bytes. Many message
-/// and forward-node mappings may point at the same row, so repeated images are
-/// stored and described once. Files live at `data/chat/images/<sha[0..2]>/...`.
+/// Content metadata keyed by the SHA-256 of the decoded bytes. Many message and
+/// forward-node mappings may point at the same row, so repeated images are
+/// described once. Bytes live per channel at
+/// `data/chat/channels/<channelId>/images/<sha[0..2]>/<sha[2..4]>/<sha[4..6]>/<sha256>.<ext>`.
 model ChatMediaObject {
   id          String   @id @default(cuid())
   sha256      String   @unique
-  /// Path relative to the image root, e.g. `ab/cd/ef/<sha256>.jpg`.
+  /// Path relative to the owning channel's image root, e.g. `ab/cd/ef/<sha256>.jpg`.
   storagePath String
   mimeType    String?
   byteSize    Int
@@ -1105,7 +1106,8 @@ model AgentAction {
   @@index([status, createdAt])
 }
 
-/// Local sticker library metadata. Bytes live on disk; the row carries the
+/// Local sticker library metadata. Bytes live under the owning channel at
+/// `data/chat/channels/<channelId>/stickers/<filePath>`; the row carries the
 /// description and embedding used for mood/scene retrieval.
 model StickerAsset {
   id          String    @id @default(cuid())

@@ -1,13 +1,13 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, resolve } from 'node:path';
+import { dirname, extname } from 'node:path';
 import { PrismaService } from '../database/prisma.service.js';
 import {
-  CHAT_MEDIA_ROOT,
-  CHAT_MEDIA_URL_PREFIX,
-  CHAT_VOICE_ROOT,
-  CHAT_VOICE_URL_PREFIX,
+  channelMediaPath,
+  channelMediaUrl,
+  CHAT_CHANNEL_ROOT,
+  parseChannelMediaUrl,
 } from './chat-paths.js';
 import type { OneBotRequester, OneBotSegment } from './onebot.js';
 
@@ -26,8 +26,7 @@ export interface StoredMedia {
 }
 
 interface MediaTarget {
-  root: string;
-  urlPrefix: string;
+  kind: 'images' | 'voices';
   defaultExtension: string;
 }
 
@@ -71,12 +70,8 @@ const VOICE_SEGMENTS = new Set(['record']);
 /** `ab/cd/ef/<sha256>.<ext>` — the only new layout this service writes. */
 const CONTENT_PATH_PATTERN =
   /^[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64}\.(?:jpg|png|gif|webp|bmp|avif|bin)$/;
-/** Files written before content addressing existed, e.g. `m1abc-<uuid>.jpg`. */
-const LEGACY_FILE_PATTERN = /^[a-z0-9-]+\.(?:jpg|jpeg|png|gif|webp|bmp|avif)$/i;
-
 const VOICE_TARGET: MediaTarget = {
-  root: CHAT_VOICE_ROOT,
-  urlPrefix: CHAT_VOICE_URL_PREFIX,
+  kind: 'voices',
   defaultExtension: 'mp3',
 };
 
@@ -87,8 +82,7 @@ export class ChatMediaService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit(): Promise<void> {
-    await mkdir(CHAT_MEDIA_ROOT, { recursive: true });
-    await mkdir(CHAT_VOICE_ROOT, { recursive: true });
+    await mkdir(CHAT_CHANNEL_ROOT, { recursive: true });
   }
 
   isMediaSegment(segment: OneBotSegment): boolean {
@@ -99,7 +93,7 @@ export class ChatMediaService implements OnModuleInit {
     return VOICE_SEGMENTS.has(segment.type);
   }
 
-  async saveSegment(segment: OneBotSegment): Promise<StoredMedia | null> {
+  async saveSegment(channelId: string, segment: OneBotSegment): Promise<StoredMedia | null> {
     if (!this.isMediaSegment(segment)) {
       return null;
     }
@@ -111,6 +105,7 @@ export class ChatMediaService implements OnModuleInit {
 
     if (file.startsWith('base64://')) {
       return this.storeImage(
+        channelId,
         Buffer.from(file.slice('base64://'.length), 'base64'),
         null,
         directUrl || null,
@@ -120,6 +115,7 @@ export class ChatMediaService implements OnModuleInit {
     const dataUrlMatch = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,(.+)$/i.exec(file);
     if (dataUrlMatch?.[1] && dataUrlMatch[2]) {
       return this.storeImage(
+        channelId,
         Buffer.from(dataUrlMatch[2], 'base64'),
         dataUrlMatch[1],
         directUrl || null,
@@ -130,7 +126,7 @@ export class ChatMediaService implements OnModuleInit {
     const remoteUrl = directUrl || fileUrl;
 
     if (remoteUrl) {
-      return this.saveRemoteImage(remoteUrl);
+      return this.saveRemoteImage(channelId, remoteUrl);
     }
 
     this.logger.warn(`收到无法定位的 ${segment.type} 表情/图片，仅保留原始消息段`);
@@ -143,6 +139,7 @@ export class ChatMediaService implements OnModuleInit {
    * `audio/mp3`, which no browser can decode.
    */
   async saveVoiceSegment(
+    channelId: string,
     segment: OneBotSegment,
     client?: OneBotRequester,
   ): Promise<StoredMedia | null> {
@@ -160,6 +157,7 @@ export class ChatMediaService implements OnModuleInit {
 
     if (file.startsWith('base64://')) {
       return this.saveBase64(
+        channelId,
         file.slice('base64://'.length),
         directUrl || null,
         VOICE_TARGET,
@@ -169,7 +167,14 @@ export class ChatMediaService implements OnModuleInit {
 
     const dataUrlMatch = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,(.+)$/i.exec(file);
     if (dataUrlMatch?.[1] && dataUrlMatch[2]) {
-      return this.saveBase64(dataUrlMatch[2], null, VOICE_TARGET, duration, dataUrlMatch[1]);
+      return this.saveBase64(
+        channelId,
+        dataUrlMatch[2],
+        null,
+        VOICE_TARGET,
+        duration,
+        dataUrlMatch[1],
+      );
     }
 
     if (client && !fileUrl && (file || fileId)) {
@@ -190,7 +195,7 @@ export class ChatMediaService implements OnModuleInit {
         const encoded =
           typeof record?.base64 === 'string' ? record.base64.replace(/^base64:\/\//i, '') : '';
         if (encoded) {
-          return this.saveBase64(encoded, directUrl || null, VOICE_TARGET, duration);
+          return this.saveBase64(channelId, encoded, directUrl || null, VOICE_TARGET, duration);
         }
 
         const recordUrl =
@@ -200,7 +205,7 @@ export class ChatMediaService implements OnModuleInit {
               ? record.file
               : '';
         if (recordUrl) {
-          return this.saveRemote(recordUrl, VOICE_TARGET, duration);
+          return this.saveRemote(channelId, recordUrl, VOICE_TARGET, duration);
         }
       } catch (error) {
         this.logger.warn(
@@ -210,10 +215,10 @@ export class ChatMediaService implements OnModuleInit {
     }
 
     if (directUrl) {
-      return this.saveRemote(directUrl, VOICE_TARGET, duration);
+      return this.saveRemote(channelId, directUrl, VOICE_TARGET, duration);
     }
     if (fileUrl) {
-      return this.saveRemote(fileUrl, VOICE_TARGET, duration);
+      return this.saveRemote(channelId, fileUrl, VOICE_TARGET, duration);
     }
 
     this.logger.warn(`收到无法定位的语音消息，仅保留原始消息段`);
@@ -221,11 +226,11 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   /**
-   * Turns a stored media reference (local `/api/v1/media/images/...` path, a
-   * data URL, or a remote http(s) URL) into a data URL that the NapCat send
-   * path accepts. Callers carry these references, never bytes.
+   * Turns a channel-scoped stored image reference, a data URL, or a remote
+   * http(s) URL into a data URL that the NapCat send path accepts. References
+   * from another channel are rejected. Callers carry references, never bytes.
    */
-  async toDataUrl(reference: string): Promise<string> {
+  async toDataUrl(channelId: string, reference: string): Promise<string> {
     const trimmed = reference.trim();
     if (trimmed.startsWith('data:image/')) {
       if (trimmed.length > MAX_IMAGE_DATA_URL) {
@@ -234,28 +239,20 @@ export class ChatMediaService implements OnModuleInit {
       return trimmed;
     }
 
-    if (trimmed.startsWith(`${CHAT_MEDIA_URL_PREFIX}/`)) {
-      const encoded = trimmed.slice(CHAT_MEDIA_URL_PREFIX.length + 1).split('?')[0] ?? '';
-      let relative: string;
-      try {
-        relative = decodeURIComponent(encoded);
-      } catch {
+    const parsed = parseChannelMediaUrl(trimmed, channelId);
+    if (parsed) {
+      if (parsed.kind !== 'images' || !CONTENT_PATH_PATTERN.test(parsed.storagePath)) {
         throw new Error(`图片引用无效：${trimmed}`);
       }
-      const allowed =
-        CONTENT_PATH_PATTERN.test(relative) ||
-        (!relative.includes('/') && LEGACY_FILE_PATTERN.test(relative));
-      if (!allowed) {
-        throw new Error(`图片引用无效：${trimmed}`);
-      }
-
       let buffer: Buffer;
       try {
-        buffer = await readFile(localPathOf(relative));
+        buffer = await readFile(
+          channelMediaPath(channelId, 'images', parsed.storagePath),
+        );
       } catch {
-        throw new Error(`图片文件无法读取：${relative}`);
+        throw new Error(`图片文件无法读取：${parsed.storagePath}`);
       }
-      return this.toImageDataUrl(buffer, relative);
+      return this.toImageDataUrl(buffer, parsed.storagePath);
     }
 
     if (/^https?:\/\//i.test(trimmed)) {
@@ -298,16 +295,29 @@ export class ChatMediaService implements OnModuleInit {
     return dataUrl;
   }
 
-  async saveDataUrl(dataUrl: string, description?: string): Promise<StoredMedia | null> {
+  async saveDataUrl(
+    channelId: string,
+    dataUrl: string,
+    description?: string,
+  ): Promise<StoredMedia | null> {
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
     if (!match || !match[1] || !match[2]) {
       return null;
     }
 
-    return this.storeImage(Buffer.from(match[2], 'base64'), match[1], null, description);
+    return this.storeImage(
+      channelId,
+      Buffer.from(match[2], 'base64'),
+      match[1],
+      null,
+      description,
+    );
   }
 
-  private async saveRemoteImage(remoteUrl: string): Promise<StoredMedia | null> {
+  private async saveRemoteImage(
+    channelId: string,
+    remoteUrl: string,
+  ): Promise<StoredMedia | null> {
     try {
       const response = await fetch(remoteUrl, {
         signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
@@ -324,7 +334,7 @@ export class ChatMediaService implements OnModuleInit {
       }
 
       const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? null;
-      const stored = await this.storeImage(buffer, mimeType, remoteUrl);
+      const stored = await this.storeImage(channelId, buffer, mimeType, remoteUrl);
       return stored ?? remoteFallback(remoteUrl, null);
     } catch (error) {
       this.logger.warn(
@@ -335,11 +345,12 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   /**
-   * Persists image bytes once per SHA-256. Files are written atomically into
-   * `ab/cd/ef/<hash>.<ext>` and the blob row is upserted; mappings keep their
-   * own position, so the same file can appear in many messages.
+   * Persists image bytes once per channel and SHA-256. Files are written
+   * atomically into `data/chat/channels/<channelId>/images/ab/cd/ef/<hash>.<ext>`;
+   * the blob row stays global so vision descriptions are still shared by hash.
    */
   private async storeImage(
+    channelId: string,
     buffer: Buffer,
     mimeTypeHint: string | null,
     remoteUrl: string | null,
@@ -357,7 +368,7 @@ export class ChatMediaService implements OnModuleInit {
     const extension = mimeType ? IMAGE_EXTENSIONS[mimeType] : undefined;
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const storagePath = `${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256.slice(4, 6)}/${sha256}.${extension ?? 'bin'}`;
-    const target = localPathOf(storagePath);
+    const target = channelMediaPath(channelId, 'images', storagePath);
     const size = sniffImageSize(buffer, mimeType);
 
     try {
@@ -380,7 +391,7 @@ export class ChatMediaService implements OnModuleInit {
     });
 
     return {
-      url: `${CHAT_MEDIA_URL_PREFIX}/${storagePath}`,
+      url: channelMediaUrl(channelId, 'images', storagePath),
       fileName: storagePath,
       mimeType,
       byteSize: buffer.byteLength,
@@ -459,6 +470,7 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   private async saveRemote(
+    channelId: string,
     remoteUrl: string,
     target: MediaTarget,
     duration: number | null,
@@ -483,7 +495,7 @@ export class ChatMediaService implements OnModuleInit {
         sniffMimeType(buffer) ??
         response.headers.get('content-type')?.split(';')[0]?.trim() ??
         null;
-      return await this.storeMedia(buffer, target, mimeType, remoteUrl, duration);
+      return await this.storeMedia(channelId, buffer, target, mimeType, remoteUrl, duration);
     } catch (error) {
       this.logger.warn(
         `媒体落盘失败，回退为远程地址：${error instanceof Error ? error.message : String(error)}`,
@@ -494,6 +506,7 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   private async saveBase64(
+    channelId: string,
     base64: string,
     remoteUrl: string | null,
     target: MediaTarget,
@@ -507,7 +520,7 @@ export class ChatMediaService implements OnModuleInit {
       }
 
       const mimeType = sniffMimeType(buffer) ?? mimeTypeHint ?? null;
-      return await this.storeMedia(buffer, target, mimeType, remoteUrl, duration);
+      return await this.storeMedia(channelId, buffer, target, mimeType, remoteUrl, duration);
     } catch (error) {
       this.logger.warn(
         `Base64 媒体落盘失败：${error instanceof Error ? error.message : String(error)}`,
@@ -517,11 +530,12 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   /**
-   * Persists voice bytes once per SHA-256 into `ab/cd/ef/<hash>.<ext>`, the
-   * same sharded layout images use, so a long-running inbox never turns the
+   * Persists voice bytes per channel and SHA-256 into `ab/cd/ef/<hash>.<ext>`,
+   * the same sharded layout images use, so a long-running inbox never turns the
    * voice directory into one oversized flat listing.
    */
   private async storeMedia(
+    channelId: string,
     buffer: Buffer,
     target: MediaTarget,
     mimeType: string | null,
@@ -531,10 +545,10 @@ export class ChatMediaService implements OnModuleInit {
     const extension = mediaExtension(mimeType, sourceUrl, target.defaultExtension);
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const storagePath = `${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256.slice(4, 6)}/${sha256}.${extension}`;
-    await this.writeBlob(resolve(target.root, ...storagePath.split('/')), buffer);
+    await this.writeBlob(targetPath(channelId, target, storagePath), buffer);
 
     return {
-      url: `${target.urlPrefix}/${storagePath}`,
+      url: channelMediaUrl(channelId, target.kind, storagePath),
       fileName: storagePath,
       mimeType,
       byteSize: buffer.byteLength,
@@ -567,8 +581,8 @@ function remoteFallback(
   };
 }
 
-function localPathOf(relative: string): string {
-  return resolve(CHAT_MEDIA_ROOT, ...relative.split('/'));
+function targetPath(channelId: string, target: MediaTarget, storagePath: string): string {
+  return channelMediaPath(channelId, target.kind, storagePath);
 }
 
 async function exists(path: string): Promise<boolean> {
