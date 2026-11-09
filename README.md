@@ -1,6 +1,8 @@
 # inkSeek Platform
 
-Agent 聊天控制平台。TypeScript 全栈 monorepo，规划能力包括定时任务、聊天界面与高级数据可视化。当前里程碑：工程脚手架、数据库引导初始化、登录与空首页。
+> **注意：项目仍处于快速迭代期，接口、数据结构与行为可能随时变化，请注意使用。**
+
+Agent 聊天控制平台。TypeScript 全栈 monorepo，通过 NapCat 接入 QQ，运行人格驱动的 Agent 对话与自主心智。当前已上线：渠道聊天、人格卡中心、人格心智、直连对话、数据洞察与概览值班台；定时任务与高级数据可视化仍在规划中。
 
 ## 技术栈
 
@@ -37,8 +39,8 @@ pnpm dev
 ## 目录结构
 
 ```
-apps/api        NestJS 后端（Prisma、认证、引导、健康检查）
-apps/web        React 前端（引导页、登录页、控制台外壳）
+apps/api        NestJS 后端（认证、引导、聊天、人格、心智、洞察、概览、手机、设置）
+apps/web        React 前端（引导、登录、概览、聊天、人格中心、心智、洞察、设置）
 packages/shared Zod schema 与共享类型
 doc             架构、ADR、API 与开发手册
 ```

@@ -29,6 +29,15 @@ pnpm workspace + Turborepo 管理任务编排；`apps/*` 与 `packages/*` 均为
 | `src/bootstrap/`        | 初始化状态、Redis 探活、首次初始化事务                                       |
 | `src/health/`           | 健康检查（含数据库连通性）                                                   |
 | `src/common/`           | Zod 校验管道、异常过滤器、scrypt 密码服务                                    |
+| `src/ai/`               | 模型提供商与文本补全、人格 AI 写作、LLM 调用日志                             |
+| `src/chat/`             | NapCat 桥接、消息持久化与分段、媒体落盘、语音转写、图片描述、直连对话        |
+| `src/mind/`             | 人格心智运行时：裁决、规划器、工具、心跳、记忆/关系、长时事件、手机焦点、学习 |
+| `src/personas/`         | 人格卡中心与渠道人格读写                                                     |
+| `src/insights/`         | 数据洞察流检测器与追问                                                       |
+| `src/overview/`         | 概览值班台聚合接口                                                           |
+| `src/phone/`            | 无线 ADB 设备读取与操作                                                      |
+| `src/redis/`            | Redis 连接探活与缓存                                                         |
+| `src/settings/`         | 系统设置 API（模型提供商、全局禁用词等）                                     |
 | `src/generated/prisma/` | Prisma 生成的客户端（构建产物，已 gitignore）                                |
 
 ### Web（apps/web）
@@ -38,7 +47,7 @@ pnpm workspace + Turborepo 管理任务编排；`apps/*` 与 `packages/*` 均为
 | `src/router.tsx`  | 路由定义与 `beforeLoad` 守卫（初始化状态 / 登录态跳转） |
 | `src/lib/`        | API 客户端、Query 定义、表单错误映射、QueryClient       |
 | `src/components/` | 品牌标识、背景、表单控件、按钮、认证布局、控制台外壳    |
-| `src/pages/`      | 引导页、登录页、空首页                                  |
+| `src/pages/`      | 引导页、登录页、概览、聊天（私聊/群聊/直连）、人格中心、心智、洞察、设置、连接 |
 | `src/styles.css`  | Tailwind 4 主题变量、玻璃面板、网格背景、动画关键帧     |
 
 ## 配置策略（强约束）
@@ -53,6 +62,7 @@ pnpm workspace + Turborepo 管理任务编排；`apps/*` 与 `packages/*` 均为
 - `onboarding.completed` — 是否完成初始化
 - `redis.connection` — Redis 连接参数（标记为敏感）
 - `video.bilibili` — B 站 SESSDATA 与昵称（标记为敏感，设置页维护，用于读取自动字幕）
+- `mind.globalBannedWords` — 心智全局禁用词（设置页维护，无行用内置默认、空数组=关闭）
 
 手机设备按渠道选择，存在 `ChatMindSettings.phoneDevice`（无线 ADB 设备：`IP:端口` 或无线调试自动发现的 mDNS 名称），不占用全局配置。
 
@@ -86,6 +96,8 @@ GET /bootstrap/status
 - `Session`：`tokenHash`（唯一）、`userId`、`expiresAt`、`lastUsedAt`、`ip`、`userAgent`，级联删除。
 - `SystemConfig`：键值配置，JSON 值，敏感标记。
 
+聊天、人格卡与心智的数据模型（渠道、消息、媒体、人格状态、关系、记忆、运行轨迹等）见 [persona-mind.md](./persona-mind.md) 与 `apps/api/prisma/schema.prisma`。
+
 ## 前端视觉规范
 
 - 自定义字体：Sora（标题）、Manrope（正文）、Noto Sans SC（中文）、JetBrains Mono（等宽）。
@@ -95,6 +107,5 @@ GET /bootstrap/status
 
 ## 后续规划
 
-- **聊天**：SSE 流式响应 + 消息持久化；前端增量渲染。
 - **定时任务**：BullMQ（复用已配置的 Redis）+ 调度表 + 执行历史。
 - **可视化**：ECharts / 图表组件库，接入任务与聊天指标。
