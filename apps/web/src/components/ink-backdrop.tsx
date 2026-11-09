@@ -5,6 +5,10 @@ interface InkBackdropProps {
   subtle?: boolean;
 }
 
+/**
+ * Decorative ink-wash background: drifting glow orbs, grid hairlines and a
+ * faint concentric seal. Purely visual, so it stays hidden from assistive tech.
+ */
 export function InkBackdrop({ className, subtle = false }: InkBackdropProps) {
   return (
     <div

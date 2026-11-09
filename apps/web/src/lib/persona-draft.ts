@@ -30,6 +30,7 @@ export type NumericKey =
 
 export const DRAFT_STORAGE_KEY = 'inkseek-persona-draft';
 
+/** Re-export of the shared draft factory so wizard pages share one default shape. */
 export const createDefaultDraft = createDefaultPersonaDraft;
 
 export interface PhaseMeta {
@@ -339,19 +340,23 @@ export const SLIDER_GROUPS: Record<number, readonly SliderMeta[]> = {
   ],
 };
 
+/** Counts characters by code point so emoji count as one, matching field limits. */
 export function charCount(value: string): number {
   return Array.from(value).length;
 }
 
+/** Hard-truncates input to the field's character budget. */
 export function clampChars(value: string, max: number): string {
   const chars = Array.from(value);
   return chars.length > max ? chars.slice(0, max).join('') : value;
 }
 
+/** Keeps a numeric value inside the slider's allowed range. */
 export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Drops blank entries from a multi-line input before validating or saving it. */
 export function filledLines(lines: readonly string[]): string[] {
   return lines.map((line) => line.trim()).filter(Boolean);
 }
@@ -378,6 +383,7 @@ function sameValue(left: unknown, right: unknown): boolean {
   return false;
 }
 
+/** True when any field differs from a default draft, so the wizard can offer resume/discard. */
 export function hasDraftContent(draft: PersonaDraft): boolean {
   const defaults = createDefaultDraft();
 
@@ -388,6 +394,7 @@ export function hasDraftContent(draft: PersonaDraft): boolean {
 
 export type StepErrors = Record<string, string>;
 
+/** Records a message when a text field is required or too long. */
 function checkText(
   errors: StepErrors,
   value: string,
@@ -408,6 +415,7 @@ function checkText(
   }
 }
 
+/** Records a message when a numeric text field is required, non-numeric or out of range. */
 function checkNumber(
   errors: StepErrors,
   value: string,
@@ -444,6 +452,7 @@ function checkNumber(
   }
 }
 
+/** Records a message when a list entry count or line length breaks the field rules. */
 function checkList(
   errors: StepErrors,
   lines: readonly string[],
@@ -470,6 +479,7 @@ function checkList(
   }
 }
 
+/** Validates one wizard step, returning Chinese messages keyed by field. */
 export function validateStep(step: number, draft: PersonaDraft): StepErrors {
   const errors: StepErrors = {};
 
@@ -580,6 +590,7 @@ export interface DraftSnapshot {
 
 const DRAFT_VERSION = 1;
 
+/** Restores a stored draft, ignoring unreadable or version-mismatched payloads. */
 export function loadDraft(): DraftSnapshot | null {
   if (typeof window === 'undefined') {
     return null;
@@ -609,6 +620,7 @@ export function loadDraft(): DraftSnapshot | null {
   }
 }
 
+/** Persists the in-progress draft and current step; returns the snapshot actually stored. */
 export function saveDraft(
   data: PersonaDraft,
   step: number,
@@ -637,6 +649,7 @@ export function saveDraft(
   }
 }
 
+/** Removes the local draft after it is saved to the server or discarded. */
 export function clearDraft(): void {
   if (typeof window === 'undefined') {
     return;
@@ -733,6 +746,7 @@ const TIME_OFFSET_ZONE: Record<number, string> = {
   9: '东京时间',
 };
 
+/** Renames legacy field keys and Chinese option values before hydration. */
 function migrateLegacyDraft(source: Record<string, unknown>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...source };
 
@@ -769,6 +783,7 @@ function migrateLegacyDraft(source: Record<string, unknown>): Record<string, unk
   return next;
 }
 
+/** Fills missing or mistyped fields from defaults and clamps numeric ranges. */
 function hydrateDraft(raw: unknown): PersonaDraft {
   const defaults = createDefaultDraft();
   const source = migrateLegacyDraft((raw ?? {}) as Record<string, unknown>);

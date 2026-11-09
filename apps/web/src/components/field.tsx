@@ -11,6 +11,10 @@ interface FieldProps {
   className?: string;
 }
 
+/**
+ * Form row that pairs a label with optional hint text, the control itself,
+ * and an inline validation message shown below it.
+ */
 export function Field({ label, htmlFor, error, hint, children, className }: FieldProps) {
   return (
     <div className={cn('space-y-2', className)}>
@@ -42,6 +46,10 @@ interface InputShellProps {
   className?: string;
 }
 
+/**
+ * Visual container for inputs: optional leading icon and trailing slot, plus
+ * an invalid flag that drives the error styling of the framed control.
+ */
 export function InputShell({ icon, trailing, invalid, children, className }: InputShellProps) {
   return (
     <div className={cn('field-shell', className)} data-invalid={invalid ? 'true' : 'false'}>

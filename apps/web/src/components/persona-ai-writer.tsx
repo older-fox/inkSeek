@@ -36,6 +36,12 @@ type ProviderState = 'loading' | 'ready' | 'error';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/**
+ * AI-assisted first draft: takes a free-form character brief, picks an
+ * available provider/model, shows staged progress while generating, and lets
+ * the user preview the draft before applying it to the form. In-flight
+ * requests and fake progress timers are abandoned on unmount or regeneration.
+ */
 export function PersonaAiWriter({
   prompt,
   hasDraft,
@@ -69,6 +75,7 @@ export function PersonaAiWriter({
   const selectedProvider = runnableProviders.find((provider) => provider.id === providerId);
   const canGenerate = providerState === 'ready' && Boolean(selectedProvider) && model.length > 0;
 
+  /** Clears the staged-progress timeouts so a cancelled run cannot keep moving the bar. */
   const stopTimers = () => {
     timers.current.forEach((timer) => window.clearTimeout(timer));
     timers.current = [];
@@ -122,6 +129,7 @@ export function PersonaAiWriter({
     };
   }, []);
 
+  /** Resets the model to the new provider's first entry, or empty when it has none. */
   const handleProviderChange = (nextId: string) => {
     const next = runnableProviders.find((provider) => provider.id === nextId);
     setProviderId(nextId);
@@ -129,6 +137,11 @@ export function PersonaAiWriter({
     setError(null);
   };
 
+  /**
+   * Requires a 20-char brief and a runnable provider before firing. Progress
+   * stages are cosmetic timers; the requestId guard drops any response whose
+   * request was superseded, cancelled, or unmounted.
+   */
   const handleGenerate = async () => {
     if (charCount(prompt.trim()) < 20) {
       setError('请至少写下 20 个字，让 AI 知道 TA 大致是谁。');
@@ -187,6 +200,7 @@ export function PersonaAiWriter({
     }
   };
 
+  /** Ignores edits while writing, and invalidates a ready preview so a stale draft can't be applied. */
   const handlePromptChange = (value: string) => {
     if (writing) {
       return;
@@ -201,6 +215,7 @@ export function PersonaAiWriter({
     }
   };
 
+  /** Inserts the sample brief and discards any preview; blocked mid-generation so the request stays coherent. */
   const handleExample = () => {
     if (writing) {
       return;
@@ -212,12 +227,14 @@ export function PersonaAiWriter({
     setGeneration(null);
   };
 
+  /** Aborts timers and invalidates the open request so a late reply cannot land on the previous step. */
   const handleBack = () => {
     stopTimers();
     requestId.current += 1;
     onBack();
   };
 
+  /** Same abort as handleBack, then leaves the writer so nothing is applied. */
   const handleCancel = () => {
     stopTimers();
     requestId.current += 1;

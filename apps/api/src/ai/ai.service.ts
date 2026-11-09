@@ -38,6 +38,7 @@ export class AiService {
     private readonly promptLogs: LlmCallLogService,
   ) {}
 
+  /** Lists providers for the picker; API keys are never exposed to the client. */
   async listProviders(): Promise<PersonaAiProviderOption[]> {
     const records = await this.prisma.modelProvider.findMany({
       orderBy: { createdAt: 'asc' },
@@ -51,6 +52,10 @@ export class AiService {
     }));
   }
 
+  /**
+   * Calls the provider once and returns a normalized draft. Every attempt is logged,
+   * including failures, so the call log explains where a bad draft came from.
+   */
   async generatePersonaDraft(input: PersonaAiGenerateInput): Promise<PersonaAiGeneration> {
     const provider = await this.resolveProvider(input.providerId);
     const model = this.resolveModel(provider, input.model);
@@ -114,6 +119,7 @@ export class AiService {
     };
   }
 
+  /** Falls back to the first provider that already has detected models. */
   private async resolveProvider(providerId?: string): Promise<ResolvedProvider> {
     const records = await this.prisma.modelProvider.findMany({
       orderBy: { createdAt: 'asc' },
@@ -144,6 +150,7 @@ export class AiService {
     return toResolvedProvider(record);
   }
 
+  /** Defaults to the first detected model; empty lists are rejected rather than guessed. */
   private resolveModel(provider: ResolvedProvider, requested?: string): string {
     if (requested) {
       if (provider.models.length === 0 || provider.models.includes(requested)) {
@@ -170,6 +177,7 @@ export class AiService {
     return first;
   }
 
+  /** Dispatches by protocol and flattens the text blocks into one string. */
   private async requestCompletion(
     provider: ResolvedProvider,
     model: string,
@@ -271,6 +279,7 @@ export class AiService {
       : '';
   }
 
+  /** Single POST with a hard timeout; non-2xx responses become readable gateway errors. */
   private async postJson(
     provider: ResolvedProvider,
     url: string,
@@ -333,6 +342,7 @@ export class AiService {
   }
 }
 
+/** Narrows a stored row into the shape the request builders expect. */
 function toResolvedProvider(record: ModelProvider): ResolvedProvider {
   return {
     id: record.id,
@@ -344,22 +354,26 @@ function toResolvedProvider(record: ModelProvider): ResolvedProvider {
   };
 }
 
+/** Tolerates malformed JSON columns by keeping only string entries. */
 function modelList(record: ModelProvider): string[] {
   return Array.isArray(record.models)
     ? record.models.filter((model): model is string => typeof model === 'string')
     : [];
 }
 
+/** Strips trailing slashes so path concatenation yields exactly one separator. */
 function trimBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
+/** Safe navigation helper for untyped provider payloads; anything else becomes `{}`. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** Extracts a short, redacted reason from a failed response body. */
 async function readErrorDetail(response: Response, secret: string): Promise<string> {
   const raw = await response.text().catch(() => '');
 
@@ -382,6 +396,7 @@ async function readErrorDetail(response: Response, secret: string): Promise<stri
   return redact(raw.replace(/\s+/g, ' ').trim().slice(0, 200), secret);
 }
 
+/** Masks the API key in upstream error text; very short secrets are left alone. */
 function redact(value: string, secret: string): string {
   return secret.length >= 8 ? value.split(secret).join('***') : value;
 }

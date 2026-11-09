@@ -18,6 +18,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     private readonly loop: MindLoopService,
   ) {}
 
+  /** Starts the shared 30s wake poll; several instances coordinate via leases. */
   onModuleInit(): void {
     this.timer = setInterval(() => {
       void this.tick();
@@ -25,6 +26,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('人格心智心跳已启动');
   }
 
+  /** Stops polling; an in-flight tick is left to finish on its own. */
   onModuleDestroy(): void {
     if (this.timer) {
       clearInterval(this.timer);
@@ -32,6 +34,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Brings the next wake forward and drops any lease; false means no state row. */
   async trigger(personaId: string): Promise<boolean> {
     const updated = await this.prisma.personaState.updateMany({
       where: { personaId },
@@ -45,6 +48,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     return updated.count > 0;
   }
 
+  /** One poll: claims due rows by lease so concurrent instances cannot double-wake. */
   private async tick(): Promise<void> {
     if (this.running) {
       return;
@@ -88,6 +92,8 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Runs one heartbeat turn outside the DB lease contract of callers; the lease
+   *  is always released and any silence falls back to a safe reschedule. */
   private async wake(personaId: string): Promise<void> {
     try {
       const settings = await this.prisma.chatMindSettings.findFirst({
@@ -118,6 +124,7 @@ export class MindHeartbeatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Pushes the next wake out by the configured interval and clears the lease. */
   private async reschedule(personaId: string, minutes: number): Promise<void> {
     await this.prisma.personaState.updateMany({
       where: { personaId },

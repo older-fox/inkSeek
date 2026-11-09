@@ -100,15 +100,18 @@ interface ChannelContext {
   personaName: string | null;
 }
 
+/** Collapses whitespace and truncates so a detail line always fits the card. */
 function clip(value: string | null | undefined, max: number): string {
   const text = (value ?? '').replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+/** Shows a leading `+` for gains; negatives already carry their sign. */
 function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
 
+/** Buckets the mood valence score into five human-readable states. */
 function moodLabel(value: number): string {
   if (value >= 60) return '愉快';
   if (value >= 20) return '轻松';
@@ -117,6 +120,7 @@ function moodLabel(value: number): string {
   return '沉重';
 }
 
+/** Renders a duration as minutes or hours and minutes; non-positive input gets a floor. */
 function formatMinutes(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes <= 0) return '不到 1 分钟';
   const rounded = Math.round(minutes);
@@ -126,21 +130,25 @@ function formatMinutes(minutes: number): string {
   return rest > 0 ? `${hours} 小时 ${rest} 分` : `${hours} 小时`;
 }
 
+/** Whole minutes between two instants, never negative. */
 function minutesBetween(start: Date, end: Date): number {
   return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000));
 }
 
+/** Narrows a JSON column to an object; arrays and primitives are rejected. */
 function jsonRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
 }
 
+/** Reads one numeric effect field; anything non-numeric reads as absent. */
 function effectNumber(effects: unknown, key: string): number | null {
   const record = jsonRecord(effects);
   const value = record?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** Reads one string effect field, defaulting to empty for display purposes. */
 function effectText(effects: unknown, key: string): string {
   const record = jsonRecord(effects);
   const value = record?.[key];
@@ -151,15 +159,18 @@ const BILIBILI_VIDEO_URL = /\/video\/(BV[0-9A-Za-z]+)/;
 const GENERIC_SOURCE_TITLE = /热门|首页|推荐|排行榜|频道/;
 const INVISIBLE_NAME = /^[\s\u115f\u1160\u2800\u3164\u200b-\u200f\ufeff]+$/;
 
+/** Falls back when a nickname is missing or consists only of invisible fillers. */
 function readableName(value: string | null | undefined, fallback: string): string {
   return value && !INVISIBLE_NAME.test(value) ? value : fallback;
 }
 
+/** Extracts the BV id from a stored source URL so cached metadata can be joined. */
 function videoIdOf(source: Record<string, unknown>): string | null {
   const url = typeof source['url'] === 'string' ? source['url'] : '';
   return BILIBILI_VIDEO_URL.exec(url)?.[1] ?? null;
 }
 
+/** Trims the stored source title, tolerating sources without one. */
 function sourceTitle(source: Record<string, unknown> | null | undefined): string {
   const title = source?.['title'];
   return typeof title === 'string' ? title.trim() : '';
@@ -169,6 +180,10 @@ function sourceTitle(source: Record<string, unknown> | null | undefined): string
 export class OverviewService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Single aggregate read for the duty desk: channel health, last-24h events and
+   * the attention list, all computed deterministically from the database.
+   */
   async getOverview(): Promise<OverviewSnapshot> {
     const now = new Date();
     const from = new Date(now.getTime() - DAY_MS);
@@ -496,6 +511,7 @@ export class OverviewService {
     };
   }
 
+  /** Turns raw rows into a short, deduplicated event feed; per-kind caps keep it balanced. */
   private async buildEvents(input: {
     changeRows: ChangeRow[];
     longEvents: Array<{
@@ -547,15 +563,18 @@ export class OverviewService {
     personaChannel: Map<string, ChannelContext>;
   }): Promise<OverviewEvent[]> {
     const events: OverviewEvent[] = [];
+    /** A persona without a connected channel cannot link anywhere, so callers must handle null. */
     const contextOf = (personaId: string): ChannelContext | null =>
       input.personaChannel.get(personaId) ?? null;
 
+    /** Builds a deep link scoped to that persona's channel, optionally pre-selecting a tab. */
     const linkOf = (
       context: ChannelContext,
       page: OverviewLink['page'],
       tab?: string,
     ): OverviewLink => ({ page, channelId: context.channel.id, ...(tab ? { tab } : {}) });
 
+    /** Appends an event and drops null, so a builder can opt out without its own if. */
     const push = (event: OverviewEvent | null): void => {
       if (event) events.push(event);
     };
@@ -651,6 +670,7 @@ export class OverviewService {
     const conversationById = new Map(
       conversations.map((conversation) => [conversation.id, conversation]),
     );
+    /** Resolves a change-log target as an internal id first, then as an id inside that channel. */
     const contactName = (personaId: string, targetId: string): string => {
       const context = contextOf(personaId);
       const contact =
@@ -659,6 +679,7 @@ export class OverviewService {
       return readableName(contact?.nickname, '一个联系人');
     };
 
+    /** Biggest movers first by absolute sum, so a drop ranks as loudly as a rise. */
     const topFields = (fields: Map<string, FieldSum>, limit = 2): FieldSum[] =>
       [...fields.values()]
         .sort((left, right) => Math.abs(right.sum) - Math.abs(left.sum))
@@ -930,6 +951,7 @@ export class OverviewService {
     return events;
   }
 
+  /** Lists only actionable problems: missing provider, broken channels, unconfirmed work. */
   private buildAttention(input: {
     channels: OverviewChannel[];
     providerCount: number;

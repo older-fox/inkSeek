@@ -17,6 +17,10 @@ const STATUS_LABELS: Record<PersonaFocusRecord['status'], string> = {
   DONE: '已结束',
 };
 
+/**
+ * Live view of what the persona is doing right now, with a manual phone-focus
+ * trigger and the recent focus history.
+ */
 export function MindFocusTab({
   personaId,
   phoneDevice,
@@ -108,6 +112,10 @@ export function MindFocusTab({
   );
 }
 
+/**
+ * Read-only summary of the activity, location and start time the persona
+ * reports right now.
+ */
 function NowCard({ now }: { now: MindFocusOverview['now'] | undefined }) {
   const activity = now?.activity?.trim() ?? '';
   const since = now?.activitySince ? `（开始于 ${formatTime(now.activitySince)}）` : '';
@@ -128,6 +136,10 @@ function NowCard({ now }: { now: MindFocusOverview['now'] | undefined }) {
   );
 }
 
+/**
+ * Card for the running or paused focus, showing the current micro-step,
+ * failures, battery and what the persona last noticed.
+ */
 function ActiveFocus({ focus }: { focus: PersonaFocusRecord }) {
   const state = stateOf(focus);
   const activity = textOf(state['activity']) || focus.goal || '玩手机';
@@ -173,6 +185,7 @@ function ActiveFocus({ focus }: { focus: PersonaFocusRecord }) {
   );
 }
 
+/** One finished focus run with its status, step count and summary or failure text. */
 function FocusRow({ focus }: { focus: PersonaFocusRecord }) {
   const state = stateOf(focus);
   const activity = textOf(state['activity']) || focus.goal;
@@ -223,6 +236,7 @@ function FocusRow({ focus }: { focus: PersonaFocusRecord }) {
   );
 }
 
+/** Extracts a plausible battery level and charging flag from focus state, or null. */
 function batteryOf(
   state: Record<string, unknown>,
 ): { level: number; charging: boolean } | null {
@@ -238,12 +252,14 @@ function batteryOf(
   return { level: Math.round(level), charging: record['charging'] === true };
 }
 
+/** Narrows a focus record's state blob to a plain object, defaulting to an empty one. */
 function stateOf(focus: PersonaFocusRecord): Record<string, unknown> {
   return focus.state && typeof focus.state === 'object' && !Array.isArray(focus.state)
     ? (focus.state as Record<string, unknown>)
     : {};
 }
 
+/** Trims a string state field, returning '' for non-strings. */
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

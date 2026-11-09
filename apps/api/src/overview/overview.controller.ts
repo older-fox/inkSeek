@@ -13,6 +13,7 @@ export class OverviewController {
 
   @Get()
   @ApiOperation({ summary: '读取概览值班台：渠道现状、近 24 小时事件与待处理项' })
+  /** Aggregate read for the duty desk; assembled deterministically in one request. */
   snapshot(): Promise<OverviewSnapshot> {
     return this.overview.getOverview();
   }

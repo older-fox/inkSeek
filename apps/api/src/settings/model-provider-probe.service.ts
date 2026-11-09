@@ -10,6 +10,7 @@ export interface ProviderProbeOutcome {
 
 @Injectable()
 export class ModelProviderProbeService {
+  /** Lists models as a connectivity check; an empty list counts as a failed test. */
   async probe(input: ModelProviderInput): Promise<ProviderProbeOutcome> {
     const startedAt = performance.now();
     const headers: Record<string, string> = { accept: 'application/json' };
@@ -76,6 +77,7 @@ export class ModelProviderProbeService {
     return { models, latencyMs: Math.round(performance.now() - startedAt) };
   }
 
+  /** Gemini carries the key as a query parameter, the others as headers. */
   private buildUrl(input: ModelProviderInput): string {
     const base = input.baseUrl.replace(/\/+$/, '');
 
@@ -89,6 +91,7 @@ export class ModelProviderProbeService {
   }
 }
 
+/** Accepts both Gemini and OpenAI list shapes; Gemini entries are filtered by capability. */
 function extractModels(protocol: ModelProviderProtocol, payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') {
     return [];
@@ -146,6 +149,7 @@ function extractModels(protocol: ModelProviderProtocol, payload: unknown): strin
   );
 }
 
+/** Deduplicates and sorts so the stored model list stays stable across probes. */
 function unique(models: string[]): string[] {
   return [...new Set(models)].sort((a, b) => a.localeCompare(b));
 }

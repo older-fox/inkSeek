@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 export const SESSION_COOKIE_NAME = 'inkseek_session';
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Writes the httpOnly session cookie, keeping it Secure only when the caller is on HTTPS. */
 export function setSessionCookie(
   reply: FastifyReply,
   token: string,
@@ -21,6 +22,7 @@ export function setSessionCookie(
   });
 }
 
+/** Expires the session cookie; the path must match the one used when setting it. */
 export function clearSessionCookie(reply: FastifyReply): void {
   reply.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
 }

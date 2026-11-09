@@ -23,6 +23,10 @@ import { ExpandButton, PersonaTextDialog, useClampedOverflow } from './persona-c
 const CARD_HEIGHT = 'h-[33rem]';
 const ADDRESS_PREVIEW_MAX = 36;
 
+/**
+ * Shortens a long address-style string at a separator boundary and appends an
+ * ellipsis so the preview keeps whole terms.
+ */
 function addressPreview(value: string): string {
   if (value.length <= ADDRESS_PREVIEW_MAX) {
     return value;
@@ -34,6 +38,7 @@ function addressPreview(value: string): string {
   return `${boundary > 0 ? clipped.slice(0, boundary) : clipped}…`;
 }
 
+/** Monogram avatar used on the front face of a persona card. */
 function PersonaAvatar({ name, accent }: { name: string; accent: PersonaAccent }) {
   return (
     <span
@@ -52,6 +57,7 @@ function PersonaAvatar({ name, accent }: { name: string; accent: PersonaAccent }
   );
 }
 
+/** Labelled 0–100 bar that animates to the trait value on mount. */
 function TraitMeter({ trait, tone }: { trait: PersonaTrait; tone: 'brass' | 'jade' }) {
   return (
     <div>
@@ -74,6 +80,10 @@ function TraitMeter({ trait, tone }: { trait: PersonaTrait; tone: 'brass' | 'jad
   );
 }
 
+/**
+ * Shared card footer with the flip hint plus edit/delete links. Links stay
+ * clickable only on the visible face, which callers mark via `active`.
+ */
 function CardFooter({
   hint,
 
@@ -136,6 +146,10 @@ function CardFooter({
   );
 }
 
+/**
+ * Front face: identity header, quote anchor, keywords, core traits and the
+ * clamped language/address summaries with expand affordances.
+ */
 function PersonaFront({
   persona,
   active,
@@ -292,6 +306,7 @@ function PersonaFront({
   );
 }
 
+/** Back face: background story, taboos, physical parameters and experience tier. */
 function PersonaBack({
   persona,
   active,
@@ -410,6 +425,10 @@ function PersonaBack({
   );
 }
 
+/**
+ * Confirmation dialog for deleting a persona, warning that version history is
+ * permanent and noting how many channels still hold a copy of the snapshot.
+ */
 function PersonaDeleteDialog({
   open,
   personaName,
@@ -435,6 +454,7 @@ function PersonaDeleteDialog({
 
     const previousFocus = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
+    /** Escape is ignored once the deletion is in flight so it cannot be interrupted halfway. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !deleting) {
         onCancel();
@@ -550,6 +570,10 @@ function PersonaDeleteDialog({
   );
 }
 
+/**
+ * Flip-card for one persona: click anywhere to turn it over, with expandable
+ * text dialogs and a guarded delete flow layered on top.
+ */
 export function PersonaCard({
   persona,
   onEdit,
@@ -566,6 +590,7 @@ export function PersonaCard({
   const [flipped, setFlipped] = useState(false);
   const [expanded, setExpanded] = useState<{ title: string; text: string } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  /** Opens the full-text dialog for a clamped field; replaces any preview already shown. */
   const handleExpand = (title: string, text: string) => setExpanded({ title, text });
   const handleDelete = onDelete ? () => setConfirmingDelete(true) : undefined;
 
@@ -640,6 +665,7 @@ export function PersonaCard({
   );
 }
 
+/** Dashed placeholder tile that starts the persona creation wizard. */
 export function NewPersonaCard({ onCreate }: { onCreate: () => void }) {
   return (
     <button

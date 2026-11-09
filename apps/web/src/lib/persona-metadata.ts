@@ -18,12 +18,14 @@ export interface PersonaMetadata {
 const MANUAL_REASON = '手动编辑';
 const COALESCE_WINDOW_MS = 15_000;
 
+/** Formats a persona timestamp as month-day time, optionally prefixed with the year. */
 export function formatPersonaTimestamp(iso: string, withYear = true): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return iso;
   }
 
+  /** Keeps each timestamp part two digits so column widths align; scoped local to avoid a shared locale helper. */
   const pad = (value: number) => String(value).padStart(2, '0');
   const stamp = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes(),
@@ -32,6 +34,7 @@ export function formatPersonaTimestamp(iso: string, withYear = true): string {
   return withYear ? `${date.getFullYear()}-${stamp}` : stamp;
 }
 
+/** Renders a persona value for history rows and cards in compact Chinese form. */
 export function formatPersonaValue(value: PersonaValue | undefined): string {
   if (value === undefined) {
     return '未同步';

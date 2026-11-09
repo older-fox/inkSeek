@@ -1,6 +1,7 @@
 import type { FieldValues, Path, UseFormSetError } from 'react-hook-form';
 import { ApiError } from './api';
 
+/** Maps server-side field validation errors onto a react-hook-form instance; reports whether any were applied. */
 export function applyApiFieldErrors<T extends FieldValues>(
   setError: UseFormSetError<T>,
   error: unknown,

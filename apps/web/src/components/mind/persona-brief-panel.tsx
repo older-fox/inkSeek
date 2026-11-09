@@ -26,6 +26,10 @@ const METRICS = [
   { key: 'grooming', label: '整洁' },
 ] as const;
 
+/**
+ * Compact persona snapshot opened from chat: live mood, active long event,
+ * recent changes and links into the full mind panel.
+ */
 export function PersonaBriefPanel({
   open,
   channelId,

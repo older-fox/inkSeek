@@ -77,6 +77,11 @@ interface ModelProviderSectionProps {
   providers: ModelProviderSummary[];
 }
 
+/**
+ * Management card for LLM providers: add form (validated against the remote
+ * model list before persisting), saved-provider list with a model preview,
+ * retest, and a two-step delete.
+ */
 export function ModelProviderSection({ providers }: ModelProviderSectionProps) {
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -402,6 +407,7 @@ interface ProviderRowProps {
   onConfirmDelete: () => void;
 }
 
+/** One saved provider entry with protocol, key hint, preview models and actions. */
 function ProviderRow({
   provider,
   retesting,

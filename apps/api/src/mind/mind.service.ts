@@ -85,6 +85,7 @@ export class MindService {
     private readonly styleNotes: PersonaStyleNoteService,
   ) {}
 
+  /** Admin change log, newest first; scope/target filters optional, paging clamped. */
   listChanges(
     personaId: string,
     input: { scope?: string; targetId?: string; limit: number; offset: number },
@@ -118,26 +119,32 @@ export class MindService {
       );
   }
 
+  /** Recent long-running life events for the mind page; read-only projection. */
   listLongEvents(personaId: string, limit = 20) {
     return this.longEvents.list(personaId, limit);
   }
 
+  /** Looks up a relationship by channel contact id rather than internal row id. */
   relationshipByExternalId(personaId: string, externalId: string) {
     return this.relationships.getByExternalId(personaId, externalId);
   }
 
+  /** Per-channel mind settings; the settings service materializes defaults on first read. */
   getSettings(channelId: string): Promise<MindSettingsRecord> {
     return this.settingsService.get(channelId);
   }
 
+  /** Persists a partial settings patch and returns the merged record. */
   updateSettings(channelId: string, input: MindSettingsUpdateInput): Promise<MindSettingsRecord> {
     return this.settingsService.update(channelId, input);
   }
 
+  /** Current persona state; a missing row is created by the state service. */
   getState(personaId: string): Promise<PersonaStateRecord> {
     return this.states.get(personaId);
   }
 
+  /** Manual edit from the mind page, stamped MANUAL so drift logs stay distinguishable. */
   updateState(personaId: string, input: PersonaStateUpdateInput): Promise<PersonaStateRecord> {
     return this.states.update(personaId, input, {
       reason: '心智页手动调整',
@@ -145,6 +152,7 @@ export class MindService {
     });
   }
 
+  /** Force-closes the active long event; null when nothing is running. */
   async endLongEvent(
     personaId: string,
   ): Promise<{ event: ReturnType<typeof toLongEventRecord>; effects: unknown } | null> {
@@ -155,10 +163,12 @@ export class MindService {
     return { event: toLongEventRecord(result.event), effects: result.effects };
   }
 
+  /** All relationship rows for the persona, unfiltered; the page does its own grouping. */
   listRelationships(personaId: string): Promise<PersonaRelationshipRecord[]> {
     return this.relationships.list(personaId);
   }
 
+  /** Writes relationship numbers and attributes; range validation lives in the service. */
   updateRelationship(
     personaId: string,
     input: PersonaRelationshipUpdateInput,
@@ -166,10 +176,12 @@ export class MindService {
     return this.relationships.update(personaId, input);
   }
 
+  /** Per-group stance rows (tone and disclosure) for the persona. */
   listGroupStances(personaId: string): Promise<PersonaGroupStanceRecord[]> {
     return this.stances.list(personaId);
   }
 
+  /** Updates one group's stance; unknown groups are rejected downstream. */
   updateGroupStance(
     personaId: string,
     input: PersonaGroupStanceUpdateInput,
@@ -177,14 +189,17 @@ export class MindService {
     return this.stances.update(personaId, input);
   }
 
+  /** Paged memory query; the caller supplies the full filter set. */
   listMemories(input: PersonaMemoryQueryInput): Promise<PersonaMemoryRecord[]> {
     return this.memories.list(input);
   }
 
+  /** Total for the same filter, so the list page can paginate without guessing. */
   countMemories(input: PersonaMemoryQueryInput): Promise<number> {
     return this.memories.count(input);
   }
 
+  /** Todo list capped at 100, open items first, then priority and recency. */
   listTodos(personaId: string): Promise<AgentTodoRecord[]> {
     return this.prisma.agentTodo
       .findMany({
@@ -195,6 +210,7 @@ export class MindService {
       .then((rows) => rows.map(toTodoRecord));
   }
 
+  /** Admin-created todo, stamped ADMIN so agent-made items stay distinguishable. */
   async createTodo(input: AgentTodoCreateInput): Promise<AgentTodoRecord> {
     const persona = await this.states.persona(input.personaId);
     const row = await this.prisma.agentTodo.create({
@@ -215,6 +231,7 @@ export class MindService {
     return toTodoRecord(row);
   }
 
+  /** Partial todo update; moving to DONE also stamps completedAt. Unknown ids throw 404. */
   async updateTodo(id: string, input: AgentTodoUpdateInput): Promise<AgentTodoRecord> {
     const existing = await this.prisma.agentTodo.findUnique({ where: { id } });
     if (!existing) {
@@ -238,6 +255,7 @@ export class MindService {
     return toTodoRecord(row);
   }
 
+  /** Admin-created proactive intention; urgency, confidence and risk fall back to sane defaults. */
   async createIntention(input: AgentIntentionCreateInput): Promise<AgentIntentionRecord> {
     const persona = await this.states.persona(input.personaId);
     const row = await this.prisma.agentIntention.create({
@@ -261,6 +279,7 @@ export class MindService {
     return toIntentionRecord(row);
   }
 
+  /** Latest 100 intentions regardless of status; filtering happens in the UI. */
   listIntentions(personaId: string): Promise<AgentIntentionRecord[]> {
     return this.prisma.agentIntention
       .findMany({
@@ -271,6 +290,7 @@ export class MindService {
       .then((rows) => rows.map(toIntentionRecord));
   }
 
+  /** Stored prompts with optional source/run filters; rows without a prompt are excluded. */
   listPromptLogs(input: MindPromptLogQueryInput): Promise<LlmPromptLogRecord[]> {
     return this.prisma.llmCallLog
       .findMany({
@@ -285,6 +305,7 @@ export class MindService {
       .then((rows) => rows.map(toPromptLogRecord));
   }
 
+  /** Run list for polling; plan and social-read blobs are omitted to keep payloads small. */
   listRuns(
     personaId: string,
     conversationId?: string,
@@ -325,10 +346,12 @@ export class MindService {
       .then((rows) => rows.map((run) => toRunSummary(run, run.conversation?.name ?? null)));
   }
 
+  /** Full run trace including plan and tool calls, delegated to the runtime. */
   runDetail(id: string): Promise<AgentRunDetail> {
     return this.runtime.runDetail(id);
   }
 
+  /** Heartbeat log page; ordering and paging are handled by the log service. */
   listHeartbeats(
     personaId: string,
     input: MindHeartbeatQueryInput,
@@ -336,6 +359,7 @@ export class MindService {
     return this.heartbeatLogs.list(personaId, input.limit, input.offset);
   }
 
+  /** Recent diary entries, newest first, capped at 100. */
   listJournal(personaId: string, limit = 30): Promise<PersonaJournalRecord[]> {
     return this.prisma.personaJournal
       .findMany({
@@ -346,6 +370,7 @@ export class MindService {
       .then((rows) => rows.map(toJournalRecord));
   }
 
+  /** Removes a diary entry; an unknown id raises 404 instead of failing silently. */
   async deleteJournal(id: string): Promise<void> {
     const existing = await this.prisma.personaJournal.findUnique({ where: { id } });
     if (!existing) {
@@ -354,18 +379,22 @@ export class MindService {
     await this.prisma.personaJournal.delete({ where: { id } });
   }
 
+  /** Actions waiting for human approval. */
   pendingActions(personaId: string): Promise<AgentActionRecord[]> {
     return this.executor.pending(personaId);
   }
 
+  /** Approves and executes a pending action; side effects happen inside the executor. */
   approveAction(id: string): Promise<AgentActionRecord> {
     return this.executor.approve(id);
   }
 
+  /** Requests one heartbeat turn; false means the gate refused (busy or off-duty). */
   triggerHeartbeat(personaId: string): Promise<boolean> {
     return this.heartbeat.trigger(personaId);
   }
 
+  /** Learning stats; the channel falls back to the persona's own channel when omitted. */
   async learningOverview(
     personaId: string,
     channelId?: string,
@@ -375,30 +404,37 @@ export class MindService {
     return this.learning.overview(personaId, resolved, limit);
   }
 
+  /** Runs a learning turn outside the normal heartbeat cadence; null if the loop is busy. */
   startLearning(personaId: string): Promise<MindTurnResult | null> {
     return this.loop.submitHeartbeat(personaId, { forceLearning: true });
   }
 
+  /** Applies a partial edit to one style note and returns the stored record. */
   updateStyleNote(id: string, input: PersonaStyleNoteUpdateInput): Promise<PersonaStyleNoteRecord> {
     return this.styleNotes.update(id, input);
   }
 
+  /** Removes a style note by id. */
   deleteStyleNote(id: string): Promise<void> {
     return this.styleNotes.remove(id);
   }
 
+  /** Sticker library for one channel; stickers are channel-scoped, not persona-scoped. */
   listStickers(channelId: string): Promise<StickerRecord[]> {
     return this.stickers.list(channelId);
   }
 
+  /** Deletes a sticker, checked against its channel so ids cannot cross channels. */
   deleteSticker(channelId: string, id: string): Promise<void> {
     return this.stickers.remove(id, channelId);
   }
 
+  /** Phone devices currently bridged for this deployment. */
   phoneDevices(): Promise<PhoneDeviceList> {
     return this.phones.devices();
   }
 
+  /** Merges the focus view with live state and situation so the page needs one request. */
   async focusOverview(personaId: string): Promise<MindFocusOverview> {
     const [overview, state, situation] = await Promise.all([
       this.focus.overview(personaId),
@@ -416,6 +452,7 @@ export class MindService {
     };
   }
 
+  /** Starts a manual phone focus and kicks the loop so the agent picks it up promptly. */
   async startPhoneFocus(personaId: string, goal?: string) {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -430,6 +467,7 @@ export class MindService {
   }
 }
 
+/** Maps a Prisma todo row to the shared contract, serializing dates to ISO strings. */
 function toTodoRecord(row: AgentTodo): AgentTodoRecord {
   return {
     id: row.id,
@@ -452,6 +490,7 @@ function toTodoRecord(row: AgentTodo): AgentTodoRecord {
   };
 }
 
+/** Maps an intention row to the shared contract, keeping nullable timestamps nullable. */
 function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
   return {
     id: row.id,
@@ -477,6 +516,7 @@ function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
   };
 }
 
+/** Maps a call-log row to the prompt-log contract; missing prompt/response become empty. */
 function toPromptLogRecord(row: LlmCallLog): LlmPromptLogRecord {
   return {
     id: row.id,
@@ -497,6 +537,7 @@ function toPromptLogRecord(row: LlmCallLog): LlmPromptLogRecord {
   };
 }
 
+/** Maps a diary row to the shared contract, serializing its creation timestamp. */
 function toJournalRecord(row: PersonaJournal): PersonaJournalRecord {
   return {
     id: row.id,

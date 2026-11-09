@@ -26,6 +26,7 @@ export class ChatDirectService {
     private readonly processor: ChatMessageProcessor,
   ) {}
 
+  /** Upserts the direct conversation so repeated page mounts stay idempotent. */
   async ensure(input: ChatDirectConversationInput): Promise<ChatConversationSummary> {
     const channel = await this.prisma.chatChannel.findUnique({
       where: { id: input.channelId },
@@ -88,6 +89,7 @@ export class ChatDirectService {
     }
   }
 
+  /** Stores the incoming line and hands it to the processor; the reply arrives asynchronously. */
   async sendIncoming(conversationId: string, text: string): Promise<ChatMessageSummary> {
     const conversation = await this.prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -195,6 +197,7 @@ export class ChatDirectService {
   }
 }
 
+/** Projects a conversation row plus its channel into the client-facing summary shape. */
 function toSummary(
   conversation: ChatConversation,
   channel: ChatChannel,

@@ -89,6 +89,7 @@ export class PersonaMemoryService {
     private readonly llm: LlmService,
   ) {}
 
+  /** Dedupes against a near-identical row first, so rewrites reinforce one memory instead of piling up. */
   async create(input: PersonaMemoryCreateInput): Promise<PersonaMemoryRecord> {
     const persona = await this.persona(input.personaId);
     const content = input.content.trim();
@@ -164,6 +165,7 @@ export class PersonaMemoryService {
     return toRecord(row);
   }
 
+  /** Partial edit; any text change re-embeds the row so search stays consistent. */
   async update(id: string, input: PersonaMemoryUpdateInput): Promise<PersonaMemoryRecord> {
     const existing = await this.prisma.personaMemory.findUnique({ where: { id } });
     if (!existing) {
@@ -212,6 +214,7 @@ export class PersonaMemoryService {
     return toRecord(updated);
   }
 
+  /** Soft delete: the row survives for audit but its embedding is cleared so it stops matching. */
   async delete(id: string): Promise<void> {
     const existing = await this.prisma.personaMemory.findUnique({ where: { id } });
     if (!existing) {
@@ -247,6 +250,7 @@ export class PersonaMemoryService {
     return { forgotten: owned, skipped: wanted.filter((id) => !kept.has(id)) };
   }
 
+  /** Paged listing; a query switches to full-library ranking instead of the automatic pools. */
   async list(input: PersonaMemoryQueryInput): Promise<PersonaMemoryRecord[]> {
     await this.persona(input.personaId);
     const where = this.listWhere(input);
@@ -276,11 +280,13 @@ export class PersonaMemoryService {
     return scored.map((entry) => ({ ...toRecord(entry.row), score: round(entry.score) }));
   }
 
+  /** Total matching rows for the same filters the listing uses. */
   async count(input: PersonaMemoryQueryInput): Promise<number> {
     await this.persona(input.personaId);
     return this.prisma.personaMemory.count({ where: this.listWhere(input) });
   }
 
+  /** Shared filter builder so listing and counting cannot drift apart. */
   private listWhere(input: PersonaMemoryQueryInput): Prisma.PersonaMemoryWhereInput {
     return {
       personaId: input.personaId,
@@ -393,6 +399,7 @@ export class PersonaMemoryService {
     return semantic + keyword >= MIN_GLOBAL_RELEVANCE;
   }
 
+  /** Three pools (recent, important, rotating archive) so old low-importance rows stay reachable. */
   private async loadCandidates(
     where: Prisma.PersonaMemoryWhereInput,
     options: { full?: boolean } = {},
@@ -505,6 +512,7 @@ export class PersonaMemoryService {
     };
   }
 
+  /** Writes planner drafts, normalising visibility and superseding the row named by `supersedesId`. */
   async applyDrafts(
     scene: MindScene,
     drafts: readonly MemoryDraft[],
@@ -553,6 +561,7 @@ export class PersonaMemoryService {
     return created;
   }
 
+  /** Saves a scene summary only for notable turns; ordinary chat is coalesced behind a cooldown. */
   async recordEpisode(input: {
     scene: MindScene;
     planReason: string;
@@ -629,6 +638,7 @@ export class PersonaMemoryService {
     });
   }
 
+  /** Episodes old enough to be consolidated into long-term knowledge. */
   async countUnconsolidated(personaId: string): Promise<number> {
     return this.prisma.personaMemory.count({
       where: {
@@ -671,6 +681,10 @@ export class PersonaMemoryService {
     return rows.length;
   }
 
+  /**
+   * Asks the model to distill recent episodes into durable memories. Episodes
+   * are only marked consolidated when the call and the parse both succeed.
+   */
   async consolidate(personaId: string): Promise<{
     created: number;
     summary: string;
@@ -805,6 +819,7 @@ export class PersonaMemoryService {
     return { created, summary: summary.trim(), episodeIds };
   }
 
+  /** Prompt-safe view; private visibility becomes a secret flag rather than a separate list. */
   async toPromptItems(memories: readonly PersonaMemoryRecord[]): Promise<MemoryPromptItem[]> {
     return memories.map((memory) => ({
       id: memory.id,
@@ -817,6 +832,7 @@ export class PersonaMemoryService {
     }));
   }
 
+  /** Recall bookkeeping that feeds decay, scoring and the archive rotation. */
   async markRecalled(ids: readonly string[]): Promise<void> {
     if (ids.length === 0) {
       return;
@@ -827,6 +843,7 @@ export class PersonaMemoryService {
     });
   }
 
+  /** Loads the persona or fails with a 404 so memory rows always resolve a channel. */
   async persona(personaId: string) {
     const persona = await this.prisma.chatChannelPersona.findUnique({ where: { id: personaId } });
     if (!persona) {
@@ -835,6 +852,7 @@ export class PersonaMemoryService {
     return persona;
   }
 
+  /** Closest existing row above a context-dependent bar; recent and cross-kind matches use looser ones. */
   private async findDuplicate(
     personaId: string,
     kind: PersonaMemoryKind,
@@ -876,6 +894,7 @@ export class PersonaMemoryService {
   }
 }
 
+/** Blended relevance: semantic, keyword, importance, recency and past recall. */
 function scoreMemory(row: PersonaMemory, queryEmbedding: number[], query: string): number {
   const semantic = cosineSimilarity(queryEmbedding, row.embedding);
   const keyword = keywordOverlap(query, `${row.title}\n${row.content}\n${row.subjectName}`);
@@ -932,20 +951,24 @@ function contextBias(row: PersonaMemory, scene: MindScene): number {
   return bias;
 }
 
+/** Coerces a model-provided string into one of the allowed values, else the fallback. */
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : fallback;
 }
 
+/** Rounds to three decimals so scores stay readable in tool output. */
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+/** Code-point-safe truncation; never splits a surrogate pair. */
 function truncate(value: string, max: number): string {
   return truncateText(value, max);
 }
 
+/** Accepts an object or a JSON string; anything else means no structured data. */
 function parseStructured(value: unknown): Record<string, unknown> | null {
   if (isRecord(value)) {
     return value;
@@ -961,10 +984,12 @@ function parseStructured(value: unknown): Record<string, unknown> | null {
   }
 }
 
+/** Plain-object guard applied before trusting parsed JSON. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** JSON columns use `{}` for a cleared value, matching the other persona tables. */
 function jsonOrNull(value: unknown): Prisma.InputJsonValue {
   if (value === null || value === undefined) {
     return {};
@@ -972,6 +997,7 @@ function jsonOrNull(value: unknown): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
 }
 
+/** Wire shape; optional dates become ISO strings or null. */
 function toRecord(row: PersonaMemory): PersonaMemoryRecord {
   return {
     id: row.id,

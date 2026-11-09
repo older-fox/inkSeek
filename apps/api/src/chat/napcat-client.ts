@@ -46,10 +46,12 @@ export class NapCatClient implements OneBotRequester {
     private readonly label: string,
   ) {}
 
+  /** Registers the event and close callbacks; attaching replaces any previous handlers. */
   attach(handlers: NapCatClientHandlers): void {
     this.handlers = handlers;
   }
 
+  /** Opens the forward WebSocket, resolving on open; the heartbeat starts at the same moment. */
   open(timeoutMs = CONNECT_TIMEOUT_MS): Promise<void> {
     if (this.disposed) {
       return Promise.reject(new Error('连接已关闭'));
@@ -122,6 +124,7 @@ export class NapCatClient implements OneBotRequester {
     });
   }
 
+  /** Sends an OneBot action, settling on the matching echo; rejects on timeout or non-zero retcode. */
   call<T>(action: string, params: Record<string, unknown> = {}, timeoutMs = CALL_TIMEOUT_MS): Promise<T> {
     const socket = this.socket;
 
@@ -158,6 +161,7 @@ export class NapCatClient implements OneBotRequester {
     });
   }
 
+  /** Marks the client disposed so the socket close does not trigger a reconnect. */
   close(): void {
     this.disposed = true;
     this.stopHeartbeat();
@@ -170,6 +174,7 @@ export class NapCatClient implements OneBotRequester {
     }
   }
 
+  /** Appends the access token as a query parameter, which some NapCat builds read instead. */
   private buildUrl(): string {
     const url = new URL(this.serverUrl);
     if (this.accessToken) {
@@ -178,6 +183,7 @@ export class NapCatClient implements OneBotRequester {
     return url.toString();
   }
 
+  /** Dispatches parsed frames: an echo settles a pending call, post_type frames become events. */
   private handleMessage(raw: RawData): void {
     let payload: unknown;
 
@@ -204,6 +210,7 @@ export class NapCatClient implements OneBotRequester {
     }
   }
 
+  /** Resolves or rejects the pending call whose echo matches this response. */
   private settleCall(response: OneBotActionResponse): void {
     const echo = String(response.echo);
     const entry = this.pending.get(echo);
@@ -224,6 +231,7 @@ export class NapCatClient implements OneBotRequester {
     entry.reject(new Error(detail));
   }
 
+  /** Fails every in-flight call; used on disconnect and shutdown. */
   private rejectPending(message: string): void {
     this.pending.forEach((entry) => {
       clearTimeout(entry.timer);
@@ -232,6 +240,7 @@ export class NapCatClient implements OneBotRequester {
     this.pending.clear();
   }
 
+  /** Ping/pong liveness: a missed pong from the previous tick terminates the socket. */
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeat = setInterval(() => {
@@ -249,6 +258,7 @@ export class NapCatClient implements OneBotRequester {
     }, HEARTBEAT_INTERVAL_MS);
   }
 
+  /** Cancels the heartbeat timer, if one is running. */
   private stopHeartbeat(): void {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);

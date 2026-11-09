@@ -8,12 +8,14 @@ const SALT_BYTES = 16;
 
 @Injectable()
 export class PasswordService {
+  /** Returns a self-describing `scrypt$salt$hash` string with a fresh random salt. */
   async hash(password: string): Promise<string> {
     const salt = randomBytes(SALT_BYTES).toString('hex');
     const derived = (await scrypt(password, salt, KEY_LENGTH)) as Buffer;
     return `scrypt$${salt}$${derived.toString('hex')}`;
   }
 
+  /** Compares in constant time; malformed or foreign hashes simply fail. */
   async verify(password: string, stored: string): Promise<boolean> {
     const [scheme, salt, hash] = stored.split('$');
 

@@ -287,6 +287,7 @@ const PRIVATE_FALLBACK: Record<string, PersonaValue> = {
   'obj_profile.active_hours': '未知',
 };
 
+/** Fresh copy of the relationship attribute baseline used before any value is stored. */
 export function privatePersonaDefaults(): Record<string, PersonaValue> {
   return { ...PRIVATE_FALLBACK };
 }

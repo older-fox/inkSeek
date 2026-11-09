@@ -25,10 +25,12 @@ import { SetupPage } from '@/pages/setup-page';
 import { queryClient } from '@/lib/query-client';
 import { bootstrapStatusQuery, meQuery } from '@/lib/queries';
 
+/** Pass-through root shell that only renders the matched child route. */
 function RootLayout() {
   return <Outlet />;
 }
 
+/** Auth-styled fallback for an unreachable API or database; retry does a hard reload. */
 function RootErrorComponent({ error }: ErrorComponentProps) {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -61,6 +63,7 @@ function RootErrorComponent({ error }: ErrorComponentProps) {
   );
 }
 
+/** 404 shell for paths outside the console, linking back to the overview. */
 function NotFoundComponent() {
   return (
     <div className="grid min-h-screen place-items-center px-6">
@@ -85,6 +88,10 @@ const rootRoute = createRootRoute({
   notFoundComponent: NotFoundComponent,
 });
 
+/**
+ * Guard for the authenticated app shell: uninitialised deployments go to /setup and
+ * missing sessions to /login, both resolved from cached bootstrap data.
+ */
 async function requireSession() {
   const status = await queryClient.ensureQueryData(bootstrapStatusQuery);
 

@@ -287,6 +287,7 @@ export class MindPhoneFocusService {
       apps,
     });
 
+    /** One phone-decision call; the caller picks the cap because screenshots burn more. */
     const ask = (text: string, maxTokens: number) =>
       this.llm.complete({
         prompt: text,
@@ -491,6 +492,7 @@ export class MindPhoneFocusService {
     return { continue: true, delayMs: STEP_GAP_MS };
   }
 
+  /** Wakes the screen, caches the app catalog, opens the focus record and starts its agent run. */
   private async startFocus(
     personaId: string,
     channelId: string,
@@ -545,6 +547,7 @@ export class MindPhoneFocusService {
     return { ...focus, state: { ...readFocusState(focus), runId: run.id, source } };
   }
 
+  /** Counts a failed round: retries after a short delay, or ends the session once MAX_FAILURES is hit. */
   private async retryAfterFailure(
     focus: PersonaFocusRecord,
     state: Record<string, unknown>,
@@ -568,6 +571,7 @@ export class MindPhoneFocusService {
     return { continue: true, delayMs: 2000 };
   }
 
+  /** Ends a session: powers off the screen, persists focus state and the run, writes an episode memory, returns a brief. */
   private async finish(
     focus: PersonaFocusRecord,
     status: 'SUCCEEDED' | 'FAILED',
@@ -691,6 +695,7 @@ export class MindPhoneFocusService {
     };
   }
 
+  /** Appends an agent step for the executed actions and folds their token/latency usage into the run. */
   private async recordStep(
     focus: PersonaFocusRecord,
     state: Record<string, unknown>,
@@ -740,6 +745,7 @@ export class MindPhoneFocusService {
   }
 }
 
+/** Renders the observe-decide prompt, switching to relative-coordinate screenshot mode when no element dump is available. */
 function buildPhonePrompt(input: {
   name: string;
   identity: string;
@@ -861,6 +867,7 @@ function buildPhonePrompt(input: {
     .join('\n\n');
 }
 
+/** Reads and validates a stored battery object, rejecting levels outside the 0-100 range. */
 function readBattery(state: Record<string, unknown>): MindPhoneBattery | null {
   const value = state.battery;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -874,6 +881,7 @@ function readBattery(state: Record<string, unknown>): MindPhoneBattery | null {
   return { level, charging: record.charging === true };
 }
 
+/** Normalizes stored notes to trimmed, non-empty lines, keeping the most recent six. */
 function readNotes(state: Record<string, unknown>): string[] {
   return readStringArray(state.notes)
     .map((note) => note.trim().slice(0, 160))
@@ -881,6 +889,7 @@ function readNotes(state: Record<string, unknown>): string[] {
     .slice(-6);
 }
 
+/** Appends a note when new and non-empty, preserving the six-note rolling window. */
 function appendNote(notes: string[], note: string): string[] {
   const trimmed = note.trim().slice(0, 160);
   if (!trimmed || notes.includes(trimmed)) {
@@ -898,7 +907,9 @@ function actionInput(
   action: string,
   picture: { width: number; height: number } | null,
 ): PhoneActionInput | null {
+  /** Maps a model-supplied coordinate onto the real screen width. */
   const x = (value: unknown) => screenPoint(value, picture?.width);
+  /** Maps a model-supplied coordinate onto the real screen height. */
   const y = (value: unknown) => screenPoint(value, picture?.height);
   if (action === 'tap') {
     return { action, x: x(parsed['x']), y: y(parsed['y']) };
@@ -967,6 +978,7 @@ function actionInput(
   return null;
 }
 
+/** Converts a 0-1000 relative coordinate to device pixels; values above 1000 pass through as raw pixels. */
 function screenPoint(value: unknown, size?: number): number {
   const number = readNumber(value, Number.NaN);
   if (!Number.isFinite(number) || !size) {
@@ -979,12 +991,14 @@ function screenPoint(value: unknown, size?: number): number {
   return Math.round((Math.min(1000, Math.max(0, number)) / 1000) * size);
 }
 
+/** Returns the focus's persisted state object, or an empty one when it is missing or malformed. */
 function readFocusState(focus: PersonaFocusRecord): Record<string, unknown> {
   return focus.state && typeof focus.state === 'object' && !Array.isArray(focus.state)
     ? (focus.state as Record<string, unknown>)
     : {};
 }
 
+/** Normalizes a model decision into an ordered action list, accepting a single action or an `actions` batch. */
 function readActionBatch(
   parsed: Record<string, unknown>,
 ): { action: string; raw: Record<string, unknown> }[] {
@@ -1010,6 +1024,7 @@ function readBoard(value: unknown): string {
   return readString(value).replace(/\\n/gu, '\n');
 }
 
+/** Coerces stored history entries into well-formed action/detail records, keeping the last eight. */
 function readHistory(value: unknown): { action: string; detail: string; at: string }[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1025,10 +1040,12 @@ function readHistory(value: unknown): { action: string; detail: string; at: stri
     .slice(-8);
 }
 
+/** The agent run id stored on the state, or an empty string when the session never created one. */
 function runIdOf(state: PhoneFocusState | Record<string, unknown>): string {
   return typeof state.runId === 'string' ? state.runId : '';
 }
 
+/** Best-effort human-readable text from an unknown thrown value. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

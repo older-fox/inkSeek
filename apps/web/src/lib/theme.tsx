@@ -72,14 +72,17 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+/** Returns the palette metadata for a theme id. */
 export function getThemeDefinition(theme: ThemeId): ThemeDefinition {
   return THEME_MAP[theme];
 }
 
+/** Type guard for theme ids read from the document or storage. */
 function isThemeId(value: string | null): value is ThemeId {
   return THEMES.some((item) => item.id === value);
 }
 
+/** Picks the startup theme from the document, legacy keys or the OS color scheme. */
 function readInitialTheme(): ThemeId {
   const current = document.documentElement.dataset.theme ?? null;
 
@@ -94,6 +97,7 @@ function readInitialTheme(): ThemeId {
   return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'snow' : 'dusk';
 }
 
+/** Stores the chosen theme locally, ignoring unavailable storage. */
 function persist(theme: ThemeId) {
   try {
     window.localStorage.setItem(STORAGE_KEY, theme);
@@ -102,9 +106,11 @@ function persist(theme: ThemeId) {
   }
 }
 
+/** Applies the selected theme to the document root and shares it with the app tree. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(readInitialTheme);
 
+  /** Switches the theme and persists it; document attributes follow via the effect below. */
   const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next);
     persist(next);
@@ -126,6 +132,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
+/** Reads the current theme and setter from context; throws outside ThemeProvider. */
 export function useTheme() {
   const context = useContext(ThemeContext);
 

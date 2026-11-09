@@ -42,6 +42,11 @@ const navItems: NavItem[] = [
   { label: '数据洞察', icon: BarChart3, to: '/insights' },
 ];
 
+/**
+ * Persistent console chrome: sidebar navigation and account block on desktop,
+ * a compact header on narrow screens, and the scrollable content area that
+ * resets to the top whenever the active section changes.
+ */
 export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps) {
   const initial = (user.displayName || user.username).slice(0, 1).toUpperCase();
   const pathname = useRouterState({ select: (state) => state.location.pathname });

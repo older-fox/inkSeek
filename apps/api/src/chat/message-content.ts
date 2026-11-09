@@ -11,10 +11,12 @@ export interface ExtractedContent {
   kind: ChatMessageKind;
 }
 
+/** First forward segment, if any: QQ nests forwarded history as a single segment. */
 export function findForwardSegment(segments: readonly OneBotSegment[]): OneBotSegment | null {
   return segments.find((segment) => segment.type === 'forward') ?? null;
 }
 
+/** Flattens segments into display text plus a coarse kind used by lists and filters. */
 export function extractContent(
   segments: readonly OneBotSegment[],
   options: { markReply?: boolean } = {},
@@ -144,6 +146,10 @@ export function buildParts(
   const consumedImages = new Set<string>();
   const consumedVoices = new Set<string>();
 
+  /**
+   * Appends text to the message, merging into a trailing text part so that
+   * interleaved fragments do not split one run of prose across several parts.
+   */
   const appendText = (value: string) => {
     if (!value) {
       return;
@@ -307,6 +313,7 @@ export function findBilibiliVideoUrl(value: unknown, depth = 0): string | null {
   return null;
 }
 
+/** Restores the scheme and drops trailing punctuation that share cards glue onto links. */
 function normalizeVideoUrl(raw: string): string {
   const trimmed = raw.trim().replace(/[)\]，。！？、;,.!?'"]+$/, '');
   if (trimmed.startsWith('//')) {

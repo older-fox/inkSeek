@@ -65,6 +65,7 @@ const features = [
   { icon: Waves, label: '开箱即用', detail: '完成后自动登录' },
 ];
 
+/** Two-step first-run wizard: verify Redis, then create the admin account and sign in. */
 export function SetupPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();

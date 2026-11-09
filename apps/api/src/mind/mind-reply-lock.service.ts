@@ -15,6 +15,7 @@ export class MindReplyLockService {
 
   constructor(private readonly cache: RedisCacheService) {}
 
+  /** Whether the window is still open; the in-process map is checked first. */
   async active(conversationId: string): Promise<boolean> {
     if (!conversationId) {
       return false;
@@ -30,6 +31,8 @@ export class MindReplyLockService {
     return (await this.cache.get(KEY_PREFIX + conversationId)) !== null;
   }
 
+  /** Takes the window; false when another run already holds it. A zero window
+   *  disables the lock entirely and always succeeds. */
   async acquire(input: {
     conversationId: string;
     runId: string;

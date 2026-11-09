@@ -53,6 +53,7 @@ export class MindSceneService {
     private readonly imageDescriptions: ImageDescriptionService,
   ) {}
 
+  /** Assembles the full planner scene around a message: recent history, cast, stance and the persona's own replies. */
   async buildFromMessage(
     message: ChatMessageSnapshot,
     imageDescriptionPrompt = '',
@@ -123,6 +124,7 @@ export class MindSceneService {
     };
   }
 
+  /** Resolves the latest message at or before the anchor time, then delegates to the message-based build. */
   async buildFromConversation(
     channelId: string,
     conversationId: string,
@@ -307,6 +309,7 @@ export class MindSceneService {
     }));
   }
 
+  /** Returns recent scene messages before a cutoff, resolving the account id without building a full scene. */
   async recentMessages(
     conversationId: string,
     limit: number,
@@ -543,6 +546,7 @@ export class MindSceneService {
     }
   }
 
+  /** Loads participants with their relationship rows: one contact privately, capped group members otherwise. */
   private async loadCast(
     conversation: ChatConversation,
     persona: ChatChannelPersona,
@@ -701,6 +705,7 @@ export class MindSceneService {
   }
 }
 
+/** Projects a stored message into the prompt shape, folding voice transcripts and detecting mentions/replies to self. */
 function toSceneMessage(row: MessageWithAssets, accountId: string): SceneMessage {
   const images = row.images
     .map((image) => image.media?.description?.trim() || '')
@@ -769,6 +774,7 @@ function mentionsAccount(segments: unknown, accountId: string): boolean {
   });
 }
 
+/** Builds a bare snapshot from a stored record and its conversation; media and quote fields are left empty. */
 export function toChatMessageSnapshot(
   record: ChatMessageRecord,
   conversation: ChatConversation,
@@ -806,6 +812,7 @@ function relationList(value: Prisma.JsonValue | null): string[] | null {
   return items.length > 0 ? items : null;
 }
 
+/** Coerces a relation JSON column to short display text, discarding empty placeholder objects. */
 function relationText(value: Prisma.JsonValue | null): string | null {
   if (typeof value === 'string') {
     const text = value.trim();

@@ -93,18 +93,26 @@ export class ChatMediaService implements OnModuleInit {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Creates the channel media root at boot; later writes assume the tree exists. */
   async onModuleInit(): Promise<void> {
     await mkdir(CHAT_CHANNEL_ROOT, { recursive: true });
   }
 
+  /** True for the image and sticker segment types this service stores as blobs. */
   isMediaSegment(segment: OneBotSegment): boolean {
     return MEDIA_SEGMENTS.has(segment.type);
   }
 
+  /** True for the `record` segment type handled by the voice storage path. */
   isVoiceSegment(segment: OneBotSegment): boolean {
     return VOICE_SEGMENTS.has(segment.type);
   }
 
+  /**
+   * Stores one image/sticker segment under channelId, preferring inline base64,
+   * then a data URL, then a remote URL. Null when nothing is locatable, leaving
+   * the raw segment as the only surviving record.
+   */
   async saveSegment(channelId: string, segment: OneBotSegment): Promise<StoredMedia | null> {
     if (!this.isMediaSegment(segment)) {
       return null;
@@ -286,6 +294,10 @@ export class ChatMediaService implements OnModuleInit {
     throw new Error(`不支持的图片引用：${trimmed.slice(0, 120)}`);
   }
 
+  /**
+   * Encodes bytes as a sendable data URL, resolving the MIME type from magic
+   * bytes, then the filename, then the hint. Throws instead of truncating.
+   */
   private toImageDataUrl(
     buffer: Buffer,
     fileName: string | null,
@@ -307,6 +319,10 @@ export class ChatMediaService implements OnModuleInit {
     return dataUrl;
   }
 
+  /**
+   * Content-addresses an image data URL into the channel store with an optional
+   * caption. Non-image or malformed URLs return null rather than throwing.
+   */
   async saveDataUrl(
     channelId: string,
     dataUrl: string,
@@ -326,6 +342,10 @@ export class ChatMediaService implements OnModuleInit {
     );
   }
 
+  /**
+   * Downloads a remote image into the channel store. Any failure degrades to a
+   * remote-URL fallback so the message still carries a usable media reference.
+   */
   private async saveRemoteImage(
     channelId: string,
     remoteUrl: string,
@@ -416,6 +436,10 @@ export class ChatMediaService implements OnModuleInit {
     };
   }
 
+  /**
+   * Writes bytes through a temp file and renames into place, skipping a hash
+   * that already exists so repeated ingests never rewrite or tear a blob.
+   */
   private async writeBlob(target: string, buffer: Buffer): Promise<void> {
     await mkdir(dirname(target), { recursive: true });
 
@@ -438,6 +462,11 @@ export class ChatMediaService implements OnModuleInit {
     }
   }
 
+  /**
+   * Inserts or reuses the global SHA-256 blob row and returns its id. The
+   * description is only written while empty, so vision output is never replaced.
+   * Metadata failures leave the file on disk and return null.
+   */
   private async upsertBlob(input: {
     sha256: string;
     storagePath: string;
@@ -481,6 +510,7 @@ export class ChatMediaService implements OnModuleInit {
     }
   }
 
+  /** Fetches a remote asset and stores it; every failure returns a remote-URL fallback row. */
   private async saveRemote(
     channelId: string,
     remoteUrl: string,
@@ -517,6 +547,10 @@ export class ChatMediaService implements OnModuleInit {
     }
   }
 
+  /**
+   * Decodes base64 payload bytes and stores them for the given target kind.
+   * Empty or oversized payloads are dropped; other errors fall back to remoteUrl.
+   */
   private async saveBase64(
     channelId: string,
     base64: string,
@@ -580,6 +614,7 @@ export class ChatMediaService implements OnModuleInit {
   }
 }
 
+/** Builds a StoredMedia that points straight at the remote URL with no local blob. */
 function remoteFallback(
   remoteUrl: string,
   sha256: string | null,
@@ -599,10 +634,12 @@ function remoteFallback(
   };
 }
 
+/** Resolves a media path inside the owning channel's directory, rejecting foreign ids. */
 function targetPath(channelId: string, target: MediaTarget, storagePath: string): string {
   return channelMediaPath(channelId, target.kind, storagePath);
 }
 
+/** Existence probe backing the dedupe check in writeBlob; read errors mean absent. */
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -612,12 +649,14 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** Prisma P2002: another writer already created this hash, which is the happy path. */
 function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002'
   );
 }
 
+/** Lower-cased image MIME without parameters, aliasing image/jpg; null for non-images. */
 function normalizeImageMime(value: string | null): string | null {
   if (!value) {
     return null;
@@ -629,6 +668,7 @@ function normalizeImageMime(value: string | null): string | null {
   return mime.startsWith('image/') ? mime : null;
 }
 
+/** Detects SVG by hint or markup sniff; the static media route must never serve it. */
 function isSvg(buffer: Buffer, mimeTypeHint: string | null): boolean {
   if (normalizeImageMime(mimeTypeHint) === 'image/svg+xml') {
     return true;
@@ -637,6 +677,7 @@ function isSvg(buffer: Buffer, mimeTypeHint: string | null): boolean {
   return head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
 }
 
+/** Image MIME type guessed from a stored file's extension; null when unrecognized. */
 function mimeTypeOfFile(fileName: string | null): string | null {
   if (!fileName) {
     return null;
@@ -651,6 +692,7 @@ function mimeTypeOfFile(fileName: string | null): string | null {
   return match?.[0] ?? null;
 }
 
+/** Keeps only a short alphanumeric extension so URL-derived names stay inert. */
 function sanitizeExtension(value: string | undefined): string | null {
   if (!value) {
     return null;
@@ -658,6 +700,7 @@ function sanitizeExtension(value: string | undefined): string | null {
   return /^[a-z0-9]{1,5}$/i.test(value) ? value.toLowerCase() : null;
 }
 
+/** Picks the blob extension from MIME type, then the source URL, then the fallback. */
 function mediaExtension(
   mimeType: string | null,
   sourceUrl: string | null,
@@ -670,6 +713,7 @@ function mediaExtension(
   return sanitizeExtension(fromMime ?? fromUrl) ?? fallback;
 }
 
+/** Voice length in whole seconds from the first usable segment field; null if absent. */
 function readDurationSeconds(data: Record<string, unknown>): number | null {
   for (const key of ['duration', 'seconds', 'length']) {
     const value = data[key];
@@ -682,6 +726,10 @@ function readDurationSeconds(data: Record<string, unknown>): number | null {
   return null;
 }
 
+/**
+ * Reads pixel dimensions straight from image headers, without decoding.
+ * Returns null when the format or the required bytes are unrecognized.
+ */
 function sniffImageSize(
   buffer: Buffer,
   mimeType: string | null,
@@ -761,6 +809,10 @@ function sniffImageSize(
   return null;
 }
 
+/**
+ * Identifies image and audio bytes by magic number. Takes precedence over the
+ * advertised content type because remote hosts mislabel AMR/SILK as mp3.
+ */
 function sniffMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
     return 'image/jpeg';

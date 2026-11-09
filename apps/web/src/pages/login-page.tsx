@@ -28,6 +28,7 @@ const features = [
   { icon: Waves, label: '数据洞察', detail: '实时指标 · 可视化' },
 ];
 
+/** Admin sign-in screen; authenticates, seeds the session cache and returns to the console. */
 export function LoginPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();

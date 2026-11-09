@@ -31,6 +31,7 @@ const SERIAL_PATTERN = /^PSN-(\d+)$/;
 export class PersonasService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Newest edit first, so the card grid reflects recent work. */
   async list(): Promise<PersonaSummary[]> {
     const rows = await this.prisma.personaCard.findMany({
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
@@ -39,6 +40,7 @@ export class PersonasService {
     return rows.map(toSummary);
   }
 
+  /** Loads the card with its version index; missing ids raise 404. */
   async get(id: string): Promise<PersonaRecord> {
     const row = await this.prisma.personaCard.findUnique({
       where: { id },
@@ -52,6 +54,7 @@ export class PersonasService {
     return toRecord(row);
   }
 
+  /** Reads one snapshot verbatim; versions are immutable once written. */
   async getVersion(id: string, version: number): Promise<PersonaVersionDetail> {
     const row = await this.prisma.personaVersion.findUnique({
       where: { personaId_version: { personaId: id, version } },
@@ -87,6 +90,10 @@ export class PersonasService {
     return toSummary(row);
   }
 
+  /**
+   * Creates the card and its first version in one transaction, allocating the
+   * next PSN serial inside the same transaction so numbers stay gap-free.
+   */
   async create(input: SavePersonaInput): Promise<PersonaRecord> {
     const data = input.data;
     const name = data.name.trim();
@@ -140,6 +147,10 @@ export class PersonasService {
     return toRecord(row);
   }
 
+  /**
+   * Appends a version with the diff against the previous draft; profile fields
+   * are only touched when they actually changed, so the log stays meaningful.
+   */
   async update(id: string, input: SavePersonaInput): Promise<PersonaRecord> {
     const existing = await this.prisma.personaCard.findUnique({ where: { id } });
 
@@ -229,6 +240,7 @@ export class PersonasService {
   }
 }
 
+/** Builds the display profile for a new card; derived fields are computed, not asked for. */
 function createProfile(
   data: PersonaDraft,
   experienceLevel: PersonaExperienceLevel = 'Ⅰ',
@@ -247,6 +259,7 @@ function createProfile(
   };
 }
 
+/** Flattens a row into the list payload, including the current draft for previews. */
 function toSummary(row: PersonaCard): PersonaSummary {
   return {
     id: row.id,
@@ -262,6 +275,7 @@ function toSummary(row: PersonaCard): PersonaSummary {
   };
 }
 
+/** Summary plus the version index, newest first. */
 function toRecord(row: PersonaWithVersions): PersonaRecord {
   return {
     ...toSummary(row),
@@ -269,6 +283,7 @@ function toRecord(row: PersonaWithVersions): PersonaRecord {
   };
 }
 
+/** Version entries intentionally omit the full draft to keep the index small. */
 function toVersionSummary(row: PersonaVersion): PersonaVersionSummary {
   return {
     version: row.version,
@@ -278,11 +293,16 @@ function toVersionSummary(row: PersonaVersion): PersonaVersionSummary {
   };
 }
 
+/** Broken profile JSON falls back to schema defaults instead of failing the read. */
 function readProfile(value: Prisma.JsonValue): PersonaProfile {
   const parsed = personaProfileSchema.safeParse(value);
   return parsed.success ? parsed.data : personaProfileSchema.parse({});
 }
 
+/**
+ * Tolerates older or partial card data: unknown keys are merged over the defaults
+ * and any remaining validation gap yields a complete default draft.
+ */
 function readDraft(value: Prisma.JsonValue): PersonaDraft {
   const parsed = personaDraftSchema.safeParse(value);
 
@@ -309,10 +329,12 @@ function readDraft(value: Prisma.JsonValue): PersonaDraft {
   return merged.success ? merged.data : createDefaultPersonaDraft();
 }
 
+/** Keeps only string entries from a stored JSON array. */
 function readStringArray(value: Prisma.JsonValue): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+/** Flattens the draft into `advanced.*` keys so diffs address leaf fields. */
 function draftFieldKeys(data: PersonaDraft): string[] {
   return (Object.keys(data) as (keyof PersonaDraft)[]).flatMap((key) =>
     key === 'advanced'
@@ -323,6 +345,7 @@ function draftFieldKeys(data: PersonaDraft): string[] {
   );
 }
 
+/** JSON comparison per field, expanding `advanced` so the changelog names the leaf. */
 function diffFields(previous: PersonaDraft, next: PersonaDraft): string[] {
   return (Object.keys(next) as (keyof PersonaDraft)[]).flatMap((key) => {
     if (key === 'advanced') {
@@ -338,11 +361,13 @@ function diffFields(previous: PersonaDraft, next: PersonaDraft): string[] {
   });
 }
 
+/** Derives the numeric age from free text, returning null when it is not a usable number. */
 function parseAge(value: string): number | null {
   const parsed = Number.parseInt(value.trim(), 10);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 999 ? parsed : null;
 }
 
+/** Continues the PSN-0001 series from the highest existing serial. */
 async function nextSerial(tx: Prisma.TransactionClient): Promise<string> {
   const latest = await tx.personaCard.findFirst({
     orderBy: { serial: 'desc' },
@@ -354,6 +379,7 @@ async function nextSerial(tx: Prisma.TransactionClient): Promise<string> {
   return `PSN-${String(next).padStart(4, '0')}`;
 }
 
+/** Shared 404 for every card lookup. */
 function personaNotFound(): NotFoundException {
   return new NotFoundException({
     code: 'PERSONA_NOT_FOUND',

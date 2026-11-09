@@ -62,6 +62,7 @@ export class ChatService {
     private readonly personas: PersonasService,
   ) {}
 
+  /** Channel cards with conversation and message counts aggregated in one round trip. */
   async listChannels(): Promise<ChatChannelSummary[]> {
     const [records, conversationCounts, messageCounts] = await Promise.all([
       this.prisma.chatChannel.findMany({
@@ -100,6 +101,7 @@ export class ChatService {
     return records.map((record) => toChannelSummary(record, stats.get(record.id) ?? EMPTY_STATS));
   }
 
+  /** Probes NapCat, rejects duplicate accounts, then creates the channel and adopts the client. */
   async connect(input: ChatChannelConnectInput): Promise<ChatChannelSummary> {
     const persona = buildChannelPersonaSnapshot(
       await this.personas.latestForSnapshot(input.personaId),
@@ -200,6 +202,7 @@ export class ChatService {
     return this.getChannelSummary(channel.id);
   }
 
+  /** Stops the runtime, deletes the row (cascading) and removes the channel media directory. */
   async deleteChannel(id: string): Promise<void> {
     const existing = await this.prisma.chatChannel.findUnique({
       where: { id },
@@ -277,6 +280,7 @@ export class ChatService {
     return this.getChannelSummary(channelId);
   }
 
+  /** Direct sessions are hidden from PRIVATE listings; they are web-only test lines. */
   async listConversations(kind: ChatConversationKind): Promise<ChatConversationSummary[]> {
     const records = await this.prisma.chatConversation.findMany({
       where: { kind, ...(kind === 'PRIVATE' ? { isDirect: false } : {}) },
@@ -315,6 +319,7 @@ export class ChatService {
     }));
   }
 
+  /** Newest-first page, returned oldest-first; one extra row is read to compute hasMore. */
   async getMessages(
     conversationId: string,
     options: { cursor?: string; limit?: number } = {},
@@ -357,6 +362,7 @@ export class ChatService {
     };
   }
 
+  /** Returns the stored expansion, or lazily expands and persists it while the channel is online. */
   async getForwardDetail(messageId: string): Promise<ChatForwardDetail> {
     const record = await this.loadForward(messageId);
 
@@ -418,6 +424,7 @@ export class ChatService {
     return toForwardDetail(repaired.forward);
   }
 
+  /** Loads a message with its stored forward tree; null when the message no longer exists. */
   private loadForward(messageId: string) {
     return this.prisma.chatMessageRecord.findUnique({
       where: { id: messageId },
@@ -439,6 +446,7 @@ export class ChatService {
     });
   }
 
+  /** Direct lines store locally; QQ lines need an online client or the send is rejected. */
   async sendMessage(
     conversationId: string,
     input: ChatSendMessageInput & { imageDescriptions?: string[] },
@@ -498,6 +506,7 @@ export class ChatService {
     }
   }
 
+  /** Re-reads one channel with fresh per-kind counts, for post-mutation responses. */
   private async getChannelSummary(id: string): Promise<ChatChannelSummary> {
     const record = await this.prisma.chatChannel.findUnique({
       where: { id },
@@ -531,6 +540,7 @@ type ChannelWithPersona = ChatChannel & {
   persona?: (ChatChannelPersona & { state?: PersonaState | null }) | null;
 };
 
+/** Masks the access token so the UI can hint at it without shipping the secret. */
 function toChannelSummary(record: ChannelWithPersona, stats: ChatChannelStats): ChatChannelSummary {
   return {
     id: record.id,
@@ -550,6 +560,7 @@ function toChannelSummary(record: ChannelWithPersona, stats: ChatChannelStats): 
   };
 }
 
+/** Exposes the editable persona fields plus a compact projection of live state. */
 function toPersonaSnapshot(
   record: ChatChannelPersona & { state?: PersonaState | null },
 ): ChatChannelPersonaSnapshot {
@@ -588,6 +599,7 @@ function toPersonaSnapshot(
   };
 }
 
+/** Drops non-scalar values so a malformed client payload cannot poison the JSON column. */
 function sanitizePersonaValues(
   values: Record<string, ChatPersonaValue>,
 ): Record<string, ChatPersonaValue> {
@@ -604,10 +616,12 @@ function sanitizePersonaValues(
   return result;
 }
 
+/** Trimmed string values only; name/identity columns fall back to their stored text. */
 function readPersonaText(value: ChatPersonaValue | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Keeps only fully formed history entries; older or corrupt rows are ignored. */
 function readPersonaHistory(value: Prisma.JsonValue | null): ChatPersonaHistoryEntry[] {
   if (!Array.isArray(value)) {
     return [];
@@ -632,6 +646,7 @@ function readPersonaHistory(value: Prisma.JsonValue | null): ChatPersonaHistoryE
   return entries;
 }
 
+/** Shows only the last four characters; short tokens reveal nothing at all. */
 function maskAccessToken(token: string): string | null {
   const trimmed = token.trim();
   if (!trimmed) {
@@ -640,6 +655,7 @@ function maskAccessToken(token: string): string | null {
   return trimmed.length <= 4 ? '••••' : `•••• ${trimmed.slice(-4)}`;
 }
 
+/** Narrows errors to Prisma's known code strings without importing its error classes. */
 function hasPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' &&

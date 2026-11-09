@@ -46,6 +46,7 @@ const SETTINGS_DEFAULTS = {
 export class MindSettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Ensures the row exists so callers always read concrete values, not defaults. */
   async get(channelId: string): Promise<MindSettingsRecord> {
     await this.assertChannel(channelId);
     const row = await this.prisma.chatMindSettings.upsert({
@@ -69,6 +70,8 @@ export class MindSettingsService {
     };
   }
 
+  /** Partial update: absent fields are left alone, and the create branch fills
+   *  every column from defaults so a first save cannot store nulls. */
   async update(channelId: string, input: MindSettingsUpdateInput): Promise<MindSettingsRecord> {
     await this.assertChannel(channelId);
     const data: Prisma.ChatMindSettingsUpdateInput = {};
@@ -203,6 +206,7 @@ export class MindSettingsService {
     return toRecord(row);
   }
 
+  /** Throws 404 for unknown channels so settings never attach to nothing. */
   private async assertChannel(channelId: string): Promise<void> {
     const channel = await this.prisma.chatChannel.findUnique({
       where: { id: channelId },
@@ -214,6 +218,7 @@ export class MindSettingsService {
   }
 }
 
+/** Widens the Prisma row with an ISO timestamp for the API contract. */
 function toRecord(row: ChatMindSettings): MindSettingsRecord {
   return {
     channelId: row.channelId,

@@ -247,6 +247,11 @@ const FUTURE_PROMISE_PATTERNS: readonly { label: string; re: RegExp }[] = [
   { label: '闲着也是闲着', re: /闲着也是闲着/gu },
 ];
 
+/**
+ * Scans recent self-messages for template tells: repeated topics, openings,
+ * near-identical replays, service tone, ledger framing, empty promises.
+ * Returns null when nothing crosses its threshold, so callers see "no signal".
+ */
 export function readRepetition(scene: MindScene): RepetitionRead | null {
   const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-20);
   if (selfMessages.length < 3) {
@@ -397,6 +402,7 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     : null;
 }
 
+/** Splits Han-only text into overlapping two-character pairs; other scripts are dropped. */
 function chineseBigrams(text: string): string[] {
   const chars = [...text.replace(/[^\u3400-\u9fff]/gu, '')];
   const bigrams: string[] = [];
@@ -436,10 +442,16 @@ const STOP_CHARS = new Set([
 const SELF_SOURCE_KEYS = ['core_values', 'long_term_motivation', 'current_goal'] as const;
 const INTEREST_MEMORY_KINDS = new Set(['PREFERENCE', 'REFLECTION']);
 
+/** Convenience wrapper that classifies a stored message, counting images as content. */
 export function classifyMessage(message: SceneMessage): MessageKind {
   return classifyText(message.text, message.images.length > 0);
 }
 
+/**
+ * Sorts a single message into one bucket (ending, question, request, ack,
+ * substantive, silence). Regex heuristics only: no model call, so it is cheap
+ * enough to run per message.
+ */
 export function classifyText(raw: string, hasMedia = false): MessageKind {
   const text = normalizeText(raw);
   if (!text) {
@@ -748,6 +760,11 @@ export function readConversation(input: {
   };
 }
 
+/**
+ * Scores how much the incoming message touches what this persona cares about,
+ * blending token overlap with embedding cosine. Read-only: it filters the
+ * persona's values and memories for matching clauses and never writes.
+ */
 function readInterest(input: {
   scene: MindScene;
   memories: readonly PersonaMemoryRecord[];
@@ -756,6 +773,11 @@ function readInterest(input: {
   const values = scene.persona.values as Record<string, unknown> | null;
   const sources: { label: string; text: string }[] = [];
   const seen = new Set<string>();
+  /**
+   * Collects candidate clauses from one text. The length window drops both
+   * single words and whole sentences, and the cap keeps the source list small
+   * enough to stay a hint rather than turning into a script.
+   */
   const addSource = (raw: string, prefix = '') => {
     for (const clause of splitClauses(raw)) {
       if (sources.length >= 24 || clause.length < 2 || clause.length > 40 || seen.has(clause)) {
@@ -807,6 +829,7 @@ function readInterest(input: {
   return { score, reason, topics };
 }
 
+/** Breaks free text at punctuation so each clause can be matched on its own. */
 function splitClauses(value: string): string[] {
   return value
     .split(/[，。；、,.!?;:\n\r\t]+/u)
@@ -814,6 +837,11 @@ function splitClauses(value: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Relevance in 0-1 between a message and one candidate source, combining token
+ * overlap with embedding cosine. Overlap is weighted higher so exact keyword
+ * hits survive noisy embeddings.
+ */
 function similarity(message: string, source: string): number {
   const messageTokens = meaningfulTokens(message);
   const sourceTokens = new Set(meaningfulTokens(source));
@@ -831,6 +859,10 @@ function similarity(message: string, source: string): number {
   return Math.min(1, overlap * 0.75 + cosine * 0.45);
 }
 
+/**
+ * Tokenizes text for overlap scoring: Han characters become single tokens after
+ * stop-word removal, while Latin/digit words stay whole.
+ */
 function meaningfulTokens(text: string): string[] {
   const tokens: string[] = [];
   for (const part of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
@@ -848,15 +880,18 @@ function meaningfulTokens(text: string): string[] {
   return tokens;
 }
 
+/** Collapses whitespace runs so downstream regexes and length checks see one line. */
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+/** Truncates by code point (not UTF-16 unit) and appends an ellipsis when cut. */
 function clip(value: string, max: number): string {
   const chars = [...value];
   return chars.length <= max ? value : `${chars.slice(0, max).join('')}…`;
 }
 
+/** Clamps a score into 0-1; the interest read accumulates unbounded weights. */
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }

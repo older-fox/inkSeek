@@ -33,6 +33,7 @@ import { EmptyState, LazyList, MindDrawer, MindSection } from './mind-ui';
 
 const MEMORY_PAGE_SIZE = 50;
 
+/** Memory browser with semantic search, paging and manual write/forget actions. */
 export function MindMemoriesTab({ personaId }: { personaId: string }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
@@ -259,6 +260,10 @@ export function MindMemoriesTab({ personaId }: { personaId: string }) {
   );
 }
 
+/**
+ * Growth tab: counts and lists of world knowledge absorbed from the web and
+ * the persona's own reflections.
+ */
 export function MindGrowthTab({ personaId }: { personaId: string }) {
   const knowledgeQuery = useQuery({
     queryKey: ['mind', 'memories', personaId, 'growth', 'world'],
@@ -333,6 +338,7 @@ export function MindGrowthTab({ personaId }: { personaId: string }) {
   );
 }
 
+/** One knowledge or reflection memory with its confidence and source link. */
 function GrowthCard({ memory }: { memory: PersonaMemoryRecord }) {
   const source = memorySourceUrl(memory);
   return (
@@ -360,6 +366,7 @@ function GrowthCard({ memory }: { memory: PersonaMemoryRecord }) {
   );
 }
 
+/** Reads the optional source URL out of a memory's structured payload. */
 function memorySourceUrl(memory: PersonaMemoryRecord): string {
   const structured = memory.structured;
   if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
@@ -369,6 +376,7 @@ function memorySourceUrl(memory: PersonaMemoryRecord): string {
   return typeof url === 'string' ? url : '';
 }
 
+/** Returns just the hostname of a URL, or the raw value when parsing fails. */
 function sourceHost(url: string): string {
   try {
     return new URL(url).hostname;
@@ -386,6 +394,10 @@ const INTENTION_NEED_LABELS: Record<string, string> = {
   learn: '想了解',
 };
 
+/**
+ * Todos and proactive intentions side by side, with a manual heartbeat trigger
+ * and a notice when proactive messaging is off.
+ */
 export function MindPlansTab({
   personaId,
   proactiveEnabled,
@@ -520,6 +532,7 @@ export function MindPlansTab({
   );
 }
 
+/** First-person diary entries written after memory consolidation, newest first. */
 export function MindJournalTab({ personaId }: { personaId: string }) {
   const queryClient = useQueryClient();
   const journalQuery = useQuery({
@@ -587,6 +600,10 @@ export function MindJournalTab({ personaId }: { personaId: string }) {
   );
 }
 
+/**
+ * Sticker library scoped to one channel: the persona's own favorites, each
+ * deletable from the grid.
+ */
 export function MindStickersTab({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
   const stickersQuery = useQuery({

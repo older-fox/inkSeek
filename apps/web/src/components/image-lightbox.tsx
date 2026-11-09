@@ -9,6 +9,10 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 0.5;
 
+/**
+ * Full-screen image viewer with wheel/button zoom, drag-to-pan and keyboard
+ * shortcuts. Escape closes only the lightbox itself, not dialogs underneath.
+ */
 export function ImageLightbox({
   src,
   alt,
@@ -30,11 +34,13 @@ export function ImageLightbox({
     originY: number;
   } | null>(null);
 
+  /** Returns the image to fit-scale and re-centers it, e.g. when a new image opens. */
   const reset = useCallback(() => {
     setScale(FIT_SCALE);
     setOffset({ x: 0, y: 0 });
   }, []);
 
+  /** Steps the zoom within bounds; zooming back to fit also clears the pan offset. */
   const zoomBy = useCallback((delta: number) => {
     setScale((current) => {
       const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((current + delta).toFixed(2))));
@@ -49,6 +55,10 @@ export function ImageLightbox({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
+    /**
+     * Escape closes the viewer; plus, minus and zero zoom or reset it. Bound in the
+     * capture phase so only the lightbox reacts, never the page behind it.
+     */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         // Keep the Escape from also closing any dialog underneath the lightbox,
@@ -84,6 +94,7 @@ export function ImageLightbox({
     if (!stage) {
       return;
     }
+    /** Wheel zooms in and out, blocking the default so the page behind never scrolls. */
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
       zoomBy(event.deltaY < 0 ? 0.25 : -0.25);
@@ -92,6 +103,7 @@ export function ImageLightbox({
     return () => stage.removeEventListener('wheel', handleWheel);
   }, [zoomBy]);
 
+  /** Starts a pan, but only while the image is zoomed past its fitted size. */
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (scale <= FIT_SCALE) {
       return;
@@ -107,6 +119,7 @@ export function ImageLightbox({
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
+  /** Moves the image by the drag delta, ignoring pointers other than the captured one. */
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
@@ -118,6 +131,7 @@ export function ImageLightbox({
     });
   };
 
+  /** Ends the pan for the captured pointer and releases the capture to the browser. */
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId !== event.pointerId) {
       return;

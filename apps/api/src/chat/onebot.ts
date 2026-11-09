@@ -105,6 +105,7 @@ export interface OneBotRequester {
   call<T>(action: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
 }
 
+/** Narrows raw events to message ones; message_sent is included so self echoes are ingested. */
 export function isOneBotMessageEvent(event: OneBotEvent): event is OneBotMessageEvent {
   return (
     (event.post_type === 'message' || event.post_type === 'message_sent') &&
@@ -113,6 +114,7 @@ export function isOneBotMessageEvent(event: OneBotEvent): event is OneBotMessage
   );
 }
 
+/** Accepts both poke shapes, since NapCat builds disagree on sub_type vs notice_type. */
 export function isOneBotPokeEvent(event: OneBotEvent): event is OneBotPokeEvent {
   return (
     event.post_type === 'notice' &&
@@ -137,6 +139,7 @@ export function normalizeSegments(message: OneBotSegment[] | string): OneBotSegm
   return message ? [{ type: 'text', data: { text: message } }] : [];
 }
 
+/** QQ ids arrive as numbers or strings; blank values collapse to null. */
 export function externalIdOf(value: number | string | undefined | null): string | null {
   if (value === undefined || value === null) {
     return null;
@@ -146,10 +149,12 @@ export function externalIdOf(value: number | string | undefined | null): string 
   return text.length > 0 ? text : null;
 }
 
+/** QQ's public avatar endpoint; 100px is sufficient for the chat lists. */
 export function userAvatarUrl(userId: string): string {
   return `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(userId)}&s=100`;
 }
 
+/** Group avatars use a different QQ CDN path than user avatars. */
 export function groupAvatarUrl(groupId: string): string {
   return `https://p.qlogo.cn/gh/${encodeURIComponent(groupId)}/${encodeURIComponent(groupId)}/100`;
 }

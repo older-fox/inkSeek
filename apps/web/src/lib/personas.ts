@@ -32,6 +32,7 @@ export interface Persona {
   updatedAt: string;
 }
 
+/** Projects a persisted persona record into the card/profile shape used by the UI. */
 export function personaViewOf(record: PersonaSummary): Persona {
   const { data, profile } = record;
 
@@ -80,6 +81,7 @@ export function personaViewOf(record: PersonaSummary): Persona {
   };
 }
 
+/** Case-insensitive match of the search box text against a persona's card fields. */
 export function matchesPersona(persona: Persona, query: string): boolean {
   if (!query) {
     return true;

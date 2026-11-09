@@ -7,6 +7,10 @@ import { GhostButton, PrimaryButton } from '@/components/button';
 import { ApiError, api } from '@/lib/api';
 import { settingsQuery } from '@/lib/queries';
 
+/**
+ * Splits the textarea into one entry per line, trimming blanks and dropping
+ * duplicates while keeping the first occurrence order.
+ */
 function parseWords(text: string): string[] {
   const seen = new Set<string>();
   const words: string[] = [];
@@ -21,6 +25,10 @@ function parseWords(text: string): string[] {
   return words;
 }
 
+/**
+ * Editor for the global banned-word list applied to every channel. Keeps local
+ * draft text, warns on oversized entries, and resets from the server copy on save.
+ */
 export function MindBannedWordsSection({ words }: { words: string[] }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState(words.join('\n'));

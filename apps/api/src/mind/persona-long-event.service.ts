@@ -96,6 +96,7 @@ export class PersonaLongEventService {
     private readonly llm: LlmService,
   ) {}
 
+  /** The event currently running, if any; a persona holds at most one at a time. */
   async active(personaId: string): Promise<PersonaLongEvent | null> {
     return this.prisma.personaLongEvent.findFirst({
       where: { personaId, status: 'ACTIVE' },
@@ -103,6 +104,7 @@ export class PersonaLongEventService {
     });
   }
 
+  /** Recent events for the mind panel, newest first. */
   async list(personaId: string, limit = 10): Promise<PersonaLongEventRecord[]> {
     const rows = await this.prisma.personaLongEvent.findMany({
       where: { personaId },
@@ -112,6 +114,7 @@ export class PersonaLongEventService {
     return rows.map(toRecord);
   }
 
+  /** Replaces any running event, then defers the end time and activity text to the state service. */
   async start(
     personaId: string,
     draft: LongEventDraft,
@@ -148,6 +151,7 @@ export class PersonaLongEventService {
     return { event, replaced };
   }
 
+  /** Claims the event before settling, so two wake paths cannot double-apply its deltas. */
   async finish(
     eventId: string,
     wakeReason: LongEventWakeReason,
@@ -208,6 +212,7 @@ export class PersonaLongEventService {
     return { event, effects };
   }
 
+  /** Ends whatever is running; null when the persona is already awake. */
   async endActive(
     personaId: string,
     wakeReason: LongEventWakeReason = 'MANUAL',
@@ -241,6 +246,7 @@ export class PersonaLongEventService {
     return { event, effects: null, action: 'START' };
   }
 
+  /** Counts a nudge aimed at a resting persona, feeding the mention wake threshold. */
   async noteStimulus(eventId: string): Promise<void> {
     await this.prisma.personaLongEvent.update({
       where: { id: eventId },
@@ -434,6 +440,7 @@ export class PersonaLongEventService {
     }
   }
 
+  /** Minutes awake before this event began, from the previous sleep or last wake marker. */
   private async awakeMinutesBefore(
     event: PersonaLongEvent,
     state: PersonaState,
@@ -457,6 +464,7 @@ export class PersonaLongEventService {
     return Math.max(0, Math.round((event.startedAt.getTime() - lastWake.getTime()) / 60_000));
   }
 
+  /** Rule-only decision when the model fails: keywords first, then accumulated mentions. */
   private fallbackWake(
     event: PersonaLongEvent,
     input: { recentMentions: number; text: string },
@@ -493,6 +501,7 @@ export class PersonaLongEventService {
     return { ...base, judgeReason: '判定失败，未达到提醒阈值，继续休息' };
   }
 
+  /** Asks the model for signed body deltas; failures still return a usable result carrying `error`. */
   private async settle(
     event: PersonaLongEvent,
     wakeReason: LongEventWakeReason,
@@ -626,11 +635,13 @@ export class PersonaLongEventService {
     }
   }
 
+  /** Throws when the row disappeared mid-flight, which only happens on manual deletion. */
   private async requireEvent(eventId: string): Promise<PersonaLongEvent> {
     return this.prisma.personaLongEvent.findUniqueOrThrow({ where: { id: eventId } });
   }
 }
 
+/** End-of-event prompt: event facts, current body values and the JSON contract. */
 function settlementPrompt(input: {
   personaName: string;
   traits: string[];
@@ -688,6 +699,7 @@ function settlementPrompt(input: {
     .join('\n');
 }
 
+/** "Should I wake up" prompt with sender, depth, elapsed time and critical reminders. */
 function wakeJudgePrompt(input: {
   personaName: string;
   identity: string;
@@ -746,6 +758,7 @@ function wakeJudgePrompt(input: {
     .join('\n');
 }
 
+/** Non-binding rest hint: night, debt, low energy and long wakefulness push toward sleep. */
 function suggestRest(input: {
   hour: number;
   sleepDebt: number;
@@ -798,6 +811,7 @@ function suggestRest(input: {
   };
 }
 
+/** HH:MM in the target zone; falls back to server local time on bad zones. */
 function localClock(date: Date, timeZone?: string | null): string {
   try {
     if (timeZone) {
@@ -814,16 +828,19 @@ function localClock(date: Date, timeZone?: string | null): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+/** One-decimal hour count for prompt sentences. */
 function formatHours(hours: number): string {
   return `${Math.round(hours * 10) / 10} 小时`;
 }
 
+/** Reads the JSON column as a settlement, or null when it is not an object. */
 function readSettlement(value: unknown): LongEventSettlement | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as LongEventSettlement)
     : null;
 }
 
+/** Object-shaped JSON or an empty object, so field reads never throw. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -842,6 +859,7 @@ export function matchWakeKeyword(
   return keywords.find((keyword) => normalized.includes(keyword)) ?? null;
 }
 
+/** Chinese label for a wake reason, used in prompts and change-log rows. */
 function wakeReasonLabel(reason: LongEventWakeReason): string {
   switch (reason) {
     case 'PLANNED':
@@ -863,6 +881,7 @@ function wakeReasonLabel(reason: LongEventWakeReason): string {
   }
 }
 
+/** Clamps a requested end into 10 min..24 h; sleep without an end uses a debt-scaled default. */
 function resolvePlannedEnd(now: Date, kind: string, plannedEndAt?: string, sleepDebt = 40): Date {
   const parsed = plannedEndAt ? new Date(plannedEndAt) : null;
   if (!parsed || Number.isNaN(parsed.getTime())) {
@@ -886,6 +905,7 @@ function resolvePlannedEnd(now: Date, kind: string, plannedEndAt?: string, sleep
   );
 }
 
+/** Uppercases and strips a free-form kind, defaulting to sleep. */
 function normalizeKind(value?: string): string {
   const kind = (value ?? 'SLEEP')
     .trim()
@@ -895,6 +915,7 @@ function normalizeKind(value?: string): string {
   return kind || 'SLEEP';
 }
 
+/** Trims, caps and limits the wake words the persona left for itself. */
 function normalizeKeywords(value?: string[]): string[] {
   return (value ?? [])
     .map((keyword) => keyword.trim().slice(0, 20))
@@ -902,6 +923,7 @@ function normalizeKeywords(value?: string[]): string[] {
     .slice(0, 8);
 }
 
+/** Rounds and bounds an optional number, falling back when it is absent or not finite. */
 function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
   if (value === undefined || !Number.isFinite(value)) {
     return fallback;
@@ -909,11 +931,13 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
+/** Trims and hard-caps a free-form string. */
 function trim(value: string | undefined, max: number): string {
   const trimmed = (value ?? '').trim();
   return trimmed.length <= max ? trimmed : trimmed.slice(0, max);
 }
 
+/** Wire shape; optional dates become ISO strings or null. */
 export function toRecord(row: PersonaLongEvent): PersonaLongEventRecord {
   return {
     id: row.id,

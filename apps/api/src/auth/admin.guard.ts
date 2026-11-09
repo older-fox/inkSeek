@@ -8,6 +8,7 @@ import type { FastifyRequest } from 'fastify';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
+  /** Rejects non-admin callers; relies on AuthGuard having populated currentUser already. */
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
 

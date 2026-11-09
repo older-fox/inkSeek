@@ -31,6 +31,10 @@ import {
   ToggleRow,
 } from './mind-ui';
 
+/**
+ * Searchable list of per-contact relationships; selecting one opens the
+ * editor drawer together with its recent change trail.
+ */
 export function MindRelationsTab({ personaId }: { personaId: string }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
@@ -149,6 +153,7 @@ export function MindRelationsTab({ personaId }: { personaId: string }) {
 
 const RELATIONSHIP_CHANGE_LIMIT = 12;
 
+/** Recent relation-field changes for one contact, newest first. */
 export function RelationshipChangeList({
   personaId,
   contactId,
@@ -221,6 +226,10 @@ export function RelationshipChangeList({
   );
 }
 
+/**
+ * Full relationship form: dimension sliders, free-text lists and extras JSON,
+ * saved back through the parent mutation.
+ */
 export function RelationEditor({
   record,
   saving,
@@ -324,6 +333,9 @@ export function RelationEditor({
   );
 }
 
+/**
+ * Searchable list of per-group stances; selecting one opens the stance editor.
+ */
 export function MindGroupsTab({ personaId }: { personaId: string }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
@@ -456,6 +468,10 @@ export function MindGroupsTab({ personaId }: { personaId: string }) {
   );
 }
 
+/**
+ * Group stance form: dimension sliders, scene fields, taboos and the
+ * mention-only switch.
+ */
 function StanceEditor({
   record,
   saving,

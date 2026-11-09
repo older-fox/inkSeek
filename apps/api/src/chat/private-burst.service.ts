@@ -25,6 +25,7 @@ export class PrivateBurstService {
   private readonly bursts = new Map<string, BurstState>();
   private readonly queues = new Map<string, Promise<void>>();
 
+  /** Extends the quiet window on each new message, but never past MAX_BURST_MS from the first. */
   schedule(message: ChatMessageSnapshot, quietSeconds: number, runner: BurstRunner): void {
     const quietMs = Math.max(0, Math.round(quietSeconds * 1000));
     if (quietMs === 0) {
@@ -57,6 +58,7 @@ export class PrivateBurstService {
     this.bursts.set(key, state);
   }
 
+  /** Fires when the quiet window closes and hands the batch to the serialized queue. */
   private async flush(key: string): Promise<void> {
     const state = this.bursts.get(key);
     if (!state) {
@@ -66,6 +68,7 @@ export class PrivateBurstService {
     await this.enqueue(key, () => this.runBurst(state.messages, state.quietSeconds, state.runner));
   }
 
+  /** Swallows runner failures so one bad turn does not poison later bursts of the chat. */
   private async runBurst(
     messages: ChatMessageSnapshot[],
     quietSeconds: number,
@@ -80,6 +83,7 @@ export class PrivateBurstService {
     }
   }
 
+  /** Chains work per conversation so two flushes of the same chat never overlap. */
   private enqueue(key: string, task: () => Promise<void>): Promise<void> {
     const previous = this.queues.get(key) ?? Promise.resolve();
     const next = previous.then(task).catch(() => undefined);
@@ -93,6 +97,7 @@ export class PrivateBurstService {
   }
 }
 
+/** Quiet time left, also capped by the deadline measured from the first message. */
 function burstDelay(firstAt: number, now: number, quietMs: number): number {
   const remaining = MAX_BURST_MS - (now - firstAt);
   return Math.max(0, Math.min(quietMs, remaining));

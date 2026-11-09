@@ -14,6 +14,10 @@ export interface ChatContactBrief {
   accent: 'brass' | 'jade';
 }
 
+/**
+ * Drawer for one contact's live relationship: editable dimensions plus the
+ * recent change trail, saved straight to the persona.
+ */
 export function ContactRelationshipPanel({
   personaId,
   contact,

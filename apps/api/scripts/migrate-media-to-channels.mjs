@@ -77,6 +77,11 @@ console.log('校验：', JSON.stringify(verification, null, 2));
 await prisma.$disconnect();
 process.exit(verification.problems.length > 0 ? 1 : 0);
 
+/**
+ * Moves one media table onto per-channel storage: copies the blob, then points
+ * url/fileName at the channel-scoped location. Remote URLs and orphans are
+ * counted, not migrated.
+ */
 async function migrateAssets(tableName, delegate, kind) {
   const prefix = kind === 'images' ? LEGACY_IMAGE_PREFIX : LEGACY_VOICE_PREFIX;
   const rows = await delegate.findMany({
@@ -122,6 +127,7 @@ async function migrateAssets(tableName, delegate, kind) {
   return result;
 }
 
+/** Same migration for forwarded nodes, whose channel lives two relations away. */
 async function migrateForwardAssets() {
   const result = { images: { rows: 0, copied: 0, updated: 0, missing: 0, remote: 0 }, voices: { rows: 0, copied: 0, updated: 0, missing: 0, remote: 0 } };
   for (const [kind, delegate, includeKey] of [
@@ -174,6 +180,7 @@ async function migrateForwardAssets() {
   return result;
 }
 
+/** Stickers already carry their channel, so only the blob copy needs migrating. */
 async function migrateStickers() {
   const rows = await prisma.stickerAsset.findMany({
     select: { id: true, channelId: true, filePath: true },
@@ -236,6 +243,10 @@ async function migrateJsonColumn(delegate, label) {
   return result;
 }
 
+/**
+ * Walks an archived JSON tree, rewriting every legacy local URL it finds.
+ * Returns the original reference when nothing changed so Prisma can skip the write.
+ */
 function rewriteLocalUrls(value, channelId, copies, depth = 0) {
   if (depth > 12 || value === null || value === undefined) {
     return { value, count: 0 };
@@ -268,6 +279,11 @@ function rewriteLocalUrls(value, channelId, copies, depth = 0) {
   return { value, count: 0 };
 }
 
+/**
+ * Rewrites one URL string: hash paths move straight to the channel prefix,
+ * pre-hash flat files get queued as copies under `legacy/`, and strings that
+ * embed a whole JSON document are parsed and rewritten recursively.
+ */
 function rewriteLocalUrl(value, channelId, copies) {
   if (value.startsWith(LEGACY_IMAGE_PREFIX) || value.startsWith(LEGACY_VOICE_PREFIX)) {
     const kind = value.startsWith(LEGACY_IMAGE_PREFIX) ? 'images' : 'voices';
@@ -327,6 +343,7 @@ async function ensureChannelCopy(channelId, kind, relative) {
   return 'copied';
 }
 
+/** Resolves a relative path under the old shared root; unknown kinds have no legacy home. */
 function legacyPath(kind, relative) {
   if (kind === 'images') {
     return resolve(CHAT_MEDIA_ROOT, ...relative.split('/'));
@@ -340,6 +357,7 @@ function legacyPath(kind, relative) {
   return null;
 }
 
+/** Finds the content-hash storage path from fileName first, then from the legacy URL. */
 function hashPathOf(fileName, legacyPrefix, url) {
   if (typeof fileName === 'string' && HASH_PATH.test(fileName)) {
     return fileName;
@@ -356,6 +374,7 @@ function hashPathOf(fileName, legacyPrefix, url) {
   }
 }
 
+/** Snapshots every affected table to data/backup before any rewrite runs. */
 async function backupTables() {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = resolve(repoRoot, 'data/backup', `media-channels-${stamp}`);
@@ -379,6 +398,7 @@ async function backupTables() {
   console.log(`已备份相关表：${file}`);
 }
 
+/** Post-run audit: every local row must point at its channel's own existing file. */
 async function verify() {
   const problems = [];
   let checked = 0;

@@ -15,6 +15,8 @@ export interface CriticalAdvisory {
   warnings: string[];
 }
 
+/** Collects warnings for values already in a dangerous band; advisory only, the
+ *  caller decides whether to surface or act on them. */
 export function criticalAdvisory(
   awakeMinutes: number | null,
   context?: { health?: number; sleepDebt?: number; stress?: number },
@@ -47,6 +49,7 @@ export function criticalAdvisory(
   };
 }
 
+/** Rounds to one decimal place for display. */
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }

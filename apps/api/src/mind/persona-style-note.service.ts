@@ -33,6 +33,7 @@ const DIMENSIONS = new Set([
 export class PersonaStyleNoteService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Upserts drafts: near-duplicates reinforce the existing row instead of creating a copy. */
   async addDrafts(
     personaId: string,
     channelId: string,
@@ -133,6 +134,7 @@ export class PersonaStyleNoteService {
     return rows.map(toRecord);
   }
 
+  /** Everything for the management list, paused and promoted notes included. */
   async list(personaId: string, channelId: string, limit = 50): Promise<PersonaStyleNoteRecord[]> {
     const rows = await this.prisma.personaStyleNote.findMany({
       where: { personaId, channelId },
@@ -142,6 +144,7 @@ export class PersonaStyleNoteService {
     return rows.map(toRecord);
   }
 
+  /** Partial admin edit; blank content is ignored so a note is never silently emptied. */
   async update(
     id: string,
     input: { status?: 'ACTIVE' | 'PAUSED'; confidence?: number; content?: string },
@@ -159,10 +162,12 @@ export class PersonaStyleNoteService {
     return toRecord(row);
   }
 
+  /** Best-effort delete: a row that is already gone is not an error. */
   async remove(id: string): Promise<void> {
     await this.prisma.personaStyleNote.delete({ where: { id } }).catch(() => undefined);
   }
 
+  /** Usage counter for prompt injection; retired notes are left alone. */
   async markApplied(ids: readonly string[]): Promise<void> {
     if (ids.length === 0) {
       return;
@@ -173,6 +178,7 @@ export class PersonaStyleNoteService {
     });
   }
 
+  /** Retires notes already folded into the persona card so they stop being injected. */
   async markPromoted(ids: readonly string[]): Promise<void> {
     if (ids.length === 0) {
       return;
@@ -203,6 +209,7 @@ export class PersonaStyleNoteService {
   }
 }
 
+/** Wire shape; loose DB strings and JSON columns are normalised on the way out. */
 function toRecord(row: PersonaStyleNote): PersonaStyleNoteRecord {
   return {
     id: row.id,
@@ -226,19 +233,23 @@ function toRecord(row: PersonaStyleNote): PersonaStyleNoteRecord {
   };
 }
 
+/** Collapses whitespace and caps length; non-strings become empty. */
 function normalizeContent(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
 }
 
+/** Unknown dimensions fall back to tone so every note lands in a bucket. */
 function normalizeDimension(value: unknown): string {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return DIMENSIONS.has(text) ? text : 'tone';
 }
 
+/** Anything outside the two retired states reads as still active. */
 function normalizeStatus(value: string): PersonaStyleNoteStatus {
   return value === 'PAUSED' || value === 'PROMOTED' ? value : 'ACTIVE';
 }
 
+/** Trimmed, deduped, capped verbatim samples kept as evidence for a note. */
 function normalizeSamples(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -253,6 +264,7 @@ function normalizeSamples(value: unknown): string[] {
   ].slice(0, MAX_SAMPLES);
 }
 
+/** Dedupes by URL, trims each field and caps the list. */
 function normalizeSources(value: readonly StyleNoteSource[]): StyleNoteSource[] {
   const seen = new Set<string>();
   const sources: StyleNoteSource[] = [];
@@ -274,14 +286,17 @@ function normalizeSources(value: readonly StyleNoteSource[]): StyleNoteSource[] 
   return sources;
 }
 
+/** Union of old and new sources after normalisation. */
 function mergeSources(left: StyleNoteSource[], right: StyleNoteSource[]): StyleNoteSource[] {
   return normalizeSources([...left, ...right]);
 }
 
+/** Union of sample lists, capped at the same limit. */
 function mergeSamples(left: string[], right: string[]): string[] {
   return [...new Set([...left, ...right])].slice(0, MAX_SAMPLES);
 }
 
+/** Reads the JSON column defensively: non-object entries are dropped, never trusted. */
 function parseSources(value: Prisma.JsonValue): StyleNoteSource[] {
   if (!Array.isArray(value)) {
     return [];
@@ -299,16 +314,19 @@ function parseSources(value: Prisma.JsonValue): StyleNoteSource[] {
   );
 }
 
+/** Reads the JSON column defensively: only strings survive the filter. */
 function parseStrings(value: Prisma.JsonValue): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string').slice(0, MAX_SAMPLES)
     : [];
 }
 
+/** Strips whitespace and punctuation so comparison ignores formatting differences. */
 function compact(text: string): string {
   return text.replace(/[\s，。！？、；：“”‘’（）()【】[\]…—-]/gu, '');
 }
 
+/** Duplicate test: exact match, containment for longer text, otherwise bigram overlap. */
 function similar(left: string, right: string): boolean {
   const a = compact(left);
   const b = compact(right);
@@ -328,6 +346,7 @@ function similar(left: string, right: string): boolean {
   return jaccard(a, b) >= 0.55;
 }
 
+/** Jaccard similarity over character bigrams, in 0..1. */
 function jaccard(left: string, right: string): number {
   const a = bigrams(left);
   const b = bigrams(right);
@@ -343,6 +362,7 @@ function jaccard(left: string, right: string): number {
   return overlap / (a.size + b.size - overlap);
 }
 
+/** Adjacent character pairs, code-point aware so CJK and emoji split correctly. */
 function bigrams(text: string): Set<string> {
   const chars = [...text];
   const out = new Set<string>();
@@ -352,6 +372,7 @@ function bigrams(text: string): Set<string> {
   return out;
 }
 
+/** Keeps a number inside an inclusive range. */
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }

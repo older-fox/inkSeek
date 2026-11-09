@@ -102,6 +102,7 @@ export const PERSONA_AI_SYSTEM_PROMPT = `你是「墨寻」平台的人格卡撰
 - decline_response_style 和 in_character_recovery 要写成可以直接照做的句子或做法。
 - 只输出 JSON。`;
 
+/** Pairs the fixed authoring system prompt with the user's role description. */
 export function buildPersonaAiMessages(prompt: string): PersonaAiMessages {
   return {
     system: PERSONA_AI_SYSTEM_PROMPT,

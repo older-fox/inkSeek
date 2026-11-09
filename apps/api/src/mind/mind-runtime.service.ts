@@ -110,6 +110,7 @@ export class MindRuntimeService implements OnModuleInit {
     private readonly closure: MindClosureService,
   ) {}
 
+  /** Reclaims AgentRun rows left RUNNING by a previous process. No-op in script runs. */
   async onModuleInit(): Promise<void> {
     // The rehearsal script boots this service without an HTTP server; it must
     // not reclaim live runs as if the process had restarted.
@@ -214,6 +215,10 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /**
+   * One gated turn: mode / long-event / reply-lock checks, scene build, AgentRun
+   * trace, plan, write-back and beat execution. Skips are persisted as runs too.
+   */
   private async executeTurn(
     input: {
       message: ChatMessageSnapshot;
@@ -244,6 +249,7 @@ export class MindRuntimeService implements OnModuleInit {
     const avoidWindow =
       settings.replyAvoidSeconds > 0 && input.message.conversationKind === 'GROUP';
     let directedCache: boolean | null = null;
+    /** Cached because several gates in one turn ask the same name check. */
     const isDirected = async (): Promise<boolean> => {
       if (directedCache === null) {
         directedCache =
@@ -444,6 +450,7 @@ export class MindRuntimeService implements OnModuleInit {
         scene: compactScene(scene),
       },
     });
+    /** Closes this run as SKIPPED when a newer message pre-empts it mid-turn. */
     const finishInterruptedTurn = async (
       stage: string,
       plan?: ActionPlan,
@@ -631,6 +638,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
 
     const plan = plannerResult.plan;
+    /** Result payload assembled from in-memory parts, so callers never re-read the run row. */
     const turnResult = (): MindTurnResult => ({
       runId: run.id,
       engage: plan.engage,
@@ -641,6 +649,7 @@ export class MindRuntimeService implements OnModuleInit {
       shown: plan.shown ?? plan.stance,
       memories: memories.map(toPublicMemory),
     });
+    /** Persists the SUCCEEDED run; every path that spoke or decided to stay quiet calls it. */
     const finishSucceeded = () =>
       this.finishRun(run.id, 'SUCCEEDED', {
         startedAt,
@@ -771,6 +780,11 @@ export class MindRuntimeService implements OnModuleInit {
     return turnResult();
   }
 
+  /**
+   * Idle wake. Gates in order: long event, due todos/intentions, learning,
+   * reflection, life event, curiosity, phone focus, reply lock, wake budget.
+   * Null means the beat was consumed without a planner turn.
+   */
   async heartbeat(
     personaId: string,
     phoneOutcome?: MindPhoneOutcomeBrief,
@@ -778,6 +792,7 @@ export class MindRuntimeService implements OnModuleInit {
   ): Promise<MindTurnResult | null> {
     const persona = await this.states.persona(personaId);
     const settings = await this.settings.get(persona.channelId);
+    /** Writes one heartbeat row; every exit path calls it so no wake-up goes unexplained. */
     const log = (
       status: MindHeartbeatStatus,
       reason: string,
@@ -1632,6 +1647,7 @@ export class MindRuntimeService implements OnModuleInit {
     };
   }
 
+  /** Newest run for a conversation regardless of status; null when never run. */
   async latest(conversationId: string): Promise<AgentRunSummary | null> {
     const row = await this.prisma.agentRun.findFirst({
       where: { conversationId },
@@ -1641,6 +1657,7 @@ export class MindRuntimeService implements OnModuleInit {
     return row ? toRunSummary(row, row.conversation?.name ?? null) : null;
   }
 
+  /** Complete run trace: decision, plan, ordered steps and persisted action rows. */
   async runDetail(id: string): Promise<AgentRunDetail> {
     const row = await this.prisma.agentRun.findUnique({
       where: { id },
@@ -1675,6 +1692,11 @@ export class MindRuntimeService implements OnModuleInit {
     };
   }
 
+  /**
+   * Persists everything the plan claims: emotion, attribute drift, memory drafts
+   * or an episode, todos, intentions, long events, self-scheduled wake and stance.
+   * Runs before the beats are executed, so side effects survive a send failure.
+   */
   private async writeBack(
     runId: string,
     scene: MindScene,
@@ -1790,6 +1812,7 @@ export class MindRuntimeService implements OnModuleInit {
     void state;
   }
 
+  /** Drift is best-effort: a failure is logged and returned as an empty summary. */
   private async applyDrift(scene: MindScene, plan: ActionPlan): Promise<DriftSummary> {
     try {
       return await this.drift.applyTurn(scene, plan);
@@ -1837,6 +1860,7 @@ export class MindRuntimeService implements OnModuleInit {
     });
   }
 
+  /** Writes a SKIPPED run plus one gate step so suppressed turns stay auditable. */
   private async recordSkippedRun(input: {
     personaId: string;
     message: ChatMessageSnapshot;
@@ -1869,6 +1893,7 @@ export class MindRuntimeService implements OnModuleInit {
     return run.id;
   }
 
+  /** Safety net for throws outside the run lifecycle: closes RUNNING rows for a message. */
   private async failRunningRun(messageId: string | null, error: unknown): Promise<void> {
     if (!messageId) {
       return;
@@ -1880,6 +1905,7 @@ export class MindRuntimeService implements OnModuleInit {
     });
   }
 
+  /** Terminal write for a run: status, latency, decision, plan and provider usage. */
   private async finishRun(
     runId: string,
     status: 'SUCCEEDED' | 'FAILED' | 'SKIPPED',
@@ -1961,6 +1987,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /** Appends one ordered AgentStep row to the run trace. */
   private async step(
     runId: string,
     type: AgentStep['type'],
@@ -2010,6 +2037,7 @@ export class MindRuntimeService implements OnModuleInit {
     );
   }
 
+  /** Latest touched conversation of the channel; rejects a persona/channel mismatch. */
   private async mostRecentConversationId(
     personaId: string,
     channelId: string,
@@ -2231,6 +2259,7 @@ export class MindRuntimeService implements OnModuleInit {
     return [...out.values()].slice(0, cap);
   }
 
+  /** Reflection cadence read from the last 自我反思 step; never due when hours <= 0. */
   private async reflectionDue(personaId: string, settings: MindSettingsRecord): Promise<boolean> {
     const hours = settings.reflectionIntervalHours;
     if (hours <= 0) {
@@ -2321,6 +2350,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /** Persists the next wake time; heartbeat=false re-arms the wake without a beat. */
   private async reschedule(
     personaId: string,
     minutes: number,
@@ -2334,6 +2364,11 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /**
+   * Settles the wake after execution: todos complete only on a real send, intentions
+   * go SENT only when the model reports using them, else DEFERRED with backoff.
+   * The updatedAt guard keeps tool-driven cancellations in this turn from being lost.
+   */
   private async completeWakeItems(
     todoIds: string[],
     intentions: readonly { id: string; attempts: number }[],
@@ -2492,6 +2527,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /** A few recent intention outcomes for the planner; empty feedback rows are excluded. */
   private async recentIntentionFeedback(personaId: string): Promise<MindIntentionFeedback[]> {
     const rows = await this.prisma.agentIntention.findMany({
       where: {
@@ -2616,6 +2652,7 @@ export class MindRuntimeService implements OnModuleInit {
     };
   }
 
+  /** Due intentions enriched with relation score and sorted by computed priority. */
   private async dueIntentionBriefs(
     personaId: string,
     rows: AgentIntention[],
@@ -2912,6 +2949,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
   }
 
+  /** Upserts the persona-local daily journal line from a consolidation summary. */
   private async writeJournal(
     personaId: string,
     summary: string,
@@ -2939,6 +2977,7 @@ export class MindRuntimeService implements OnModuleInit {
   }
 }
 
+/** Rewrites planner name/id references onto real cast ids; unknown subjects dropped. */
 function resolveSceneRefs(scene: MindScene, plan: ActionPlan): void {
   const byRef = new Map<string, string>();
   for (const member of scene.cast) {
@@ -2947,6 +2986,7 @@ function resolveSceneRefs(scene: MindScene, plan: ActionPlan): void {
     byRef.set(member.nickname, member.contactId);
   }
   const known = new Set(scene.cast.map((member) => member.contactId));
+  /** Tries the model's own reference first, then the display name, then keeps it raw. */
   const resolve = (ref?: string, name?: string): string => {
     const raw = ref?.trim() ?? '';
     const direct = raw ? byRef.get(raw) : undefined;
@@ -2982,6 +3022,7 @@ function resolveSceneRefs(scene: MindScene, plan: ActionPlan): void {
   }
 }
 
+/** Turn result for a gated skip: no plan, engage false, skipped marker set. */
 function skipped(
   reason: string,
   options?: {
@@ -3005,6 +3046,7 @@ function skipped(
   };
 }
 
+/** Short recall query from conversation name, anchor sender and the last messages. */
 function buildMemoryQuery(scene: MindScene): string {
   const recent = scene.messages
     .slice(-5)
@@ -3016,6 +3058,7 @@ function buildMemoryQuery(scene: MindScene): string {
     .slice(0, 2000);
 }
 
+/** Minimal persisted scene for runs recorded without a full scene build. */
 function compactMessageScene(message: ChatMessageSnapshot) {
   return {
     conversationId: message.conversationId,
@@ -3036,6 +3079,7 @@ function compactMessageScene(message: ChatMessageSnapshot) {
   };
 }
 
+/** Bounded scene snapshot stored on the AgentRun row: 12 messages, 10 cast members. */
 function compactScene(scene: MindScene) {
   return {
     conversationId: scene.conversation.id,
@@ -3058,10 +3102,12 @@ function compactScene(scene: MindScene) {
   };
 }
 
+/** Identity mapping kept as the explicit boundary between memory record and API. */
 function toPublicMemory(memory: PersonaMemoryRecord): PersonaMemoryRecord {
   return memory;
 }
 
+/** In-memory state for simulations of personas that have no state row; never written. */
 function ephemeralState(persona: MindPersona): PersonaState {
   const now = new Date();
   const values =
@@ -3097,6 +3143,7 @@ function ephemeralState(persona: MindPersona): PersonaState {
   };
 }
 
+/** State view for the simulation payload: feeling values only, no scheduling columns. */
 function simulationState(state: PersonaState): Record<string, unknown> {
   return {
     moodValence: state.moodValence,
@@ -3115,6 +3162,7 @@ function simulationState(state: PersonaState): Record<string, unknown> {
   };
 }
 
+/** Trace step row as exposed to clients, with ISO timestamps. */
 function toStepRecord(step: AgentStep): AgentStepRecord {
   return {
     id: step.id,
@@ -3128,6 +3176,7 @@ function toStepRecord(step: AgentStep): AgentStepRecord {
   };
 }
 
+/** Heartbeat-log digest of a plan: beats verbatim, write-backs counted only. */
 function heartbeatPlanSummary(plan: ActionPlan) {
   return {
     engage: plan.engage,
@@ -3148,6 +3197,7 @@ function heartbeatPlanSummary(plan: ActionPlan) {
   };
 }
 
+/** Executed actions reduced to what the heartbeat log needs to replay the beat. */
 function heartbeatActionSummary(
   actions: readonly {
     kind: string;
@@ -3166,6 +3216,7 @@ function heartbeatActionSummary(
   }));
 }
 
+/** AgentRun row to list DTO; reads engage/reason defensively out of the JSON decision. */
 export function toRunSummary(
   row: {
     id: string;
@@ -3265,6 +3316,7 @@ function lastInboundPreview(scene: unknown): { text: string; sender: string } | 
   return fallback;
 }
 
+/** Journal mood text: valence band with an arousal prefix; pure formatting. */
 function moodLabel(state: PersonaState): string {
   const base =
     state.moodValence > 30
@@ -3281,11 +3333,13 @@ function moodLabel(state: PersonaState): string {
   return base;
 }
 
+/** Quiet interval during quiet hours, always clamped into the configured window. */
 function effectiveWakeMinutes(settings: MindSettingsRecord, quiet: boolean): number {
   const base = quiet ? settings.quietIntervalMinutes : settings.wakeIntervalMinutes;
   return Math.min(settings.wakeMaxMinutes, Math.max(settings.wakeMinMinutes, base));
 }
 
+/** Ranking score for due intentions: urgency weighted by confidence, relation, risk. */
 function intentionPriority(intent: {
   urgency: number;
   confidence: number;
@@ -3356,10 +3410,12 @@ function seedContainment(left: string, right: string): number {
   return overlap / Math.min(a.size, b.size);
 }
 
+/** Duplicate test combining Jaccard similarity and short-seed containment. */
 function isSeedDuplicate(left: string, right: string): boolean {
   return seedSimilarity(left, right) >= 0.55 || seedContainment(left, right) >= 0.3;
 }
 
+/** Normalised CJK/alnum-only key so punctuation and case cannot hide a duplicate. */
 function compactSeed(text: string): string {
   return text
     .normalize('NFKC')
@@ -3367,6 +3423,7 @@ function compactSeed(text: string): string {
     .toLowerCase();
 }
 
+/** Character bigram set; seeds of two chars or less compare as one gram. */
 function seedBigrams(text: string): Set<string> {
   const chars = [...text];
   if (chars.length <= 2) {
@@ -3379,6 +3436,7 @@ function seedBigrams(text: string): Set<string> {
   return grams;
 }
 
+/** Minute of hour in the persona timezone, falling back to server-local time. */
 function localMinute(date: Date, timeZone: string | null): number {
   if (timeZone) {
     try {
@@ -3396,10 +3454,12 @@ function localMinute(date: Date, timeZone: string | null): number {
   return date.getMinutes();
 }
 
+/** Minutes left in the persona-local day; used to defer until the daily budget resets. */
 function minutesUntilLocalMidnight(now: Date, timeZone: string | null): number {
   return Math.max(1, 24 * 60 - (localHour(now, timeZone) * 60 + localMinute(now, timeZone)));
 }
 
+/** Labels why a conversation was closed: busy event, explicit end, topic done or tired. */
 function closureReasonOf(plan: ActionPlan, read?: ConversationRead): string {
   if (plan.longEvent?.action === 'START') {
     return 'busy';
@@ -3419,6 +3479,7 @@ function closureReasonOf(plan: ActionPlan, read?: ConversationRead): string {
   return 'natural';
 }
 
+/** Self-scheduled wake clamped to the configured window; an invalid date uses cadence. */
 function clampWakeAt(settings: MindSettingsRecord, requested: Date): Date {
   const now = Date.now();
   const earliest = now + Math.max(1, settings.wakeMinMinutes) * 60_000;

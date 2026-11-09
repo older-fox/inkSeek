@@ -13,6 +13,10 @@ const TABS = [
   { to: '/connections/groups', label: '群聊', icon: UsersRound },
 ] as const;
 
+/**
+ * Layout for the interconnect center: header with bridge status, tab bar with
+ * live conversation counts, and the routed child page underneath.
+ */
 export function ConnectionsLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const channels = useChannels();

@@ -91,6 +91,11 @@ export class ChatMessagesService {
     private readonly transcription: VoiceTranscriptionService,
   ) {}
 
+  /**
+   * Persists one OneBot event, at most once per (conversation, external id), so
+   * repeated deliveries are ignored. The message row commits before any media,
+   * quote or forward work; those later steps only log when they fail.
+   */
   async ingest(
     channel: ChatChannel,
     client: OneBotRequester,
@@ -561,6 +566,11 @@ export class ChatMessagesService {
     return toMessageSummary(message);
   }
 
+  /**
+   * Sends through NapCat and archives the result. When the send echo was already
+   * ingested under the same message id, that row is returned instead of a second
+   * record, so retries stay idempotent.
+   */
   async send(
     channel: ChatChannel,
     conversation: ChatConversation,
@@ -749,6 +759,7 @@ export class ChatMessagesService {
     return toMessageSummary(message);
   }
 
+  /** Refetches a committed message with media, sender and forward relations joined. */
   private loadMessageView(id: string): Promise<MessageView> {
     return this.prisma.chatMessageRecord.findUniqueOrThrow({
       where: { id },
@@ -816,6 +827,7 @@ export class ChatMessagesService {
     }
   }
 
+  /** Upserts the channel's own account as a contact, reused for self-authored messages. */
   async ensureSelfContact(channel: ChatChannel): Promise<ChatContact> {
     return this.ensureContact(channel, {
       externalId: channel.accountId,
@@ -826,6 +838,10 @@ export class ChatMessagesService {
     });
   }
 
+  /**
+   * Normalizes a raw event into conversation kind, peer/sender ids and segments.
+   * Returns null when no peer can be derived, so nothing is written.
+   */
   private parseEvent(channel: ChatChannel, event: OneBotMessageEvent): ParsedMessageEvent | null {
     const kind: ChatConversationKind = event.message_type === 'group' ? 'GROUP' : 'PRIVATE';
     const isSelf =
@@ -869,6 +885,11 @@ export class ChatMessagesService {
     };
   }
 
+  /**
+   * Finds or creates the conversation for a parsed event, back-filling name,
+   * avatar and group info. A unique violation on create means another ingest won
+   * the race; that row is re-read so both messages land in one conversation.
+   */
   private async ensureConversation(
     channel: ChatChannel,
     client: OneBotRequester,
@@ -997,6 +1018,7 @@ export class ChatMessagesService {
     }
   }
 
+  /** One `get_group_info` read; failures are logged and returned as null, never thrown. */
   private async fetchGroupInfo(
     client: OneBotRequester,
     groupId: string,
@@ -1123,6 +1145,7 @@ export class ChatMessagesService {
     }
   }
 
+  /** Upserts the sender's membership, refreshing card/role only when the event supplies them. */
   private async ensureMembership(
     conversationId: string,
     contactId: string,
@@ -1147,6 +1170,10 @@ export class ChatMessagesService {
     });
   }
 
+  /**
+   * Upserts a contact keyed by (channel, external id): nickname, avatar and
+   * lastSeenAt refresh on every call, while isSelf is only ever turned on.
+   */
   private ensureContact(
     channel: ChatChannel,
     input: {
@@ -1236,6 +1263,10 @@ export class ChatMessagesService {
     };
   }
 
+  /**
+   * Resolves a quote through `get_msg` and mirrors its images into our channel
+   * store so the snapshot survives expiring QQ URLs. Null on any API failure.
+   */
   private async fetchQuotedMessage(
     channelId: string,
     client: OneBotRequester,
@@ -1287,6 +1318,10 @@ export class ChatMessagesService {
     }
   }
 
+  /**
+   * Hands the committed message to the processor with media ordered by segment
+   * position; processor errors are swallowed so persistence never rolls back.
+   */
   private async triggerProcessing(
     channel: ChatChannel,
     conversation: ChatConversation,
@@ -1332,10 +1367,15 @@ export class ChatMessagesService {
   }
 }
 
+/** Prisma P2002 marker: a concurrent writer already stored this row or identity. */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002';
 }
 
+/**
+ * Maps a message view to the API shape. Media is re-sorted by position, a stored
+ * forward wins over a legacy card, and parts are rebuilt from the archived segments.
+ */
 export function toMessageSummary(record: MessageView): ChatMessageSummary {
   const images = [...record.images]
     .sort((left, right) => left.position - right.position)
@@ -1406,6 +1446,7 @@ function storedForwardSummary(segments: Prisma.JsonValue): ChatForwardSummary | 
     : null;
 }
 
+/** Projects a forward row onto the summary enum values clients render cards from. */
 function toForwardSummary(record: ForwardMeta | null): ChatForwardSummary | null {
   if (!record) {
     return null;
@@ -1435,6 +1476,7 @@ const QUOTE_KINDS = new Set<ChatMessageKind>([
   'FORWARD',
 ]);
 
+/** Reads the quoted message id from a `reply` segment, normalized to a string. */
 function replyExternalIdOf(segments: readonly OneBotSegment[]): string | null {
   const reply = segments.find((segment) => segment.type === 'reply');
   const data = reply?.data;
@@ -1451,6 +1493,7 @@ function replyExternalIdOf(segments: readonly OneBotSegment[]): string | null {
   return typeof id === 'string' && id.trim().length > 0 ? id.trim() : null;
 }
 
+/** Empty snapshot standing in for quotes QQ cannot return, e.g. recalled messages. */
 function unavailableQuote(externalId: string): ChatQuoteSummary {
   return {
     messageId: null,
@@ -1465,6 +1508,10 @@ function unavailableQuote(externalId: string): ChatQuoteSummary {
   };
 }
 
+/**
+ * Validates a stored reply snapshot, coercing unknown fields to safe defaults.
+ * Anything not RESOLVED or UNAVAILABLE is treated as no quote at all.
+ */
 function quoteFromSnapshot(value: Prisma.JsonValue | null): ChatQuoteSummary | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -1519,6 +1566,7 @@ function quoteFromRecord(record: MessageView): ChatQuoteSummary | null {
   return externalId ? unavailableQuote(externalId) : null;
 }
 
+/** Quote worth feeding the model: resolved snapshots that carry real content. */
 function quoteContextOf(value: Prisma.JsonValue | null): ChatMessageQuote | null {
   const quote = quoteFromSnapshot(value);
 
@@ -1542,6 +1590,7 @@ function quoteContextOf(value: Prisma.JsonValue | null): ChatMessageQuote | null
   };
 }
 
+/** Builds a forward node, nesting child forwards through the relation. */
 function toForwardNodeCreate(
   node: ForwardNodeWrite,
   forwardId: string,
@@ -1558,6 +1607,7 @@ function toForwardNodeCreate(
   };
 }
 
+/** Same node shape as toForwardNodeCreate, but with the parent forward id set directly. */
 function toNestedForwardNodeCreate(
   node: ForwardNodeWrite,
   forwardId: string,
@@ -1575,6 +1625,7 @@ function toNestedForwardNodeCreate(
   };
 }
 
+/** Shared scalar columns plus nested image/voice rows for one forward node. */
 function forwardNodeFields(node: ForwardNodeWrite) {
   return {
     position: node.position,
@@ -1637,6 +1688,7 @@ function sanitizeInlineMedia(segments: readonly OneBotSegment[]): OneBotSegment[
   });
 }
 
+/** Conversation-list preview: whitespace-collapsed text, else a media placeholder. */
 function previewOf(
   text: string,
   kind: ChatMessageKind,
@@ -1656,11 +1708,13 @@ function previewOf(
   return kind === 'FACE' ? '[表情]' : '[消息]';
 }
 
+/** QQ ids that fit a safe integer are sent numerically; longer ones stay strings. */
 function toOneBotId(value: string): number | string {
   const numeric = Number(value);
   return Number.isSafeInteger(numeric) ? numeric : value;
 }
 
+/** Splits an image data URL into its base64 payload, or null when it is not one. */
 function parseImageDataUrl(dataUrl: string): { base64: string } | null {
   const match = /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(dataUrl);
   return match?.[1] ? { base64: match[1] } : null;

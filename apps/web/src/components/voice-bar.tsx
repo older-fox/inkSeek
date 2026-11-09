@@ -8,12 +8,17 @@ const WAVE_BARS = [
   0.32, 0.7,
 ];
 
+/** Renders a duration in seconds as m:ss, falling back to 0:00 for bad input. */
 function formatClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
   const total = Math.round(seconds);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+/**
+ * Inline voice-message player with a scrubbable waveform, plus the optional
+ * transcript. Playback stops on unmount so navigating away never leaks audio.
+ */
 export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self: boolean }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -25,10 +30,13 @@ export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    /** Mirrors playback position into state so the waveform fill follows the clip. */
     const onTime = () => setPosition(audio.currentTime);
+    /** Adopts the decoded duration, ignoring NaN or zero so the metadata-less fallback stays usable. */
     const onMeta = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration);
     };
+    /** Rewinds to the start on finish so the next play begins from 0 rather than the end. */
     const onEnd = () => {
       setPlaying(false);
       setPosition(0);
@@ -46,6 +54,7 @@ export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self
     };
   }, []);
 
+  /** Play/pause; skipped when the element is missing or already failed, and a rejected play() counts as a failure. */
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio || failed) return;
@@ -60,6 +69,7 @@ export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self
     }
   };
 
+  /** Jumps to a 0–1 waveform position; a no-op until a real duration is known, so scrubbing can't produce NaN. */
   const seekTo = (ratio: number) => {
     const audio = audioRef.current;
     if (!audio || !(audio.duration > 0)) return;

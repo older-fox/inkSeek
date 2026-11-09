@@ -33,6 +33,7 @@ export class BilibiliAuthService {
     private readonly config: SystemConfigService,
   ) {}
 
+  /** Returns a ready-to-send `Cookie` fragment, or `null` when no login is stored. */
   async getCookie(): Promise<string | null> {
     const record = await this.prisma.systemConfig.findUnique({
       where: { key: CONFIG_KEYS.bilibiliCookie },
@@ -41,6 +42,7 @@ export class BilibiliAuthService {
     return sessdata ? `SESSDATA=${sessdata}` : null;
   }
 
+  /** Client-safe view: only whether a cookie exists and the account name, never SESSDATA. */
   async overview(): Promise<BilibiliSettings | null> {
     const record = await this.prisma.systemConfig.findUnique({
       where: { key: CONFIG_KEYS.bilibiliCookie },
@@ -56,6 +58,10 @@ export class BilibiliAuthService {
     };
   }
 
+  /**
+   * Validates against Bilibili before storing; an empty input keeps the existing
+   * cookie, and `clearCookie` wipes it without probing.
+   */
   async save(input: BilibiliSettingsInput): Promise<BilibiliSettings> {
     const record = await this.prisma.systemConfig.findUnique({
       where: { key: CONFIG_KEYS.bilibiliCookie },
@@ -104,6 +110,7 @@ export class BilibiliAuthService {
   }
 }
 
+/** Calls the nav endpoint to confirm the cookie is still logged in. */
 async function probeLogin(sessdata: string): Promise<{ isLogin: boolean; uname?: string }> {
   let response: Response;
   try {
@@ -134,11 +141,13 @@ async function probeLogin(sessdata: string): Promise<{ isLogin: boolean; uname?:
   };
 }
 
+/** Reads the stored SESSDATA defensively; anything unexpected reads as empty. */
 function readSessdata(value: unknown): string {
   const record = value as BilibiliCookieRecord | null;
   return typeof record?.sessdata === 'string' ? record.sessdata.trim() : '';
 }
 
+/** Accepts either a bare value or a pasted cookie header and pulls SESSDATA out. */
 function extractSessdata(input: string): string {
   const text = input.trim();
   const match = text.match(/(?:^|[;\s])SESSDATA=([^;\s]+)/i);

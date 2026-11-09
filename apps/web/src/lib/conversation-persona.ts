@@ -105,6 +105,10 @@ export function useConversationPersona(
     () => (conversation ? { ...defaults, ...(overrides ?? {}) } : null),
     [conversation, defaults, overrides],
   );
+  /**
+   * Serializes saves via savingRef; a save that lands mid-flight is queued and
+   * re-run from finally, so rapid edits never race each other on the API.
+   */
   const runSave = useCallback(async () => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -150,6 +154,7 @@ export function useConversationPersona(
     }
   }, [queryClient, relationship, stance]);
 
+  /** Forces an immediate save, used on close/unmount so no debounce tail is lost. */
   const flush = useCallback(() => {
     void runSave();
   }, [runSave]);
@@ -166,6 +171,7 @@ export function useConversationPersona(
     };
   }, [runSave]);
 
+  /** Records an edit locally and debounces the save; private edits need an existing relationship row. */
   const update = useCallback(
     (key: string, value: PersonaValue) => {
       if (!conversationId || !personaId || !values || !entity) {
@@ -209,6 +215,7 @@ export function useConversationPersona(
   };
 }
 
+/** Narrows an unknown value to a plain object so extras can be merged safely. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

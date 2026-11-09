@@ -34,6 +34,7 @@ const TEXT_STATE_FIELDS = ['currentActivity', 'location'] as const;
 export class PersonaStateService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Upserts the row on demand, seeding grooming from the persona card and scheduling a quick first wake. */
   async ensure(personaId: string): Promise<PersonaState> {
     const persona = await this.persona(personaId);
     const values =
@@ -55,6 +56,7 @@ export class PersonaStateService {
     });
   }
 
+  /** Record for the polling UI, so lazy drift runs without appending audit rows. */
   async get(personaId: string): Promise<PersonaStateRecord> {
     const persona = await this.persona(personaId);
     const state = await this.ensure(personaId);
@@ -64,6 +66,10 @@ export class PersonaStateService {
     return toRecord(drifted);
   }
 
+  /**
+   * Operator-facing write. Numeric fields clamp to their allowed ranges and
+   * `activitySince` only resets when the activity text actually changes.
+   */
   async update(
     personaId: string,
     input: PersonaStateUpdateInput,
@@ -104,6 +110,7 @@ export class PersonaStateService {
     return toRecord(state);
   }
 
+  /** Folds a felt emotion into mood and stress by keyword polarity; unrelated body fields are untouched. */
   async applyEmotion(
     personaId: string,
     felt: MindEmotion | null,
@@ -248,6 +255,7 @@ export class PersonaStateService {
     });
   }
 
+  /** Sets only the wake timestamp; any held worker lease stays as it was. */
   async setNextWakeAt(personaId: string, nextWakeAt: Date | null): Promise<void> {
     await this.prisma.personaState.updateMany({
       where: { personaId },
@@ -263,6 +271,7 @@ export class PersonaStateService {
     });
   }
 
+  /** Loads the persona or fails with a 404; state rows never outlive their persona. */
   async persona(personaId: string): Promise<MindPersona> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -273,6 +282,10 @@ export class PersonaStateService {
     return persona;
   }
 
+  /**
+   * Time-based pull toward baselines between events (sleep vs. waking targets).
+   * Sub-minute gaps are skipped so rapid calls do not burn writes.
+   */
   private async drift(
     persona: MindPersona,
     state: PersonaState,
@@ -316,6 +329,7 @@ export class PersonaStateService {
     return next;
   }
 
+  /** One audit row per changed field; write failures are swallowed so history never blocks state. */
   private async logChanges(
     personaId: string,
     before: PersonaState,
@@ -376,10 +390,12 @@ export class PersonaStateService {
   }
 }
 
+/** First-order approach step; rate is capped at 1 so large deltas converge instead of overshooting. */
 function approach(current: number, target: number, rate: number): number {
   return clamp(current + (target - current) * Math.min(1, rate), 0, 100);
 }
 
+/** Wire shape for the state; optional dates become ISO strings or null. */
 function toRecord(state: PersonaState): PersonaStateRecord {
   return {
     personaId: state.personaId,

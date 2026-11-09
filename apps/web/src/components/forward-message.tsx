@@ -19,6 +19,7 @@ const nodeTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 });
 
+/** Short human-readable summary of a merged forward's sync state and size. */
 function statusText(forward: ChatForwardSummary): string {
   if (forward.status === 'PENDING') {
     return '内容尚未展开，打开后同步';
@@ -32,10 +33,15 @@ function statusText(forward: ChatForwardSummary): string {
   return `${forward.nodeCount} 条消息`;
 }
 
+/** Badge label for the node count, replaced by a pending marker until expanded. */
 function countText(forward: ChatForwardSummary): string {
   return forward.status === 'PENDING' ? '待同步' : `${forward.nodeCount} 条`;
 }
 
+/**
+ * Chat bubble standing in for a merged forward; clicking it opens the drawer
+ * that lazily loads the forwarded conversation.
+ */
 export function ForwardMessageCard({
   messageId,
   forward,
@@ -96,6 +102,11 @@ export function ForwardMessageCard({
   );
 }
 
+/**
+ * Drawer listing the forwarded nodes, fetched on first open. Escape is ignored
+ * while an image preview is stacked above it, and expanding a legacy pending
+ * card refreshes the message list so the summary updates itself.
+ */
 function ForwardDrawer({
   open,
   onClose,
@@ -133,6 +144,7 @@ function ForwardDrawer({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
+    /** Escape closes the card, deferring to an image preview nested inside it. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         // An image preview opened from inside the forward list owns Escape.
@@ -243,6 +255,7 @@ function ForwardDrawer({
   );
 }
 
+/** One forwarded message line: sender, timestamp, body parts and nested forwards. */
 function ForwardNodeRow({ node }: { node: ChatForwardNodeSummary }) {
   const time = node.sentAt ? nodeTimeFormatter.format(new Date(node.sentAt)) : null;
 
@@ -279,6 +292,7 @@ function ForwardNodeRow({ node }: { node: ChatForwardNodeSummary }) {
   );
 }
 
+/** Collapsible block for a forward nested inside another forward's nodes. */
 function NestedForwardBlock({ nodes }: { nodes: ChatForwardNodeSummary[] }) {
   const [open, setOpen] = useState(false);
 
@@ -324,6 +338,10 @@ function NestedForwardBlock({ nodes }: { nodes: ChatForwardNodeSummary[] }) {
   );
 }
 
+/**
+ * Renders a single forwarded part by type: text, playable voice, image with
+ * lightbox, or a compact reference to a further nested forward.
+ */
 function ForwardNodePart({ part }: { part: ChatMessagePart }) {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
 

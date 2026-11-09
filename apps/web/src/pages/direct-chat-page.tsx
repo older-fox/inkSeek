@@ -24,6 +24,7 @@ const OWNER_IDENTITY = '__owner__';
 
 type ModeView = 'OFF' | 'SHADOW' | 'APPROVAL' | 'LIVE';
 
+/** Direct line to a persona: pick persona and speaking identity, then chat without QQ delivery. */
 export function DirectChatPage() {
   const search = useSearch({ strict: false }) as {
     channelId?: string;
@@ -42,6 +43,7 @@ export function DirectChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
+  /** Refocuses the composer without scrolling and parks the caret at the end, keeping typing flow after a send. */
   const focusComposer = () => {
     const el = composerRef.current;
     if (!el) return;
@@ -152,12 +154,14 @@ export function DirectChatPage() {
     setAwaitingSince(null);
   }, [direct?.id]);
 
+  /** Resets the identity and the awaiting-reply timer (they belong to the old channel) and mirrors the choice into the URL. */
   const selectChannel = (value: string) => {
     setChannelId(value);
     setIdentityId('');
     setAwaitingSince(null);
     void navigate({ to: '/direct', search: { channelId: value }, replace: true });
   };
+  /** Drops the pending-reply state before switching personas and writes the identity into the URL search. */
   const selectIdentity = (value: string) => {
     setIdentityId(value);
     setAwaitingSince(null);
@@ -168,16 +172,19 @@ export function DirectChatPage() {
     });
   };
 
+  /** Guards empty drafts, a missing direct conversation and in-flight sends so no duplicate message can go out. */
   const submit = () => {
     const text = draft.trim();
     if (!text || !direct || send.isPending) return;
     send.mutate(text);
   };
+  /** Sends a suggestion-chip text as-is; same pending guard as submit, then returns focus to the composer. */
   const sendText = (text: string) => {
     if (!direct || send.isPending) return;
     send.mutate(text);
     focusComposer();
   };
+  /** Enter sends and Shift+Enter inserts a break; IME composition Enter is ignored so CJK input is not cut off. */
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -492,6 +499,7 @@ export function DirectChatPage() {
   );
 }
 
+/** One bubble on the direct line, aligned by sender and rendering text, image or voice parts. */
 function DirectMessage({
   message,
   personaName,
@@ -534,6 +542,7 @@ function DirectMessage({
   );
 }
 
+/** Renders a single message part; unknown record types collapse to a forward marker. */
 function MessagePart({ part }: { part: ChatMessagePart }) {
   if (part.type === 'text') {
     return <span className="block whitespace-pre-wrap">{part.text}</span>;
@@ -559,6 +568,7 @@ function MessagePart({ part }: { part: ChatMessagePart }) {
   return <span className="block text-[0.76rem] text-mist-400">[聊天记录]</span>;
 }
 
+/** Explains what the current mind mode does with a message on this line. */
 function modeHint(mode: ModeView): string {
   switch (mode) {
     case 'LIVE':
@@ -572,6 +582,7 @@ function modeHint(mode: ModeView): string {
   }
 }
 
+/** Clock time for a message stamp, blank when the timestamp is invalid. */
 function formatTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';

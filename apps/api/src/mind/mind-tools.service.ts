@@ -62,6 +62,7 @@ export interface MindToolContext {
   dryRun?: boolean;
 }
 
+/** Promisified child_process.execFile, used for ffmpeg image downscaling. */
 const execFileAsync = promisify(execFile);
 
 const DRY_RUN_BLOCKED_TOOLS = new Set([
@@ -666,6 +667,7 @@ export class MindToolsService {
     ].join('\n');
   }
 
+  /** Dispatches a tool call via run(), timing it and turning thrown errors into an error result. */
   async execute(name: string, input: unknown, context: MindToolContext): Promise<ToolExecution> {
     const startedAt = Date.now();
     const args =
@@ -686,6 +688,7 @@ export class MindToolsService {
     }
   }
 
+  /** Routes each tool by name after enforcing browser-enabled and dry-run write-block guards. */
   private async run(
     name: string,
     args: Record<string, unknown>,
@@ -820,6 +823,7 @@ export class MindToolsService {
     }
   }
 
+  /** Scores the tool catalog against query keywords/Chinese aliases, returns top param contracts. */
   private toolsSearch(args: Record<string, unknown>) {
     const query = readString(args['query']).trim().toLowerCase();
     if (!query) {
@@ -865,6 +869,7 @@ export class MindToolsService {
     };
   }
 
+  /** Reads chat history from the DB by keyword/sender/time, or a window around an anchor message. */
   private async historySearch(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim();
     const sender = readString(args['sender']).trim();
@@ -925,6 +930,7 @@ export class MindToolsService {
     }));
   }
 
+  /** Semantic recall over long-term memory for the scene; marks recalls unless this is a dry run. */
   private async memorySearch(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim() || '最近发生的事';
     const limit = Math.max(1, Math.min(12, readNumber(args['limit'], 8)));
@@ -938,6 +944,7 @@ export class MindToolsService {
     ];
   }
 
+  /** Forgets up to 10 owned memories by id via the memory service; foreign/unknown ids are skipped. */
   private async memoryForget(args: Record<string, unknown>, context: MindToolContext) {
     const ids = readStringArray(args['ids']);
     const single = readString(args['id']).trim();
@@ -957,6 +964,7 @@ export class MindToolsService {
     };
   }
 
+  /** Persists one long-term memory row, deriving subject/scope from the scene cast and args. */
   private async memoryCreate(args: Record<string, unknown>, context: MindToolContext) {
     const content = readString(args['content']).trim();
     if (!content) {
@@ -1023,6 +1031,7 @@ export class MindToolsService {
     return compactMemory(record);
   }
 
+  /** Lists every persona-card and live-state attribute key with labels and grouping (no values). */
   private personaAttributesList(context: MindToolContext) {
     const attributes = listPersonaAttributes(context.scene.persona, context.state);
     return {
@@ -1037,6 +1046,7 @@ export class MindToolsService {
     };
   }
 
+  /** Reads full values for the requested self-attribute keys from card data plus live state. */
   private personaAttributesGet(args: Record<string, unknown>, context: MindToolContext) {
     const keys = readAttributeKeys(args);
     if (keys.length === 0) {
@@ -1226,6 +1236,7 @@ export class MindToolsService {
     };
   }
 
+  /** Reads a contact's full relationship and 37-attribute view; dry run uses a non-touching find. */
   private async relationshipGet(args: Record<string, unknown>, context: MindToolContext) {
     const contactId = this.resolveContactId(context, args['contactId']);
     if (!contactId) {
@@ -1277,6 +1288,7 @@ export class MindToolsService {
     };
   }
 
+  /** Normalizes numeric/list/attribute patches and applies them to a contact via the drift service. */
   private async relationshipUpdate(args: Record<string, unknown>, context: MindToolContext) {
     const contactId = this.resolveContactId(context, args['contactId']);
     if (!contactId) {
@@ -1340,6 +1352,7 @@ export class MindToolsService {
     };
   }
 
+  /** Maps a contact id/external id/nickname to a contactId, falling back to the scene anchor or first other. */
   private resolveContactId(context: MindToolContext, raw: unknown): string {
     const ref = readString(raw).trim();
     if (!ref) {
@@ -1354,6 +1367,7 @@ export class MindToolsService {
     return member?.contactId ?? ref;
   }
 
+  /** Returns current conversation/group name, membership and stance rules from the scene. */
   private async groupGet(context: MindToolContext) {
     const stance = context.scene.stance;
     return {
@@ -1371,6 +1385,7 @@ export class MindToolsService {
     };
   }
 
+  /** Runs a capped (1-5) web search via the web service; results are untrusted reference data. */
   private async webSearch(args: Record<string, unknown>) {
     const query = readString(args['query']).trim();
     if (!query) {
@@ -1380,6 +1395,7 @@ export class MindToolsService {
     return this.web.search(query, limit);
   }
 
+  /** Fetches and extracts a public http/https page body via the web service; blocks non-standard targets. */
   private async webRead(args: Record<string, unknown>) {
     const url = readString(args['url']).trim();
     if (!url) {
@@ -1388,6 +1404,7 @@ export class MindToolsService {
     return this.web.read(url);
   }
 
+  /** Watches a Bilibili video (cached by id) for the persona channel, returning summary and points. */
   private async videoWatch(args: Record<string, unknown>, context: MindToolContext) {
     const video = readString(args['video'] ?? args['url'] ?? args['query']).trim();
     if (!video) {
@@ -1401,6 +1418,7 @@ export class MindToolsService {
     });
   }
 
+  /** Reads one capped page of Bilibili comments (hot or time sort) via the video service. */
   private async videoComments(args: Record<string, unknown>) {
     const video = readString(args['video'] ?? args['url'] ?? args['query']).trim();
     if (!video) {
@@ -1412,6 +1430,7 @@ export class MindToolsService {
     return this.videos.comments(video, { page, sort, limit });
   }
 
+  /** Opens a public url in the persona's headless browser session, returning body and clickable refs. */
   private async browserOpen(args: Record<string, unknown>, context: MindToolContext) {
     const url = readString(args['url']).trim();
     if (!url) {
@@ -1420,6 +1439,7 @@ export class MindToolsService {
     return this.browsers.open(context.scene.persona.id, url);
   }
 
+  /** Clicks a snapshot ref or visible text in the headless browser and returns the resulting page state. */
   private async browserClick(args: Record<string, unknown>, context: MindToolContext) {
     const ref = readString(args['ref']).trim() || undefined;
     const text = readString(args['text']).trim() || undefined;
@@ -1429,6 +1449,7 @@ export class MindToolsService {
     return this.browsers.click(context.scene.persona.id, { ref, text });
   }
 
+  /** Types text into a browser input by ref; submit=true presses Enter (search only, no form login). */
   private async browserType(args: Record<string, unknown>, context: MindToolContext) {
     const ref = readString(args['ref']).trim();
     const text = readString(args['text']);
@@ -1442,16 +1463,19 @@ export class MindToolsService {
     });
   }
 
+  /** Scrolls the current page up/down by capped pages, triggering lazy loads and returning new refs. */
   private async browserScroll(args: Record<string, unknown>, context: MindToolContext) {
     const direction = readString(args['direction']).trim() === 'up' ? 'up' : 'down';
     const pages = Math.max(1, Math.min(8, readNumber(args['pages'], 1)));
     return this.browsers.scroll(context.scene.persona.id, direction, pages);
   }
 
+  /** Reads the phone's current UI elements and coordinates over ADB for the channel device. */
   private phoneScreen(context: MindToolContext) {
     return this.phones.screen(context.scene.persona.channelId);
   }
 
+  /** Captures a phone screenshot via ADB and has the vision LLM describe it with tappable pixel points. */
   private async phoneScreenshot(context: MindToolContext) {
     const picture = await this.phones.screenshot(context.scene.persona.channelId);
     const completion = await this.llm.complete({
@@ -1502,6 +1526,7 @@ export class MindToolsService {
     };
   }
 
+  /** Maps validated gesture/key/media args to one ADB phone action for the channel device. */
   private phoneAct(args: Record<string, unknown>, context: MindToolContext) {
     const action = readString(args['action']).trim();
     if (!action) {
@@ -1531,6 +1556,7 @@ export class MindToolsService {
     });
   }
 
+  /** Starts or replaces a background phone focus so the persona plays the device step by step. */
   private async phonePlay(args: Record<string, unknown>, context: MindToolContext) {
     const goal = readString(args['goal']).trim().slice(0, 200);
     const replace = args['replace'] === true;
@@ -1556,6 +1582,7 @@ export class MindToolsService {
     };
   }
 
+  /** Ends the active phone focus, turns the screen off and records the session brief. */
   private async phoneEnd(args: Record<string, unknown>, context: MindToolContext) {
     const reason = readString(args['reason']).trim().slice(0, 200);
     const brief = await this.phoneFocus.endActive(context.scene.persona.id, reason);
@@ -1577,6 +1604,7 @@ export class MindToolsService {
     };
   }
 
+  /** Reports live phone-focus progress, or the last run's result/aborted reason when idle. */
   private async phoneStatus(context: MindToolContext) {
     const personaId = context.scene.persona.id;
     const active = await this.focus.active(personaId, 'PHONE');
@@ -1644,6 +1672,7 @@ export class MindToolsService {
     };
   }
 
+  /** Lists installed apps (third-party by default) over ADB with a capped name/package filter. */
   private async phoneApps(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim();
     const includeSystem = args['includeSystem'] === true;
@@ -1660,6 +1689,7 @@ export class MindToolsService {
     };
   }
 
+  /** Reads the phone's current notifications over ADB (capped); content is data, not instructions. */
   private async phoneNotifications(args: Record<string, unknown>, context: MindToolContext) {
     const limit = Math.max(1, Math.min(40, readNumber(args['limit'], 20)));
     const items = await this.phones.notifications(context.scene.persona.channelId, limit);
@@ -1670,6 +1700,7 @@ export class MindToolsService {
     };
   }
 
+  /** Lists recent photo/video entries from the phone media store with a capped limit. */
   private async phonePhotos(args: Record<string, unknown>, context: MindToolContext) {
     const kind = readString(args['kind']).trim().toLowerCase() === 'video' ? 'video' : 'image';
     const limit = Math.max(1, Math.min(60, readNumber(args['limit'], 12)));
@@ -1685,6 +1716,7 @@ export class MindToolsService {
     };
   }
 
+  /** Pulls one album photo over ADB, downscales for vision, describes it via LLM, caching when no focus. */
   private async phonePhoto(args: Record<string, unknown>, context: MindToolContext) {
     const id = readString(args['id']).trim();
     if (!id) {
@@ -1733,6 +1765,7 @@ export class MindToolsService {
     };
   }
 
+  /** Stores a photo description in the in-memory note cache, evicting the oldest past 30 entries. */
   private rememberPhotoNote(key: string, description: string): void {
     if (this.photoNotes.size >= 30) {
       const oldest = this.photoNotes.keys().next().value;
@@ -1743,6 +1776,7 @@ export class MindToolsService {
     this.photoNotes.set(key, description);
   }
 
+  /** Semantic search over the channel sticker library, returning id/description/tags/score. */
   private async stickerSearch(args: Record<string, unknown>, context: MindToolContext) {
     const query = readString(args['query']).trim() || '自然';
     const limit = Math.max(1, Math.min(5, readNumber(args['limit'], 3)));
@@ -1755,6 +1789,7 @@ export class MindToolsService {
     }));
   }
 
+  /** Re-runs vision recognition on one sticker and persists the updated description to the DB. */
   private async stickerDescribe(args: Record<string, unknown>, context: MindToolContext) {
     const stickerId = readString(args['stickerId']).trim();
     if (!stickerId) {
@@ -1774,6 +1809,7 @@ export class MindToolsService {
     };
   }
 
+  /** Resolves a conversation image by its description/url, then imports it into the sticker library. */
   private async stickerCollect(args: Record<string, unknown>, context: MindToolContext) {
     const image = readString(args['image']).trim();
     if (!image) {
@@ -1836,6 +1872,7 @@ export class MindToolsService {
     return asset.mediaId ? { mediaId: asset.mediaId } : { imageUrl: asset.url };
   }
 
+  /** Creates an agent todo DB row only after consent check confirms paired invite/accept messages. */
   private async todoCreate(args: Record<string, unknown>, context: MindToolContext) {
     const title = readString(args['title']).trim();
     if (!title) {
@@ -1870,6 +1907,7 @@ export class MindToolsService {
     return { id: row.id, title: row.title, dueAt: row.dueAt?.toISOString() ?? null };
   }
 
+  /** Lists pending/deferred (or one status) intentions from the DB with resolved target names and active count. */
   private async intentionList(args: Record<string, unknown>, context: MindToolContext) {
     const statusArg = readString(args['status']).trim().toUpperCase();
     const statuses = ['PENDING', 'DEFERRED', 'SENT', 'CANCELLED', 'EXPIRED'] as const;
@@ -1907,6 +1945,7 @@ export class MindToolsService {
     };
   }
 
+  /** Patches an un-sent intention row after per-field validation; rejects already-sent ones. */
   private async intentionUpdate(args: Record<string, unknown>, context: MindToolContext) {
     const id = readString(args['id']).trim();
     if (!id) {
@@ -1979,6 +2018,7 @@ export class MindToolsService {
     return compactIntention(updated);
   }
 
+  /** Marks an un-sent intention CANCELLED in the DB, stamping feedback and dropping its wake schedule. */
   private async intentionCancel(args: Record<string, unknown>, context: MindToolContext) {
     const id = readString(args['id']).trim();
     if (!id) {
@@ -2005,6 +2045,7 @@ export class MindToolsService {
     return { id: updated.id, status: updated.status, feedback: updated.feedback };
   }
 
+  /** Batch-resolves PERSON/GROUP target ids to display names via contact and conversation lookups. */
   private async intentionTargetNames(
     rows: readonly { targetType: string; targetId: string }[],
   ): Promise<Map<string, string>> {
@@ -2041,6 +2082,7 @@ export class MindToolsService {
   }
 }
 
+/** Trims an intention row to prompt-safe fields with capped text and ISO timestamps. */
 function compactIntention(row: {
   id: string;
   status: string;
@@ -2104,6 +2146,7 @@ async function prepareVisionImage(
   }
 }
 
+/** Projects a memory record into a compact tool view with age-in-days and capped content. */
 function compactMemory(memory: PersonaMemoryRecord) {
   const ageDays = Math.max(
     0,
@@ -2123,6 +2166,7 @@ function compactMemory(memory: PersonaMemoryRecord) {
   };
 }
 
+/** Formats live PersonaState into the mood/energy/activity summary returned by self.state. */
 function stateSummary(state: {
   moodValence: number;
   moodArousal: number;
@@ -2206,6 +2250,7 @@ const NONNEGATIVE_ATTRIBUTE_KEYS = new Set([
 type CardNormalizeResult =
   { ok: true; value: string | number | boolean | string[] } | { ok: false; reason: string };
 
+/** Validates/coerces one card attribute value, clamping the score and non-negative key sets. */
 function normalizeCardAttribute(key: string, raw: unknown): CardNormalizeResult {
   if (typeof raw === 'boolean') {
     return { ok: true, value: raw };
@@ -2239,6 +2284,7 @@ function auditValue(value: unknown): ReturnType<typeof jsonValue> {
   return jsonValue(value);
 }
 
+/** Builds a timestamped persona-card revision entry with a labeled field and formatted from/to. */
 function historyEntry(
   key: string,
   from: unknown,
@@ -2255,6 +2301,7 @@ function historyEntry(
   };
 }
 
+/** Filters a stored persona history array down to well-shaped revision entries. */
 function readPersonaHistory(value: unknown): PersonaHistoryEntry[] {
   if (!Array.isArray(value)) {
     return [];
@@ -2279,6 +2326,7 @@ function readPersonaHistory(value: unknown): PersonaHistoryEntry[] {
   return entries;
 }
 
+/** Renders any attribute value as a readable history string with localized empty/bool sentinels. */
 function formatHistoryValue(value: unknown): string {
   if (value === undefined || value === null) {
     return '未同步';
@@ -2295,6 +2343,7 @@ function formatHistoryValue(value: unknown): string {
   return String(value);
 }
 
+/** Returns the persona's local time, hour, tz and current-activity duration for the time.now tool. */
 function timeNow(context: MindToolContext) {
   const values = context.scene.persona.values as Record<string, unknown> | null;
   const timeZone = normalizeTimeZone(readString(values?.['time_zone'])) ?? undefined;
@@ -2328,12 +2377,14 @@ function timeNow(context: MindToolContext) {
   };
 }
 
+/** Keeps a string value only if it is one of the allowed enum members, otherwise the fallback. */
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : fallback;
 }
 
+/** Parses a non-empty string into a Date, returning null when blank or an invalid date. */
 function parseDate(value: unknown): Date | null {
   if (typeof value !== 'string' || !value.trim()) {
     return null;
@@ -2342,6 +2393,7 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Returns the value when it is a finite number, else undefined, for optional numeric phone args. */
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
@@ -2358,6 +2410,7 @@ function toDevicePoint(value: unknown, size: number): number {
   return Math.round((Math.min(1000, Math.max(0, number)) / 1000) * size);
 }
 
+/** Coerces a number or numeric string into a finite number, else null, for relationship patches. */
 function readNumericInput(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -2369,6 +2422,7 @@ function readNumericInput(value: unknown): number | null {
   return null;
 }
 
+/** Normalizes a list or delimited string into up to 50 trimmed, non-empty text items. */
 function readTextList(value: unknown, field: string): string[] {
   const items = Array.isArray(value)
     ? value
@@ -2385,6 +2439,7 @@ function readTextList(value: unknown, field: string): string[] {
     .slice(0, 50);
 }
 
+/** Converts a mute timestamp to ISO (null for empty/null), throwing on an invalid date. */
 function parseMutedUntil(value: unknown): string | null {
   if (value === null) {
     return null;

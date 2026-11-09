@@ -47,6 +47,10 @@ export class MindSceneWriterService {
     private readonly config: SystemConfigService,
   ) {}
 
+  /**
+   * Turns the planner's cue into narration. Retries once at a larger budget when
+   * the first pass yields nothing; returns null when both passes come back empty.
+   */
   async write(input: SceneWriteInput): Promise<SceneWriteResult | null> {
     const cue = input.cue.trim();
     if (!cue) {
@@ -81,6 +85,7 @@ export class MindSceneWriterService {
     };
   }
 
+  /** Single LLM call with a high temperature; dry runs skip call logging. */
   private complete(
     input: SceneWriteInput,
     prompt: string,
@@ -101,6 +106,11 @@ export class MindSceneWriterService {
     });
   }
 
+  /**
+   * Assembles the writer prompt: cue, scene style, persona body details, current
+   * state, relationship and recent dialogue. Banned words are merged globally;
+   * a failed config read degrades to an empty list.
+   */
   private async buildPrompt(input: SceneWriteInput, cue: string): Promise<string> {
     const { scene, state } = input;
     const values = (scene.persona.values ?? {}) as Record<string, unknown>;
@@ -119,7 +129,9 @@ export class MindSceneWriterService {
       .map((word) => word.trim())
       .filter(Boolean);
 
+    /** A card field as display text; blank means the expanded line is skipped. */
     const text = (key: string): string => personaValueText(values, key).trim();
+    /** A card list field with blank entries removed. */
     const list = (key: string): string[] =>
       readStringArray(values[key])
         .map((item) => item.trim())
@@ -203,6 +215,7 @@ export class MindSceneWriterService {
   }
 }
 
+/** Strips code fences and a leading scene label some models add despite instructions. */
 function cleanSceneText(value: string): string {
   return value
     .replace(/^```[a-z]*\s*/iu, '')
@@ -211,6 +224,7 @@ function cleanSceneText(value: string): string {
     .trim();
 }
 
+/** Trims then hard-cuts at a character budget, keeping prompt lines bounded. */
 function trim(value: string, max: number): string {
   return truncateText(value.trim(), max);
 }

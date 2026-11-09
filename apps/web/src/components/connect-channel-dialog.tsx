@@ -58,6 +58,7 @@ const EYEBROW: Record<Phase, string> = {
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/** Accepts only absolute ws:// or wss:// URLs so a bogus address never reaches the server. */
 function isValidWebSocketUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -67,10 +68,16 @@ function isValidWebSocketUrl(value: string): boolean {
   }
 }
 
+/** First character of a persona or account name for avatar fallbacks, defaulting to 'Q'. */
 function initialsOf(name: string): string {
   return Array.from(name.trim())[0] ?? 'Q';
 }
 
+/**
+ * NapCat channel wizard: platform, role card, credentials, handshake, confirmed account.
+ * Success invalidates the chat caches and reports the new channel exactly once, and on
+ * desktop the shell animates to a measured content height instead of jumping.
+ */
 export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChannelDialogProps) {
   const queryClient = useQueryClient();
   const personaQuery = useQuery({ ...personasQuery, enabled: open });
@@ -127,6 +134,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
 
   useEffect(() => {
     const query = window.matchMedia('(min-width: 640px)');
+    /** Tracks the sm breakpoint so the wizard can swap between mobile sheet and card. */
     const sync = () => setIsDesktop(query.matches);
 
     sync();
@@ -146,6 +154,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
       return undefined;
     }
 
+    /** Sums header, content and borders so the shell animates to its exact content height. */
     const measure = () => {
       const styles = window.getComputedStyle(shell);
       const border =
@@ -177,6 +186,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [open, phase]);
 
+  /** Hands the channel to the parent exactly once, then closes; repeat calls only close. */
   const finish = () => {
     if (result && !reportedRef.current) {
       reportedRef.current = true;
@@ -185,6 +195,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     onClose();
   };
 
+  /** Closes the dialog; from the ready step it routes through finish so the result sticks. */
   const dismiss = () => {
     if (phase === 'ready' && result) {
       finish();
@@ -198,6 +209,10 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
       return undefined;
     }
 
+    /**
+     * Escape dismisses the dialog. The listener rebinds on every render, so it always
+     * sees the current phase and behaves exactly like the close button.
+     */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         dismiss();
@@ -208,6 +223,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     return () => document.removeEventListener('keydown', handleKeyDown);
   });
 
+  /** Picks a platform and advances to the role-card step; planned ones stay inert. */
   const handleSelect = (platform: PlatformDefinition) => {
     if (!platform.available) {
       return;
@@ -217,6 +233,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     setPhase('persona');
   };
 
+  /** Records the role card the channel will speak as, then opens the credentials step. */
   const handlePersonaSelect = (persona: PersonaSummary) => {
     setPersonaId(persona.id);
     setPhase('configure');
@@ -226,6 +243,11 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     ? (personas.find((persona) => persona.id === personaId) ?? null)
     : null;
 
+  /**
+   * Validates the trimmed credentials and starts the handshake. Bad input keeps its error
+   * inline instead of calling the API, and a missing role card bounces the wizard back to
+   * that step rather than connecting an account with no persona.
+   */
   const handleConnect = () => {
     const trimmedServerUrl = serverUrl.trim();
     const trimmedToken = accessToken.trim();
@@ -259,6 +281,7 @@ export function ConnectChannelDialog({ open, onClose, onConnected }: ConnectChan
     });
   };
 
+  /** Stops the native submit so Enter inside the credential fields runs the connect flow. */
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     handleConnect();

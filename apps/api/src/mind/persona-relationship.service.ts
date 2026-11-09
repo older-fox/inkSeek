@@ -29,6 +29,7 @@ const DIMENSIONS = [
 export class PersonaRelationshipService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Creates the relationship on first contact with a neutral familiarity seed so later math has a base. */
   async ensureForContact(personaId: string, contactId: string): Promise<PersonaRelationship> {
     const persona = await this.persona(personaId);
     await this.contact(persona.channelId, contactId);
@@ -59,6 +60,7 @@ export class PersonaRelationshipService {
     return rows.map(toRecord);
   }
 
+  /** Resolves a channel-scoped external id first; unknown contacts fail instead of being created. */
   async getByExternalId(personaId: string, externalId: string): Promise<PersonaRelationshipRecord> {
     const persona = await this.persona(personaId);
     const contact = await this.prisma.chatContact.findFirst({
@@ -80,6 +82,7 @@ export class PersonaRelationshipService {
     return withContact ? toRecord(withContact) : null;
   }
 
+  /** Full record with contact metadata; ensures the row exists so readers always get a complete shape. */
   async get(personaId: string, contactId: string): Promise<PersonaRelationshipRecord> {
     const row = await this.ensureForContact(personaId, contactId);
     const withContact = await this.prisma.personaRelationship.findUniqueOrThrow({
@@ -89,6 +92,7 @@ export class PersonaRelationshipService {
     return toRecord(withContact);
   }
 
+  /** Operator-facing write: dimensions clamp to -100..100 and only real changes are logged. */
   async update(
     personaId: string,
     input: PersonaRelationshipUpdateInput,
@@ -100,6 +104,7 @@ export class PersonaRelationshipService {
     const source = audit?.kind ?? 'ADMIN_EDIT';
     const reason = audit?.reason ?? '操作员手动调整关系';
 
+    /** Queues a change-log row, but only for a field that actually moved. */
     const logField = (field: string, before: unknown, after: unknown, delta?: number) => {
       if (before === after) {
         return;
@@ -161,6 +166,7 @@ export class PersonaRelationshipService {
     return this.get(personaId, input.contactId);
   }
 
+  /** Applies drift deltas round-by-round; zero or clamped-out deltas skip the write entirely. */
   async applySignals(
     personaId: string,
     signals: readonly RelationshipSignal[],
@@ -206,6 +212,7 @@ export class PersonaRelationshipService {
     }
   }
 
+  /** Bumps the last-interaction timestamp without touching any dimension value. */
   async touch(personaId: string, contactId: string): Promise<void> {
     const relationship = await this.ensureForContact(personaId, contactId);
     await this.prisma.personaRelationship.update({
@@ -214,6 +221,7 @@ export class PersonaRelationshipService {
     });
   }
 
+  /** Loads the persona or fails with a 404 so callers never see a half-resolved channel id. */
   async persona(personaId: string): Promise<MindPersona> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -224,6 +232,7 @@ export class PersonaRelationshipService {
     return persona;
   }
 
+  /** Contacts are channel-scoped, so the id alone is not enough to find one. */
   private async contact(channelId: string, contactId: string): Promise<ChatContact> {
     const contact = await this.prisma.chatContact.findFirst({
       where: { id: contactId, channelId },
@@ -235,6 +244,7 @@ export class PersonaRelationshipService {
   }
 }
 
+/** Flattens the joined contact fields into the wire record shape, normalising dates to ISO strings. */
 function toRecord(row: PersonaRelationship & { contact: ChatContact }): PersonaRelationshipRecord {
   return {
     id: row.id,

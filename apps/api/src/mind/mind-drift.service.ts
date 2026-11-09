@@ -87,6 +87,7 @@ export class MindDriftService {
     private readonly states: PersonaStateService,
   ) {}
 
+  /** Runs all drift paths for one turn against a shared change ledger. */
   async applyTurn(scene: MindScene, plan: ActionPlan): Promise<DriftSummary> {
     const ledger = await this.loadLedger(scene.persona.id);
     const summary: DriftSummary = {
@@ -182,6 +183,7 @@ export class MindDriftService {
     };
   }
 
+  /** Stores a new activity verbatim; grooming only moves via event-keyed deltas. */
   private async applyActivity(
     scene: MindScene,
     plan: ActionPlan,
@@ -233,6 +235,10 @@ export class MindDriftService {
     return { activity, grooming: nextGrooming };
   }
 
+  /**
+   * Applies limited trait deltas to the persona values json and writes one
+   * change-log row per accepted field; biggest proposals are considered first.
+   */
   private async applySelfTraits(
     scene: MindScene,
     plan: ActionPlan,
@@ -308,6 +314,7 @@ export class MindDriftService {
     return { values: changes };
   }
 
+  /** Limited per-conversation stance nudges, group chats only, via absolute next values. */
   private async applyGroupStance(
     scene: MindScene,
     plan: ActionPlan,
@@ -369,6 +376,11 @@ export class MindDriftService {
     return changes;
   }
 
+  /**
+   * Clamps proposed relation deltas against current values, dropping signals
+   * for contacts outside the cast or fields that land on zero change. Unlike
+   * traits/stances these bypass the ledger limits and go through applySignals.
+   */
   private async applyRelationships(
     scene: MindScene,
     plan: ActionPlan,
@@ -426,6 +438,7 @@ export class MindDriftService {
     return summary;
   }
 
+  /** Rebuilds the 24h per-field drift budget from DRIFT/TOOL change-log rows. */
   private async loadLedger(personaId: string): Promise<Map<string, LedgerEntry>> {
     const rows = await this.prisma.personaChangeLog.findMany({
       where: {
@@ -454,6 +467,7 @@ export class MindDriftService {
     return ledger;
   }
 
+  /** Caps a proposal by cooldown, per-turn bound and remaining same-sign daily budget. */
   private limitDelta(input: {
     ledger: Map<string, LedgerEntry>;
     scope: string;
@@ -484,6 +498,7 @@ export class MindDriftService {
     return delta;
   }
 
+  /** Records the accepted delta so later fields in the same turn see the budget spent. */
   private remember(
     ledger: Map<string, LedgerEntry>,
     scope: string,
@@ -532,16 +547,19 @@ function groomingDeltaForActivity(activity: string): number {
   return 0;
 }
 
+/** Ledger map key combining the three change-log dimensions. */
 function ledgerKey(scope: string, targetId: string, key: string): string {
   return `${scope}|${targetId}|${key}`;
 }
 
+/** Rounds any number-like stored value, or null when it is not numeric. */
 function numeric(value: unknown): number | null {
   const parsed =
     typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
   return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
+/** Plain-object check that also rejects arrays. */
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

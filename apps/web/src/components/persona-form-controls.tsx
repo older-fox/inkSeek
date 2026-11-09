@@ -23,6 +23,10 @@ interface FieldFrameProps {
   className?: string;
 }
 
+/**
+ * Shared label/counter/hint frame for wizard fields; shows required or
+ * "optional" markers and swaps the hint for an error when validation fails.
+ */
 export function FieldFrame({
   id,
   label,
@@ -84,6 +88,7 @@ interface TextControlProps {
   inputMode?: 'text' | 'numeric';
 }
 
+/** Single-line text field that hard-clamps input to the character budget. */
 export function TextControl({
   id,
   label,
@@ -124,6 +129,7 @@ interface TextAreaControlProps extends Omit<TextControlProps, 'inputMode' | 'pla
   placeholder?: string;
 }
 
+/** Multi-line text field with the same character budget as the text control. */
 export function TextAreaControl({
   id,
   label,
@@ -172,6 +178,7 @@ interface NumberControlProps {
   error?: string;
 }
 
+/** Numeric input with optional bounds and a fixed unit suffix. */
 export function NumberControl({
   id,
   label,
@@ -225,6 +232,7 @@ interface SelectControlProps {
   error?: string;
 }
 
+/** Native select styled to match the wizard, for short fixed option lists. */
 export function SelectControl({
   id,
   label,
@@ -268,6 +276,10 @@ interface ChoiceControlProps<T extends string> {
   columns?: 1 | 2 | 3;
 }
 
+/**
+ * Card-style single-choice group where each option can carry its own hint and
+ * example line; selection replaces the whole value immediately.
+ */
 export function ChoiceControl<T extends string>({
   label,
   value,
@@ -354,6 +366,10 @@ interface LevelControlProps {
   error?: string;
 }
 
+/**
+ * Ordinal slider over a fixed ladder of labels, with one clickable tick per
+ * step so a level can be picked directly instead of dragged.
+ */
 export function LevelControl({
   label,
   value,
@@ -426,6 +442,7 @@ interface SliderControlProps {
   error?: string;
 }
 
+/** Free 0–100 slider that clamps out-of-range values before rendering. */
 export function SliderControl({
   label,
   value,
@@ -476,6 +493,7 @@ interface SwitchControlProps {
   onChange: (checked: boolean) => void;
 }
 
+/** Whole-row toggle switch used for standalone on/off settings. */
 export function SwitchControl({ label, description, checked, onChange }: SwitchControlProps) {
   return (
     <button
@@ -520,6 +538,10 @@ interface LinesControlProps {
   addLabel?: string;
 }
 
+/**
+ * Repeatable list editor: one clamped input per line, add and remove actions,
+ * and an optional cap on the number of entries.
+ */
 export function LinesControl({
   id,
   label,
@@ -535,12 +557,14 @@ export function LinesControl({
 }: LinesControlProps) {
   const filled = lines.filter((line) => line.trim()).length;
 
+  /** Copies the array before writing, so the parent's lines stay immutable, and clamps each edit. */
   const updateLine = (index: number, value: string) => {
     const next = [...lines];
     next[index] = clampChars(value, perLineMax);
     onChange(next);
   };
 
+  /** Removes by index rather than value, so duplicated lines only lose the clicked row. */
   const removeLine = (index: number) => {
     onChange(lines.filter((_, lineIndex) => lineIndex !== index));
   };
@@ -608,6 +632,10 @@ interface CommaListControlProps {
   placeholder?: string;
 }
 
+/**
+ * Splits a raw comma/顿号/semicolon separated string into unique items, each
+ * clamped to the per-item limit and cut off at the optional count cap.
+ */
 function parseCommaList(value: string, perLineMax: number, max?: number): string[] {
   const seen = new Set<string>();
   const items: string[] = [];
@@ -630,6 +658,10 @@ function parseCommaList(value: string, perLineMax: number, max?: number): string
   return items;
 }
 
+/**
+ * Comma-separated list input that parses on every keystroke, previews the
+ * recognized items as chips, and re-serializes when the field loses focus.
+ */
 export function CommaListControl({
   id,
   label,
@@ -654,6 +686,7 @@ export function CommaListControl({
 
   const recognized = parseCommaList(text, perLineMax, max);
 
+  /** Re-serializes the parsed items; an empty field is stored as one blank line so the list stays editable. */
   const commit = () => {
     const items = parseCommaList(text, perLineMax, max);
     onChange(items.length > 0 ? items : ['']);
@@ -722,6 +755,11 @@ interface PickerPopoverProps {
   children: ReactNode;
 }
 
+/**
+ * Portalled floating panel anchored to a trigger button: measures available
+ * space to flip upwards when cramped, and closes on outside press, Escape,
+ * scroll or resize.
+ */
 function PickerPopover({
   open,
   onClose,
@@ -763,6 +801,7 @@ function PickerPopover({
       return undefined;
     }
 
+    /** Closes on a press outside the popover; presses on the panel or the anchor itself are swallowed. */
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
 
@@ -773,12 +812,14 @@ function PickerPopover({
       onClose();
     };
 
+    /** Escape dismisses without changing the current selection. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
       }
     };
 
+    /** Scroll or resize closes the popover because its cached anchor rect goes stale; scrolling inside the panel is exempt. */
     const handleDismiss = (event: Event) => {
       if (panelRef.current?.contains(event.target as Node)) {
         return;
@@ -829,6 +870,10 @@ interface TimeZonePickerProps {
   bare?: boolean;
 }
 
+/**
+ * Search-free listbox for long option sets such as time zones; `bare` skips
+ * the label frame when the picker already sits inside one.
+ */
 export function TimeZonePicker({
   id,
   label,
@@ -936,14 +981,17 @@ export function TimeZonePicker({
   );
 }
 
+/** Neutral unfilled portion of the custom range-track gradients. */
 function baseTrack(): string {
   return 'color-mix(in srgb, var(--color-mist-500) 22%, transparent)';
 }
 
+/** Track gradient for the level slider, filled up to the given percentage. */
 function levelTrack(percent: number): string {
   return `linear-gradient(to right, var(--color-brass-400) 0%, var(--color-brass-300) ${percent}%, ${baseTrack()} ${percent}%, ${baseTrack()} 100%)`;
 }
 
+/** Track gradient for the 0–100 slider, filled up to the current value. */
 function sliderTrack(value: number): string {
   return `linear-gradient(to right, var(--color-brass-400) 0%, var(--color-brass-300) ${value}%, ${baseTrack()} ${value}%, ${baseTrack()} 100%)`;
 }

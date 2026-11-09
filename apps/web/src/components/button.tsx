@@ -7,6 +7,10 @@ interface ButtonProps extends ComponentProps<'button'> {
   icon?: ReactNode;
 }
 
+/**
+ * Brass call-to-action button. While `loading` it blocks clicks and swaps the
+ * label for a spinner so submitting forms cannot be double-fired.
+ */
 export function PrimaryButton({
   children,
   className,
@@ -44,6 +48,10 @@ export function PrimaryButton({
   );
 }
 
+/**
+ * Low-emphasis outlined button used for secondary actions next to a primary
+ * one; all native button props pass through to the underlying element.
+ */
 export function GhostButton({ children, className, disabled, ...props }: ComponentProps<'button'>) {
   return (
     <button

@@ -40,21 +40,25 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly events: ChatEventsService,
   ) {}
 
+  /** Reconnects every saved channel on boot; failures fall back to the retry loop. */
   async onModuleInit(): Promise<void> {
     const channels = await this.prisma.chatChannel.findMany({ orderBy: { createdAt: 'asc' } });
     channels.forEach((channel) => this.launch(channel));
   }
 
+  /** Suppresses reconnects while Nest tears the process down. */
   onModuleDestroy(): void {
     this.shuttingDown = true;
     this.connections.forEach((connection) => this.dispose(connection));
     this.connections.clear();
   }
 
+  /** Live client for a channel, or null when the channel is not being managed. */
   getClient(channelId: string): NapCatClient | null {
     return this.connections.get(channelId)?.client ?? null;
   }
 
+  /** Reads the persisted status flag rather than the socket, so restarts converge. */
   isOnline(channelId: string): boolean {
     const connection = this.connections.get(channelId);
     return connection?.channel.status === 'ONLINE';
@@ -92,6 +96,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.verifyAndMarkOnline(connection);
   }
 
+  /** Disposes the connection and forgets it, so nothing schedules a reconnect. */
   stop(channelId: string): void {
     const connection = this.connections.get(channelId);
     if (!connection) {
@@ -102,6 +107,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.connections.delete(channelId);
   }
 
+  /** Replaces any existing connection with a fresh client and connects without awaiting. */
   private launch(channel: ChatChannel): void {
     this.stop(channel.id);
 
@@ -127,6 +133,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     void this.start(connection);
   }
 
+  /** Guards against stale or disposed connections, then opens and verifies the login account. */
   private async start(connection: ManagedConnection): Promise<void> {
     if (connection.disposed || this.shuttingDown) {
       return;
@@ -148,6 +155,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Confirms NapCat is logged into the expected QQ account before messages are accepted. */
   private async verifyAndMarkOnline(connection: ManagedConnection): Promise<void> {
     let info: LoginInfo;
 
@@ -197,6 +205,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`渠道 ${updated.displayName}（${updated.accountId}）已上线`);
   }
 
+  /** Pokes go to the dedicated ingest path; everything else must parse as a message event. */
   private async handleEvent(connection: ManagedConnection, event: OneBotEvent): Promise<void> {
     if (connection.disposed) {
       return;
@@ -214,6 +223,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.messages.ingest(connection.channel, connection.client, event);
   }
 
+  /** Outside shutdown, a close means offline plus a backoff reconnect. */
   private async handleClose(connection: ManagedConnection, info: NapCatCloseInfo): Promise<void> {
     if (connection.disposed || connection.blocked || this.shuttingDown) {
       return;
@@ -225,6 +235,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.scheduleReconnect(connection);
   }
 
+  /** Exponential backoff capped at MAX_RETRY_DELAY_MS, with a single timer per connection. */
   private scheduleReconnect(connection: ManagedConnection): void {
     if (connection.disposed || this.shuttingDown || connection.retryTimer) {
       return;
@@ -240,6 +251,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     }, delay);
   }
 
+  /** Persists status for the UI; a failed write is logged instead of thrown. */
   private async updateStatus(
     connection: ManagedConnection,
     status: 'CONNECTING' | 'ONLINE' | 'OFFLINE' | 'ERROR',
@@ -264,6 +276,7 @@ export class ChatRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Marks the connection dead, cancels any retry timer and closes the socket. */
   private dispose(connection: ManagedConnection): void {
     connection.disposed = true;
 

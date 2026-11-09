@@ -46,6 +46,7 @@ export class SettingsController {
 
   @Get()
   @ApiOperation({ summary: '读取系统设置概览（管理员）' })
+  /** Aggregates every settings block the admin page renders. */
   overview(): Promise<SettingsOverview> {
     return this.settings.getOverview();
   }
@@ -53,6 +54,7 @@ export class SettingsController {
   @Put('redis')
   @HttpCode(200)
   @ApiOperation({ summary: '测试并保存 Redis 缓存配置（管理员）' })
+  /** Saves only after a successful probe, so a broken config cannot be persisted. */
   updateRedis(
     @Body(new ZodValidationPipe(redisSettingsSchema)) input: RedisSettingsInput,
   ): Promise<RedisSettingsResult> {
@@ -62,6 +64,7 @@ export class SettingsController {
   @Put('bilibili')
   @HttpCode(200)
   @ApiOperation({ summary: '校验并保存 B 站 SESSDATA，用于读取自动字幕（管理员）' })
+  /** Validates against Bilibili before storing the cookie. */
   updateBilibili(
     @Body(new ZodValidationPipe(bilibiliSettingsSchema)) input: BilibiliSettingsInput,
   ): Promise<BilibiliSettingsResult> {
@@ -71,6 +74,7 @@ export class SettingsController {
   @Put('mind-banned-words')
   @HttpCode(200)
   @ApiOperation({ summary: '保存全局禁用词，对所有渠道的心智提示词生效（管理员）' })
+  /** Empty input clears the list and disables the filter for every channel. */
   updateMindBannedWords(
     @Body(new ZodValidationPipe(mindBannedWordsSchema)) input: MindBannedWordsInput,
   ): Promise<MindBannedWordsResult> {
@@ -80,6 +84,7 @@ export class SettingsController {
   @Post('phone/connect')
   @HttpCode(200)
   @ApiOperation({ summary: '通过 adb connect 连接手机（管理员）' })
+  /** Connects an already-paired device; pairing itself is a separate step. */
   connectPhone(
     @Body(new ZodValidationPipe(phoneConnectSchema)) input: PhoneConnectInput,
   ): Promise<PhoneSettingsResult> {
@@ -89,6 +94,7 @@ export class SettingsController {
   @Post('phone/pair')
   @HttpCode(200)
   @ApiOperation({ summary: '无线调试配对（管理员）' })
+  /** Exchanges the one-time wireless debugging code for a trusted pairing. */
   pairPhone(
     @Body(new ZodValidationPipe(phonePairSchema)) input: PhonePairInput,
   ): Promise<PhoneSettingsResult> {
@@ -98,6 +104,7 @@ export class SettingsController {
   @Post('phone/disconnect')
   @HttpCode(200)
   @ApiOperation({ summary: '断开无线调试设备（管理员）' })
+  /** Drops the adb transport without forgetting the paired device. */
   disconnectPhone(
     @Body(new ZodValidationPipe(phoneDisconnectSchema)) input: PhoneDisconnectInput,
   ): Promise<PhoneSettingsResult> {
@@ -107,6 +114,7 @@ export class SettingsController {
   @Post('providers')
   @HttpCode(201)
   @ApiOperation({ summary: '测试并新增模型提供商（管理员）' })
+  /** Probes the endpoint first; only a reachable provider with models is stored. */
   createProvider(
     @Body(new ZodValidationPipe(modelProviderSchema)) input: ModelProviderInput,
   ): Promise<ModelProviderSaveResult> {
@@ -116,6 +124,7 @@ export class SettingsController {
   @Post('providers/:id/test')
   @HttpCode(200)
   @ApiOperation({ summary: '重新测试模型提供商并刷新可用模型（管理员）' })
+  /** Re-fetches the model list, e.g. after the account gains access to new models. */
   retestProvider(@Param('id') id: string): Promise<ModelProviderSaveResult> {
     return this.settings.retestProvider(id);
   }
@@ -123,6 +132,7 @@ export class SettingsController {
   @Delete('providers/:id')
   @HttpCode(204)
   @ApiOperation({ summary: '删除模型提供商（管理员）' })
+  /** Removes the provider record; channels pointing at it fall back to the default. */
   deleteProvider(@Param('id') id: string): Promise<void> {
     return this.settings.deleteProvider(id);
   }

@@ -5,6 +5,7 @@ import type { ZodType } from 'zod';
 export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
   constructor(private readonly schema: ZodType<T>) {}
 
+  /** Parses into the schema type and groups issues by dotted field path for the form UI. */
   transform(value: unknown): T {
     const result = this.schema.safeParse(value ?? {});
 

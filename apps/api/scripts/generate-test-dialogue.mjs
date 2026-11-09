@@ -47,6 +47,10 @@ const personaLabelFiles = {
   group: resolve(repoRoot, 'apps/web/src/lib/group-persona.ts'),
 };
 
+/**
+ * Regex-scrapes key/label pairs from the web persona label files, which cannot be
+ * imported here; unreadable files leave the map empty and the sheet uses raw keys.
+ */
 function readPersonaLabels(file) {
   const labels = new Map();
   const order = [];
@@ -70,6 +74,7 @@ function readPersonaLabels(file) {
   return { labels, order };
 }
 
+/** Keeps only scalar and string-array persona fields, so nested JSON never reaches the prompt. */
 function pickValues(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {};
@@ -92,6 +97,7 @@ function pickValues(raw) {
   return values;
 }
 
+/** Renders one attribute for the prompt sheet, using the Chinese blank placeholder. */
 function formatValue(value) {
   if (Array.isArray(value)) {
     return value.length > 0 ? value.join('、') : '未填写';
@@ -105,6 +111,10 @@ function formatValue(value) {
   return text || '未填写';
 }
 
+/**
+ * Builds the bullet sheet for one persona: keys listed in label-file order first,
+ * then any extras, so a stored attribute is never silently dropped.
+ */
 function formatAttributeSheet(values, { labels, order }) {
   const keys = order.filter((key) => key in values);
 
@@ -117,6 +127,7 @@ function formatAttributeSheet(values, { labels, order }) {
   return keys.map((key) => `- ${labels.get(key) ?? key}：${formatValue(values[key])}`).join('\n');
 }
 
+/** Keeps the string entries of a stored model list; anything else yields an empty list. */
 function readModels(raw) {
   return Array.isArray(raw) ? raw.filter((model) => typeof model === 'string') : [];
 }
@@ -124,6 +135,11 @@ function readModels(raw) {
 const NOISY_MODEL =
   /embed|whisper|tts|speech|voice|image|dall-e|moderation|rerank|guard|stable-diffusion/i;
 
+/**
+ * Picks a chat model: TEST_MODEL wins outright, otherwise non-chat ids (embedding,
+ * TTS, image) are dropped because they cannot reply, survivors are ranked by family
+ * and the first listed model stays as the last resort.
+ */
 function pickModel(models) {
   const preferred = process.env.TEST_MODEL?.trim();
 
@@ -145,10 +161,15 @@ function pickModel(models) {
   return ordered[0] ?? models[0];
 }
 
+/** Strips trailing slashes so endpoint paths are appended exactly once. */
 function trimBaseUrl(baseUrl) {
   return baseUrl.replace(/\/+$/, '');
 }
 
+/**
+ * One completion against the chosen provider in its native wire format.
+ * Error bodies are scrubbed of the API key before they can reach the console.
+ */
 async function callProvider({ provider, model, system, user }) {
   const baseUrl = trimBaseUrl(provider.baseUrl);
   const apiKey = provider.apiKey;
@@ -238,6 +259,7 @@ async function callProvider({ provider, model, system, user }) {
   return extractText(provider.protocol, payload);
 }
 
+/** Pulls the text out of each provider's response shape; unknown shapes yield ''. */
 function extractText(protocol, payload) {
   if (protocol === 'openai') {
     const content = payload?.choices?.[0]?.message?.content;
@@ -271,6 +293,7 @@ function extractText(protocol, payload) {
     .trim();
 }
 
+/** Console-safe key hint: only the last four characters survive. */
 function maskKey(apiKey) {
   return apiKey.length > 4 ? `••••${apiKey.slice(-4)}` : '••••';
 }

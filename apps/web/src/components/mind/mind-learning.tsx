@@ -33,6 +33,10 @@ const STATUS_LABELS: Record<string, string> = {
   FAILED: '失败',
 };
 
+/**
+ * Learning tab: enablement summary with a manual trigger, editable
+ * speaking-style notes, and the history of learning runs.
+ */
 export function MindLearningTab({
   personaId,
   channelId,
@@ -178,6 +182,10 @@ export function MindLearningTab({
   );
 }
 
+/**
+ * One speaking-style note with confidence, evidence and sources; can be
+ * toggled between active and paused, or deleted.
+ */
 function NoteCard({
   note,
   busy,
@@ -264,6 +272,7 @@ function NoteCard({
   );
 }
 
+/** Collapsible learning-run card summarizing sources, memories and style notes. */
 function LogCard({
   log,
   open,
@@ -326,6 +335,7 @@ function LogCard({
   );
 }
 
+/** Short list of learned items with optional source links. */
 function ItemList({ title, items }: { title: string; items: MindLearningItemRecord[] }) {
   return (
     <div>
@@ -353,6 +363,7 @@ function ItemList({ title, items }: { title: string; items: MindLearningItemReco
   );
 }
 
+/** Tiny tone-colored pill used for learning statuses and counters. */
 function Badge({
   children,
   tone,

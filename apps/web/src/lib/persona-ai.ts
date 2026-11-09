@@ -23,6 +23,7 @@ export interface AiPreviewSection {
   rows: readonly AiPreviewRow[];
 }
 
+/** Joins list entries for preview rows, substituting a placeholder when nothing was generated. */
 function listOrEmpty(items: string[]): string {
   return (
     items
@@ -32,10 +33,12 @@ function listOrEmpty(items: string[]): string {
   );
 }
 
+/** Trims a text field for preview, substituting a placeholder when empty. */
 function textOrEmpty(value: string): string {
   return value.trim() || '未填写';
 }
 
+/** Builds the grouped preview shown after an AI draft is generated, matching the 22-step form. */
 export function describeGeneratedDraft(draft: PersonaDraft): AiPreviewSection[] {
   return [
     {

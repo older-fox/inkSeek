@@ -96,6 +96,10 @@ export function DropdownSelect({
 
   const current = items.find((option) => option.value === value) ?? null;
 
+  /**
+   * Opens the portal menu at the trigger's measured rect, flipping it above the trigger
+   * when the space below is too tight, and seeds the active row from the current value.
+   */
   const openMenu = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) {
@@ -125,6 +129,7 @@ export function DropdownSelect({
     setOpen(true);
   };
 
+  /** Closes the menu and clears the filter; refocus returns the caret to the trigger. */
   const close = (refocus: boolean) => {
     setOpen(false);
     setQuery('');
@@ -133,6 +138,7 @@ export function DropdownSelect({
     }
   };
 
+  /** Selects a row when the filtered list has one, then refocuses the trigger. */
   const commit = (option: DropdownOption | undefined) => {
     if (!option) {
       return;
@@ -146,6 +152,10 @@ export function DropdownSelect({
       return;
     }
 
+    /**
+     * A press outside the menu closes it. The menu is portalled to the body, so it has
+     * no DOM ancestry and both refs must be tested explicitly.
+     */
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) {
@@ -156,11 +166,16 @@ export function DropdownSelect({
       }
       setOpen(false);
     };
+    /** Escape closes the menu and hands focus back to the trigger. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         close(true);
       }
     };
+    /**
+     * Page scroll, wheel or resize closes the menu, whose fixed portal would otherwise
+     * drift away from its trigger; scrolling inside the option list is ignored.
+     */
     const handleViewportChange = (event: Event) => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) {
         return;
@@ -202,6 +217,11 @@ export function DropdownSelect({
     node?.scrollIntoView({ block: 'nearest' });
   }, [active, open, filtered]);
 
+  /**
+   * Keyboard navigation for the option list: arrows, Home and End walk the filtered
+   * rows, Enter or Space commits the active one, and Tab closes without refocusing so
+   * focus keeps its natural order. An empty list leaves the keys alone.
+   */
   const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (filtered.length === 0) {
       return;
@@ -236,6 +256,10 @@ export function DropdownSelect({
     }
   };
 
+  /**
+   * Gives the filter box the same arrow and Enter behaviour as the list, so typing and
+   * picking never need to leave it. Escape closes with focus back on the trigger.
+   */
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     // The search box owns the keyboard while focused; without this the menu's
     // own handler would apply the same arrow/enter a second time.
@@ -428,6 +452,7 @@ export function DropdownSelect({
   );
 }
 
+/** Inline "create new option" form pinned to the bottom of the menu. */
 function CreateRow({
   create,
   onCommit,
@@ -438,6 +463,7 @@ function CreateRow({
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  /** Creates the typed option after the caller's validation, then selects it. */
   const submit = () => {
     const value = draft.trim();
     if (value === '') {

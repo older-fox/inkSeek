@@ -1,12 +1,15 @@
 import { z } from 'zod';
 
+/** Bounded string-array schema with shared Chinese length messages. */
 const listSchema = (maxItems: number, perItem: number) =>
   z.array(z.string().max(perItem, '列表条目过长')).max(maxItems, '列表条目过多');
 
+/** Open-ended string list; item length is capped but the count is not. */
 const openListSchema = (perItem: number) => z.array(z.string().max(perItem, '列表条目过长'));
 
 const numberField = z.number().int('需要填写整数').min(0).max(100);
 
+/** Capped at 200 chars; the label builds the error text and the default fills blanks. */
 const sentenceField = (label: string, fallback = '') =>
   z.string().max(200, `${label}最多 200 个字符`).default(fallback);
 
@@ -45,6 +48,10 @@ export const personaAdvancedSchema = z.object({
 
 export type PersonaAdvanced = z.infer<typeof personaAdvancedSchema>;
 
+/**
+ * Baseline advanced settings; the values mirror the schema defaults so a freshly
+ * created card validates without user input.
+ */
 export function createDefaultPersonaAdvanced(): PersonaAdvanced {
   return {
     address_for_stranger: '您',
@@ -146,6 +153,10 @@ export const personaDraftSchema = z.object({
 
 export type PersonaDraft = z.infer<typeof personaDraftSchema>;
 
+/**
+ * Blank draft with one empty list slot per list field and the schema defaults
+ * pre-filled, so the editor starts from a valid form.
+ */
 export function createDefaultPersonaDraft(): PersonaDraft {
   return {
     name: '',
@@ -244,6 +255,7 @@ export const PERSONA_EXPERIENCE_LABELS: Record<PersonaExperienceLevel, string> =
   'Ⅴ': '深谙',
 };
 
+/** Display label for an experience tier; the map is exhaustive over the union. */
 export function experienceLabelOf(level: PersonaExperienceLevel): string {
   return PERSONA_EXPERIENCE_LABELS[level];
 }

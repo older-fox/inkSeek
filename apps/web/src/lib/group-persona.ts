@@ -159,6 +159,7 @@ const GROUP_FALLBACK: Record<string, PersonaValue> = {
   speak_rate_target: 0,
 };
 
+/** Fresh copy of the per-group attribute baseline for conversations without a stored stance. */
 export function groupPersonaDefaults(): Record<string, PersonaValue> {
   return { ...GROUP_FALLBACK };
 }

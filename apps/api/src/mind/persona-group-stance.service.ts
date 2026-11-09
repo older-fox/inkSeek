@@ -9,6 +9,7 @@ import { clamp, type MindPersona } from './mind.types.js';
 export class PersonaGroupStanceService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Lazily creates the stance row for a group that has never been read; validated against persona channel. */
   async ensure(personaId: string, conversationId: string): Promise<PersonaGroupStance> {
     const persona = await this.persona(personaId);
     const conversation = await this.prisma.chatConversation.findFirst({
@@ -44,6 +45,7 @@ export class PersonaGroupStanceService {
     return rows.map(toRecord);
   }
 
+  /** Single group with conversation metadata joined in; creates the row first if missing. */
   async get(personaId: string, conversationId: string): Promise<PersonaGroupStanceRecord> {
     const row = await this.ensure(personaId, conversationId);
     const withConversation = await this.prisma.personaGroupStance.findUniqueOrThrow({
@@ -53,6 +55,7 @@ export class PersonaGroupStanceService {
     return toRecord(withConversation);
   }
 
+  /** Numeric fields clamp to 0–100; every changed field also lands in the change log for later audit. */
   async update(
     personaId: string,
     input: PersonaGroupStanceUpdateInput,
@@ -63,6 +66,7 @@ export class PersonaGroupStanceService {
     const changes: Prisma.PersonaChangeLogCreateManyInput[] = [];
     const source = meta?.source ?? 'ADMIN_EDIT';
     const reason = meta?.reason ?? '操作员手动调整群态度';
+    /** Queues a change-log row, but only for a field that actually moved. */
     const logField = (field: string, before: unknown, after: unknown, delta?: number) => {
       if (before === after) {
         return;
@@ -123,6 +127,7 @@ export class PersonaGroupStanceService {
     return this.get(personaId, input.conversationId);
   }
 
+  /** Moves the group watermark so unread counting restarts from now. */
   async markRead(personaId: string, conversationId: string): Promise<void> {
     const stance = await this.ensure(personaId, conversationId);
     await this.prisma.personaGroupStance.update({
@@ -131,6 +136,7 @@ export class PersonaGroupStanceService {
     });
   }
 
+  /** Loads the persona or fails with a 404 so callers never see a half-resolved channel id. */
   async persona(personaId: string): Promise<MindPersona> {
     const persona = await this.prisma.chatChannelPersona.findUnique({
       where: { id: personaId },
@@ -142,6 +148,7 @@ export class PersonaGroupStanceService {
   }
 }
 
+/** Flattens the joined conversation fields into the wire record shape, normalising dates to ISO strings. */
 function toRecord(
   row: PersonaGroupStance & { conversation: ChatConversation },
 ): PersonaGroupStanceRecord {

@@ -6,6 +6,10 @@ interface BrandMarkProps {
   compact?: boolean;
 }
 
+/**
+ * Product logo lockup (droplet glyph plus wordmark). `compact` drops the
+ * wordmark so it can sit inside narrowed headers and sidebars.
+ */
 export function BrandMark({ className, compact = false }: BrandMarkProps) {
   const gradientId = useId();
 

@@ -60,6 +60,7 @@ import { chatConversationsQuery, chatMessagesQuery } from '@/lib/queries';
 const EASE = [0.22, 1, 0.36, 1] as const;
 const MAX_IMAGE_COUNT = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** First character of a display name for avatar fallbacks, defaulting to 我. */
 function initialsOf(name: string): string {
   return Array.from(name.trim())[0] ?? '我';
 }
@@ -67,6 +68,10 @@ function initialsOf(name: string): string {
 type MessagePartGroup =
   { kind: 'bubble'; parts: ChatMessagePart[] } | { kind: 'standalone'; part: ChatMessagePart };
 
+/**
+ * Consecutive text and image parts share one bubble; voice, forward and other parts
+ * are emitted as standalone blocks beside it.
+ */
 function groupMessageParts(parts: ChatMessagePart[]): MessagePartGroup[] {
   const groups: MessagePartGroup[] = [];
 
@@ -87,6 +92,7 @@ function groupMessageParts(parts: ChatMessagePart[]): MessagePartGroup[] {
   return groups;
 }
 
+/** Short label for a quoted message, using a kind placeholder when it has no text. */
 function quotePreviewText(quote: ChatQuoteSummary): string {
   if (quote.status !== 'RESOLVED') {
     return '引用的消息已不可用';
@@ -112,6 +118,10 @@ function quotePreviewText(quote: ChatQuoteSummary): string {
   }
 }
 
+/**
+ * Quoted-message strip inside a bubble; when the original is loaded, clicking it
+ * scrolls that message into view and flashes it.
+ */
 function QuoteStrip({ quote, self }: { quote: ChatQuoteSummary; self: boolean }) {
   const resolved = quote.status === 'RESOLVED';
   const content = (
@@ -165,6 +175,10 @@ function QuoteStrip({ quote, self }: { quote: ChatQuoteSummary; self: boolean })
   );
 }
 
+/**
+ * One archived message: avatars, part groups, timestamp and image lightbox. With a channel
+ * persona present the avatars also open the relationship or persona brief panels.
+ */
 function MessageBubble({
   message,
   kind,
@@ -374,6 +388,7 @@ function MessageBubble({
   );
 }
 
+/** Sidebar row summarising a conversation with its source channel, handle and last message. */
 function ConversationRow({
   conversation,
   active,
@@ -447,6 +462,10 @@ function ConversationRow({
   );
 }
 
+/**
+ * Dropdown that limits the list to one channel namespace; an outside pointer or Escape
+ * closes it without changing the selection.
+ */
 function SourceFilter({
   sources,
   value,
@@ -467,12 +486,17 @@ function SourceFilter({
       return;
     }
 
+    /**
+     * A press outside the dropdown closes it. The trigger lives inside rootRef, so its
+     * own click still reaches the toggle instead of being swallowed here.
+     */
     const handlePointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false);
       }
     };
 
+    /** Escape closes the menu and leaves the active filter untouched. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpen(false);
@@ -488,6 +512,7 @@ function SourceFilter({
     };
   }, [open]);
 
+  /** Applies a source filter and closes the menu in one gesture. */
   const select = (sourceId: string | null) => {
     onChange(sourceId);
     setOpen(false);
@@ -603,6 +628,7 @@ function SourceFilter({
   );
 }
 
+/** Empty state shown before any channel is connected, linking to the connections screen. */
 function ChannelRequired({ kind }: { kind: ConversationKind }) {
   return (
     <motion.div
@@ -640,6 +666,7 @@ function ChannelRequired({ kind }: { kind: ConversationKind }) {
   );
 }
 
+/** Placeholder panel while channels or conversations are still loading. */
 function LoadingPanel() {
   return (
     <div className="glass-panel grid min-h-[18rem] place-items-center rounded-[1.6rem] p-8">
@@ -651,6 +678,11 @@ function LoadingPanel() {
   );
 }
 
+/**
+ * Two-pane private/group chat view aggregated across every connected channel.
+ * Autoscroll only follows new realtime messages while the reader is pinned near the bottom,
+ * pausing during manual scrolling; sending invalidates the message and conversation caches.
+ */
 export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   const { channels, isLoading: channelsLoading } = useChannelsState();
   const queryClient = useQueryClient();
@@ -746,6 +778,7 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   });
 
   const lastMessageId = messages.at(-1)?.id ?? '';
+  /** Jumps the transcript to its newest message without animation. */
   const scrollToBottom = useCallback(() => {
     const element = scrollRef.current;
     if (element) {
@@ -793,10 +826,12 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
       return;
     }
 
+    /** Notes whether the reader sits near the bottom; that flag gates auto-scrolling. */
     const handleScroll = () => {
       stickToBottomRef.current =
         element.scrollHeight - element.scrollTop - element.clientHeight < 32;
     };
+    /** Any deliberate wheel, touch or pointer input suspends auto-pinning briefly. */
     const holdAutoPin = () => {
       scrollHoldUntilRef.current = performance.now() + 180;
     };
@@ -839,6 +874,10 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     setBriefOpen(false);
   }, [selectedId]);
 
+  /**
+   * Attaches pasted images to the composer; a text paste falls through untouched, and the
+   * count and 8 MB limits are reported with a toast rather than dropped silently.
+   */
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
     const imageFiles = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
@@ -877,6 +916,10 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     });
   };
 
+  /**
+   * Sends the trimmed draft with its attachments; an empty message, or one submitted
+   * before any conversation is selected, is dropped instead of posting a blank bubble.
+   */
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 

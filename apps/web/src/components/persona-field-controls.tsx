@@ -20,15 +20,18 @@ export interface PersonaFieldShape {
 const EDITOR_INPUT =
   'w-full rounded-lg border border-brass-400/25 bg-ink-950/40 px-2.5 py-1.5 text-[0.8rem] leading-6 text-mist-100 outline-none transition placeholder:text-mist-600 focus:border-brass-400/50';
 
+/** Coerces a stored persona value to a finite number, or null when unusable. */
 function numericValue(value: PersonaValue | undefined): number | null {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+/** Formats a 0–1 ratio as a percentage or a two-decimal number. */
 function ratioLabel(field: PersonaFieldShape, ratio: number): string {
   return field.display === 'percent' ? `${(ratio * 100).toFixed(1)}%` : ratio.toFixed(2);
 }
 
+/** Cancel/save pair shown under an inline field editor. */
 export function EditorActions({
   onCancel,
   onCommit,
@@ -56,6 +59,10 @@ export function EditorActions({
   );
 }
 
+/**
+ * Inline editor for text-like fields. Enter commits (Ctrl/Cmd+Enter for
+ * multiline), Escape cancels, and lists are split on commas or newlines.
+ */
 function PersonaFieldEditor({
   field,
   value,
@@ -74,6 +81,7 @@ function PersonaFieldEditor({
     return value === undefined ? '' : String(value);
   });
 
+  /** Re-parses the raw text into the field's shape: tags split on commas, lists on newlines, blanks dropped. */
   const commit = () => {
     if (field.kind === 'tags') {
       onCommit(
@@ -96,6 +104,7 @@ function PersonaFieldEditor({
     onCommit(text.trim());
   };
 
+  /** Escape cancels without saving; plain Enter commits, but multiline fields need Ctrl/Cmd so newlines stay typeable. */
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -142,6 +151,7 @@ function PersonaFieldEditor({
   );
 }
 
+/** Range slider for score fields (0–100) and ratio fields (0–1), saving as you drag. */
 export function PersonaSlider({
   field,
   value,
@@ -217,6 +227,7 @@ export function PersonaSlider({
   );
 }
 
+/** Toggle for boolean persona fields; accepts both `true` and `'true'` as on. */
 export function PersonaSwitch({
   field,
   value,
@@ -267,6 +278,10 @@ export function PersonaSwitch({
   );
 }
 
+/**
+ * Read-only rendering of a field value, varying by kind: chips for tags,
+ * bulleted rows for lists, and paragraphs for long text.
+ */
 export function PersonaFieldValue({
   field,
   value,
@@ -326,6 +341,10 @@ export function PersonaFieldValue({
   }
 }
 
+/**
+ * Self-contained card for one persona attribute: shows the current value or
+ * the matching control, and flips into inline editing on the pencil action.
+ */
 export function PersonaFieldCard({
   field,
   value,

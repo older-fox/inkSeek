@@ -59,6 +59,7 @@ interface StateFieldBinding {
   input?: (value: PersonaValue) => PersonaStateUpdateInput;
 }
 
+/** Coerces a card value to a number, falling back to zero when it is not finite. */
 const numericValue = (value: PersonaValue): number => {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -121,14 +122,17 @@ const STATE_FIELD_BINDINGS: Record<string, StateFieldBinding> = {
   },
 };
 
+/** True when the card field is a projection of live PersonaState rather than stored card data. */
 export function isStateField(key: string): boolean {
   return key in STATE_FIELD_BINDINGS;
 }
 
+/** Converts an edit on a live field into a PersonaState patch; null for read-only fields. */
 export function stateFieldInput(key: string, value: PersonaValue): PersonaStateUpdateInput | null {
   return STATE_FIELD_BINDINGS[key]?.input?.(value) ?? null;
 }
 
+/** Overlays live PersonaState values onto stored card values for editor display. */
 export function mergeStateValues(
   values: Record<string, PersonaValue>,
   state: StateSnapshot | null,
@@ -143,6 +147,7 @@ export function mergeStateValues(
   return merged;
 }
 
+/** Derives the mood label shown in the card from valence and arousal. */
 export function stateMoodLabel(state: Pick<StateSnapshot, 'moodValence' | 'moodArousal'>): string {
   const base =
     state.moodValence > 30
@@ -943,6 +948,7 @@ const EMPTY_PERSONA_VALUES: Record<string, PersonaValue> = {
   anchor_quote: '角色卡尚未导入',
 };
 
+/** Builds the card view for a channel, falling back to an empty persona when none is bound. */
 export function personaForChannel(channel: Channel): ChannelPersona {
   const snapshot = channel.persona;
 
@@ -977,6 +983,7 @@ const LEGACY_OVERRIDE_KEYS: Record<string, string> = {
   social_battery_max: 'social_battery',
 };
 
+/** Type guard for values persisted in the local override store. */
 function isPersonaValue(value: unknown): value is PersonaValue {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return true;
@@ -985,6 +992,7 @@ function isPersonaValue(value: unknown): value is PersonaValue {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+/** Reads locally cached card edits for a channel, dropping unknown shapes and legacy keys. */
 export function readChannelPersonaOverrides(channelId: string): Record<string, PersonaValue> {
   if (typeof window === 'undefined') {
     return {};
@@ -1026,6 +1034,7 @@ export function readChannelPersonaOverrides(channelId: string): Record<string, P
   }
 }
 
+/** Drops a channel's cached card edits after they are saved to the server. */
 export function clearChannelPersonaOverrides(channelId: string): void {
   if (typeof window === 'undefined') {
     return;

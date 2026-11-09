@@ -60,6 +60,7 @@ export class MindLoopService implements OnModuleInit {
     private readonly phoneFocus: MindPhoneFocusService,
   ) {}
 
+  /** Reclaims focus rows left ACTIVE by a previous process, skipping rehearsal boots. */
   async onModuleInit(): Promise<void> {
     // The read-only rehearsal boots this module without an HTTP server; it must
     // not touch live focus rows just because the process is new.
@@ -71,6 +72,7 @@ export class MindLoopService implements OnModuleInit {
     });
   }
 
+  /** Runs the turn inside the persona's queue; channels without a persona reply directly. */
   async submitMessage(message: ChatMessageSnapshot, mode?: PersonaMindMode): Promise<void> {
     const personaId = await this.personaForChannel(message.channelId);
     if (!personaId) {
@@ -89,6 +91,7 @@ export class MindLoopService implements OnModuleInit {
     });
   }
 
+  /** Queues one idle heartbeat and resolves with its turn result, if any. */
   submitHeartbeat(
     personaId: string,
     options: { forceLearning?: boolean } = {},
@@ -145,6 +148,7 @@ export class MindLoopService implements OnModuleInit {
     }
   }
 
+  /** Appends to the persona queue and starts the drain loop if it is idle. */
   private push(event: LoopEvent): void {
     const queue = this.queues.get(event.personaId) ?? [];
     queue.push(event);
@@ -152,6 +156,7 @@ export class MindLoopService implements OnModuleInit {
     void this.pump(event.personaId);
   }
 
+  /** Drains one persona's queue in priority order; re-entrant calls return at once. */
   private async pump(personaId: string): Promise<void> {
     if (this.running.has(personaId)) {
       return;
@@ -188,6 +193,7 @@ export class MindLoopService implements OnModuleInit {
     }
   }
 
+  /** Dispatches by event kind; only heartbeats produce a turn result. */
   private async handle(event: LoopEvent): Promise<MindTurnResult | null> {
     if (event.kind === 'message') {
       await this.handleMessage(event);
@@ -200,6 +206,7 @@ export class MindLoopService implements OnModuleInit {
     return null;
   }
 
+  /** Interrupts phone time, answers, then restores the phone focus where it left off. */
   private async handleMessage(event: MessageEvent): Promise<void> {
     const phone = await this.focus.active(event.personaId, 'PHONE');
     // Only interrupted phone time needs a stack row; ordinary replies do not
@@ -241,6 +248,7 @@ export class MindLoopService implements OnModuleInit {
     }
   }
 
+  /** A running phone session wins over a plain heartbeat; it is stepped instead. */
   private async handleHeartbeat(event: HeartbeatEvent): Promise<MindTurnResult | null> {
     if (event.phoneOutcome) {
       const result = await this.runtime.heartbeat(event.personaId, event.phoneOutcome);
@@ -267,6 +275,7 @@ export class MindLoopService implements OnModuleInit {
     return result;
   }
 
+  /** Advances the phone one micro-step and self-schedules the next while wanted. */
   private async handlePhoneStep(event: PhoneStepEvent): Promise<void> {
     const outcome = await this.phoneFocus.step(event.focusId);
     if (outcome.ended && outcome.brief) {
@@ -290,6 +299,7 @@ export class MindLoopService implements OnModuleInit {
     this.scheduleStep(personaId, phone.id, delayMs);
   }
 
+  /** Arms a one-shot step timer; an already pending timer is kept as-is. */
   private scheduleStep(personaId: string, focusId: string, delayMs: number): void {
     const pending = this.stepTimers.get(personaId);
     if (pending) {
@@ -304,6 +314,7 @@ export class MindLoopService implements OnModuleInit {
     this.stepTimers.set(personaId, timer);
   }
 
+  /** Persona bound to a channel, or null for channels nobody minds. */
   private async personaForChannel(channelId: string): Promise<string | null> {
     const channel = await this.prisma.chatChannel.findUnique({
       where: { id: channelId },
@@ -313,6 +324,7 @@ export class MindLoopService implements OnModuleInit {
   }
 }
 
+/** Best-effort message text for logs; never throws on non-Error values. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

@@ -6,6 +6,7 @@ const CONNECT_TIMEOUT_MS = 5000;
 
 @Injectable()
 export class RedisProbeService {
+  /** Opens a throwaway connection, pings, and always disconnects; failures become 400s. */
   async probe(connection: RedisConnectionInput): Promise<RedisProbeResult> {
     const client = new Redis({
       host: connection.host,
@@ -38,6 +39,7 @@ export class RedisProbeService {
     }
   }
 
+  /** ioredis has no connect deadline of its own, so the race supplies one. */
   private async connectAndPing(client: Redis): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
 

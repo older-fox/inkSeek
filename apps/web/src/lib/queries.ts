@@ -40,6 +40,7 @@ export const personasQuery = queryOptions({
   staleTime: 10_000,
 });
 
+/** Single persona record for the editor; disabled until an id is available. */
 export const personaRecordQuery = (id: string) =>
   queryOptions({
     queryKey: ['personas', id],
@@ -48,6 +49,7 @@ export const personaRecordQuery = (id: string) =>
     staleTime: 10_000,
   });
 
+/** Conversation list for one chat kind (direct, group or private). */
 export const chatConversationsQuery = (kind: ChatConversationKind) =>
   queryOptions({
     queryKey: ['chat', 'conversations', kind],
@@ -55,6 +57,7 @@ export const chatConversationsQuery = (kind: ChatConversationKind) =>
     staleTime: 5_000,
   });
 
+/** Latest message page of one conversation, invalidated by realtime chat events. */
 export const chatMessagesQuery = (conversationId: string) =>
   queryOptions({
     queryKey: ['chat', 'messages', conversationId],
@@ -62,6 +65,7 @@ export const chatMessagesQuery = (conversationId: string) =>
     staleTime: 5_000,
   });
 
+/** Contact relationship numbers for a persona's mind panel. */
 export const mindRelationshipsQuery = (personaId: string) =>
   queryOptions({
     queryKey: ['mind', 'relationships', personaId],
@@ -70,6 +74,7 @@ export const mindRelationshipsQuery = (personaId: string) =>
     staleTime: 5_000,
   });
 
+/** Group stance values the persona holds across chats. */
 export const mindGroupStancesQuery = (personaId: string) =>
   queryOptions({
     queryKey: ['mind', 'group-stances', personaId],
@@ -78,6 +83,7 @@ export const mindGroupStancesQuery = (personaId: string) =>
     staleTime: 5_000,
   });
 
+/** Insight feed for one channel over the selected day range. */
 export const mindInsightsQuery = (channelId: string, days: number) =>
   queryOptions({
     queryKey: ['insights', channelId, days],

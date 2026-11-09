@@ -21,6 +21,10 @@ const API_PORT = 3100;
 // Outgoing chat images travel as base64 data URLs: 4 × 12 MB schema cap plus JSON overhead.
 const JSON_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 
+/**
+ * Boots the Fastify-backed API: cookies, static media roots, global prefix,
+ * the exception filter and Swagger, then listens on all interfaces.
+ */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,

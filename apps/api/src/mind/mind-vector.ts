@@ -38,6 +38,7 @@ export function embedText(text: string): number[] {
   return vector.map((value) => value / norm);
 }
 
+/** Cosine distance of two embeddings; mismatched lengths are compared up to the shorter one, zero vectors score 0. */
 export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   if (a.length === 0 || b.length === 0) {
     return 0;
@@ -59,6 +60,7 @@ export function cosineSimilarity(a: readonly number[], b: readonly number[]): nu
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+/** Share of distinct query tokens also present in the text; cheap lexical pre-filter alongside cosine. */
 export function keywordOverlap(query: string, text: string): number {
   const queryTokens = new Set(tokenize(query.toLowerCase()));
   if (queryTokens.size === 0) {
@@ -74,6 +76,7 @@ export function keywordOverlap(query: string, text: string): number {
   return hits / queryTokens.size;
 }
 
+/** Splits on non-word runs and expands CJK words into character bigrams. */
 function tokenize(text: string): string[] {
   const tokens: string[] = [];
   const words = text.split(/[^\p{L}\p{N}_]+/u).filter(Boolean);
@@ -88,6 +91,7 @@ function tokenize(text: string): string[] {
   return tokens;
 }
 
+/** 32-bit FNV-1a hash; unsigned so it can be used as a vector index. */
 function fnv1a(value: string): number {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {

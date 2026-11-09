@@ -34,6 +34,12 @@ export class MindActionExecutor {
     private readonly stickers: StickerService,
   ) {}
 
+  /**
+   * Persists each beat as an AgentAction (idempotency key dedupes retries),
+   * then sends sequentially: SHADOW/APPROVAL modes stop before sending, a
+   * failed send skips the remaining beats, and the daily budget is consumed
+   * only by reactive turns.
+   */
   async execute(input: ExecutePlanInput): Promise<AgentAction[]> {
     if (!input.plan.engage || input.plan.beats.length === 0) {
       return [];
@@ -142,6 +148,7 @@ export class MindActionExecutor {
     });
   }
 
+  /** Approves and sends a pending action; already-sent rows return unchanged. */
   async approve(actionId: string): Promise<AgentActionRecord> {
     const action = await this.prisma.agentAction.findUnique({ where: { id: actionId } });
     if (!action) {
@@ -190,6 +197,7 @@ export class MindActionExecutor {
     }
   }
 
+  /** Lists actions still awaiting approval (or claimed but not yet sent). */
   async pending(personaId: string): Promise<AgentActionRecord[]> {
     const rows = await this.prisma.agentAction.findMany({
       where: { personaId, status: { in: ['PENDING', 'APPROVED'] } },
@@ -199,6 +207,7 @@ export class MindActionExecutor {
     return rows.map(toRecord);
   }
 
+  /** Sends one beat through ChatService and returns the created message id. */
   private async sendBeat(
     scene: MindScene,
     beat: OutgoingBeat,
@@ -232,6 +241,7 @@ export class MindActionExecutor {
     throw new Error(`暂不支持发送 ${beat.kind} 类型的消息段（动作 ${actionId}）`);
   }
 
+  /** Rebuilds a minimal scene from stored rows so approval-time sends can run. */
   private async sceneForAction(action: AgentAction): Promise<MindScene> {
     const scene = await this.prisma.chatConversation.findUnique({
       where: { id: action.conversationId ?? '' },
@@ -276,6 +286,7 @@ export class MindActionExecutor {
     };
   }
 
+  /** Sent count since local midnight from message-triggered runs, for the daily budget. */
   private async todaySentCount(personaId: string): Promise<number> {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -291,6 +302,7 @@ export class MindActionExecutor {
   }
 }
 
+/** Shapes a stored action for API responses. */
 function toRecord(row: AgentAction): AgentActionRecord {
   return {
     id: row.id,
@@ -321,6 +333,7 @@ function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
       },
       Math.max(0, ms),
     );
+    /** A wake-up while waiting is an interrupt, not a completed sleep. */
     const onAbort = () => {
       clearTimeout(timer);
       reject(new MindTurnInterruptedError());

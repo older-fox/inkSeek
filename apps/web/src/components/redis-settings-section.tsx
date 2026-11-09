@@ -46,6 +46,10 @@ interface RedisSettingsSectionProps {
   redis: RedisSettings | null;
 }
 
+/**
+ * Settings card for the Redis connection used by cache, queues and event
+ * broadcast. Saving first runs a live PING and only persists on success.
+ */
 export function RedisSettingsSection({ redis }: RedisSettingsSectionProps) {
   const queryClient = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);

@@ -83,6 +83,10 @@ export class LlmService {
     private readonly promptLogs: LlmCallLogService,
   ) {}
 
+  /**
+   * Single entry point for one-shot completions: resolves the provider and model,
+   * calls the wire protocol, and logs both successes and failures unless opted out.
+   */
   async complete(input: LlmCompletionInput): Promise<LlmCompletion> {
     if (input.prompt.trim().length === 0) {
       throw new BadRequestException({ code: 'AI_PROMPT_EMPTY', message: '提示词不能为空' });
@@ -150,6 +154,7 @@ export class LlmService {
     }
   }
 
+  /** Falls back to the first provider that already has detected models. */
   private async resolveProvider(providerId?: string | null): Promise<ResolvedProvider> {
     const records = await this.prisma.modelProvider.findMany({
       orderBy: { createdAt: 'asc' },
@@ -177,6 +182,7 @@ export class LlmService {
     return toResolvedProvider(record);
   }
 
+  /** Defaults to the first detected model; empty lists are rejected rather than guessed. */
   private resolveModel(provider: ResolvedProvider, requested?: string | null): string {
     if (requested) {
       if (provider.models.length === 0 || provider.models.includes(requested)) {
@@ -199,6 +205,7 @@ export class LlmService {
     return first;
   }
 
+  /** Builds the protocol-specific body and returns text plus any reported usage. */
   private async requestCompletion(
     provider: ResolvedProvider,
     model: string,
@@ -332,6 +339,7 @@ export class LlmService {
     };
   }
 
+  /** One POST bounded by the per-call signal; maps transport and status errors to gateway codes. */
   private async postJson(
     provider: ResolvedProvider,
     url: string,
@@ -414,6 +422,7 @@ function joinTextBlocks(value: unknown): string {
     .join('');
 }
 
+/** Narrows a stored row into the shape the request builders expect. */
 function toResolvedProvider(record: ModelProvider): ResolvedProvider {
   return {
     id: record.id,
@@ -425,26 +434,31 @@ function toResolvedProvider(record: ModelProvider): ResolvedProvider {
   };
 }
 
+/** Tolerates malformed JSON columns by keeping only string entries. */
 function modelList(record: ModelProvider): string[] {
   return Array.isArray(record.models)
     ? record.models.filter((model): model is string => typeof model === 'string')
     : [];
 }
 
+/** Strips trailing slashes so path concatenation yields exactly one separator. */
 function trimBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
+/** Providers disagree on whether usage is present, so absent counters stay undefined. */
 function readUsageNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** Safe navigation helper for untyped provider payloads; anything else becomes `{}`. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** Extracts a short, redacted reason from a failed response body. */
 async function readErrorDetail(response: Response, secret: string): Promise<string> {
   const raw = await response.text().catch(() => '');
 
@@ -467,6 +481,7 @@ async function readErrorDetail(response: Response, secret: string): Promise<stri
   return redact(raw.replace(/\s+/g, ' ').trim().slice(0, 200), secret);
 }
 
+/** Masks the API key in upstream error text; very short secrets are left alone. */
 function redact(value: string, secret: string): string {
   return secret.length >= 8 ? value.split(secret).join('***') : value;
 }

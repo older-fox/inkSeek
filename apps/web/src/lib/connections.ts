@@ -147,6 +147,7 @@ const LEGACY_PERSONA_STORAGE_KEYS = [
   'inkseek-private-persona-meta',
 ];
 
+/** Clears localStorage keys written by the pre-API demo so stale data cannot resurface. */
 function purgeLegacyMockData(): void {
   try {
     window.localStorage.removeItem(LEGACY_MOCK_STORAGE_KEY);
@@ -171,6 +172,7 @@ const CHANNEL_STATUS: Record<ChatChannelStatus, ChannelStatus> = {
   ERROR: 'error',
 };
 
+/** First character of a display name, used for avatar fallbacks. */
 function initialsOf(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
@@ -179,6 +181,7 @@ function initialsOf(name: string): string {
   return Array.from(trimmed)[0] ?? 'Q';
 }
 
+/** Short list timestamp: time of day for today, otherwise month/day. */
 function formatConversationTime(value: string | null): string {
   if (!value) {
     return '';
@@ -197,6 +200,7 @@ function formatConversationTime(value: string | null): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+/** Full message timestamp, adding the date once a message is not from today. */
 export function formatMessageTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -212,6 +216,7 @@ export function formatMessageTime(value: string): string {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${time}`;
 }
 
+/** Maps an API channel summary onto the view model used by the connections screen. */
 export function toChannel(summary: ChatChannelSummary): Channel {
   const definition = PLATFORMS[summary.platform];
 
@@ -235,6 +240,7 @@ export function toChannel(summary: ChatChannelSummary): Channel {
   };
 }
 
+/** Maps an API conversation summary onto the chat list item view model. */
 export function toSourcedConversation(summary: ChatConversationSummary): SourcedConversation {
   const kind: ConversationKind = summary.kind === 'GROUP' ? 'group' : 'private';
   const definition = PLATFORMS[summary.source.platform];
@@ -265,6 +271,7 @@ export function toSourcedConversation(summary: ChatConversationSummary): Sourced
   };
 }
 
+/** Maps an API message summary onto the render model, formatting its timestamp. */
 export function toChatMessage(summary: ChatMessageSummary): ChatMessage {
   return {
     id: summary.id,
@@ -284,6 +291,7 @@ export function toChatMessage(summary: ChatMessageSummary): ChatMessage {
   };
 }
 
+/** Groups conversations by their channel so the sidebar can show per-channel filters. */
 export function conversationSources(
   conversations: readonly SourcedConversation[],
 ): ConversationSourceSummary[] {
@@ -303,6 +311,7 @@ export function conversationSources(
     .map(({ source, count }) => ({ ...source, count }));
 }
 
+/** Loads connected channels with a pending flag for the connections screen skeletons. */
 export function useChannelsState(): { channels: Channel[]; isLoading: boolean } {
   const { data, isPending } = useQuery(chatChannelsQuery);
   const channels = useMemo(() => (data ?? []).map(toChannel), [data]);
@@ -310,6 +319,7 @@ export function useChannelsState(): { channels: Channel[]; isLoading: boolean } 
   return { channels, isLoading: isPending };
 }
 
+/** Convenience hook returning only the channel list. */
 export function useChannels(): Channel[] {
   return useChannelsState().channels;
 }

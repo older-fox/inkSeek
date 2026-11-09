@@ -22,6 +22,7 @@ export type ChannelMediaKind = 'images' | 'voices' | 'stickers';
 
 const CHANNEL_ID_PATTERN = /^[a-z0-9]{8,64}$/;
 
+/** Channel ids double as directory names, so the format is checked before any path join. */
 export function isChannelId(value: string): boolean {
   return CHANNEL_ID_PATTERN.test(value);
 }
@@ -42,6 +43,7 @@ export function channelMediaPath(
   return resolve(CHAT_CHANNEL_ROOT, channelId, kind, ...segments);
 }
 
+/** Public URL of a stored file; segments are percent-encoded rather than validated as ids. */
 export function channelMediaUrl(
   channelId: string,
   kind: ChannelMediaKind,
@@ -64,6 +66,7 @@ export interface ChannelMediaReference {
   storagePath: string;
 }
 
+/** Inverse of channelMediaUrl; null for foreign URLs or references that fail validation. */
 export function splitChannelMediaUrl(reference: string): ChannelMediaReference | null {
   const prefix = `${CHAT_CHANNEL_MEDIA_URL_PREFIX}/`;
   if (!reference.startsWith(prefix)) {

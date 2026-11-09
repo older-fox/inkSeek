@@ -14,6 +14,7 @@ import type { SessionMeta } from './session.service.js';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  /** Verifies credentials, then issues the session cookie once the session row exists. */
   @Post('login')
   @HttpCode(200)
   @ApiOperation({ summary: '使用管理员账户登录' })
@@ -27,6 +28,7 @@ export class AuthController {
     return { user };
   }
 
+  /** Echoes the guard-resolved user so the web client can bootstrap from one shape. */
   @Get('me')
   @UseGuards(AuthGuard)
   @ApiCookieAuth()
@@ -35,6 +37,7 @@ export class AuthController {
     return { user };
   }
 
+  /** Revokes the session server-side; the cookie is cleared even when no token was sent. */
   @Post('logout')
   @UseGuards(AuthGuard)
   @HttpCode(204)
@@ -51,6 +54,7 @@ export class AuthController {
   }
 }
 
+/** Collects the request facts persisted on the session for later auditing. */
 function readSessionMeta(request: FastifyRequest): SessionMeta {
   return {
     ip: request.ip,

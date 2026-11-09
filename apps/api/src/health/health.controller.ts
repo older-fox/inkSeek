@@ -10,6 +10,7 @@ export class HealthController {
 
   @Get()
   @ApiOperation({ summary: '服务与数据库健康检查' })
+  /** Cheap query so the probe fails when the database is unreachable. */
   async check(): Promise<HealthStatus> {
     await this.prisma.user.count();
 

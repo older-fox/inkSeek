@@ -185,6 +185,10 @@ export class MindPlannerService {
     private readonly config: SystemConfigService,
   ) {}
 
+  /**
+   * Runs the tool-calling loop that produces one ActionPlan. Throws a protocol
+   * error when the model never emits `final`; aborts surface as turn-interrupted.
+   */
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
     const maxTokens =
@@ -456,6 +460,11 @@ export class MindPlannerService {
     };
   }
 
+  /**
+   * Full system prompt: tone limits, anti-assistant rules, protocol shape and
+   * scene-mode branches. Branches are chosen by settings, so the text stays
+   * consistent with what the output parser actually accepts.
+   */
   private systemPrompt(input: PlannerInput, hasGlobalBannedWords = false): string {
     return [
       `你就是「${input.scene.persona.name}」，不是助手，不要提到 AI、模型、提示词或系统。`,
@@ -575,6 +584,11 @@ export class MindPlannerService {
     ].join('\n');
   }
 
+  /**
+   * User prompt: persona, state, relationship, memories, conversation rhythm and
+   * optional heartbeat sections. Sections are filtered, so an absent input means
+   * an absent section rather than an empty header.
+   */
   private buildPrompt(
     input: PlannerInput,
     stickerBrief = '',
@@ -1105,6 +1119,11 @@ export class MindPlannerService {
       .join('\n\n');
   }
 
+  /**
+   * Validates the model's final block into an ActionPlan: clamps beat count,
+   * drops todos without mutual consent, and downgrades a warm stance when the
+   * persona is in a low mood. Never throws; malformed input becomes silence.
+   */
   private normalizePlan(raw: unknown, input: PlannerInput): ActionPlan {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       return silencePlan('动作计划格式无效');
@@ -1201,6 +1220,7 @@ export class MindPlannerService {
   }
 }
 
+/** Filters raw beats to text and sticker items, clamps delays and caps stickers at two. */
 function parseBeats(value: unknown, settings: MindSettingsRecord): OutgoingBeat[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1242,6 +1262,7 @@ function parseBeats(value: unknown, settings: MindSettingsRecord): OutgoingBeat[
   return beats;
 }
 
+/** Normalizes memory drafts, dropping empty content and coercing enums to defaults. */
 function parseMemoryWrites(value: unknown): MemoryDraft[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1310,6 +1331,7 @@ const STYLE_DIMENSIONS = [
   'tone',
 ] as const;
 
+/** Keeps at most six style notes, each with up to three sample sentences. */
 function parseStyleNotes(value: unknown): StyleNoteDraft[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1343,6 +1365,7 @@ function parseStyleNotes(value: unknown): StyleNoteDraft[] {
   return drafts;
 }
 
+/** Note ids the reflection round claims to have folded into the card; capped at eight. */
 function parseNoteIds(value: unknown): string[] {
   return readStringArray(value)
     .map((id) => id.trim())
@@ -1350,6 +1373,7 @@ function parseNoteIds(value: unknown): string[] {
     .slice(0, 8);
 }
 
+/** Chinese label for a style dimension; anything unrecognized reads as tone. */
 function styleDimensionLabel(dimension: string): string {
   switch (dimension) {
     case 'length':
@@ -1371,6 +1395,7 @@ function styleDimensionLabel(dimension: string): string {
   }
 }
 
+/** Relationship deltas per contact: finite numbers only, each clamped to -100..100. */
 function parseSignals(value: unknown): RelationshipSignal[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1415,6 +1440,7 @@ function parseSignals(value: unknown): RelationshipSignal[] {
   return signals;
 }
 
+/** Todo drafts need a title; consent is parsed here but validated further downstream. */
 function parseTodos(value: unknown): TodoDraft[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1444,6 +1470,7 @@ function parseTodos(value: unknown): TodoDraft[] {
   return todos;
 }
 
+/** Daily self-drift: current activity plus small trait deltas; no-op signals are dropped. */
 function parseSelf(value: unknown): SelfDriftSignal | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1474,6 +1501,7 @@ function parseSelf(value: unknown): SelfDriftSignal | undefined {
   };
 }
 
+/** Per-group stance deltas; zero values are omitted so the merge downstream stays sparse. */
 function parseGroupStance(value: unknown): GroupStanceSignal | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1504,6 +1532,7 @@ function parseGroupStance(value: unknown): GroupStanceSignal | undefined {
   return Object.keys(signal).length > 0 ? signal : undefined;
 }
 
+/** Proactive intentions need a seed; at most three are kept per turn. */
 function parseIntentions(value: unknown): IntentionDraft[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1535,6 +1564,7 @@ function parseIntentions(value: unknown): IntentionDraft[] {
   return drafts.slice(0, 3);
 }
 
+/** Only an explicit close:true counts; summary and next opening stay optional. */
 function parseDialogue(value: unknown): DialogueDecision | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1552,6 +1582,7 @@ function parseDialogue(value: unknown): DialogueDecision | undefined {
   };
 }
 
+/** Mutual consent needs both message ids; a partial pair is treated as absent. */
 function parseConsent(value: unknown): TodoConsent | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1569,6 +1600,7 @@ function parseConsent(value: unknown): TodoConsent | undefined {
   };
 }
 
+/** Felt emotion with clamped intensity; the label falls back to calm. */
 function parseEmotion(value: unknown): MindEmotion | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1582,6 +1614,7 @@ function parseEmotion(value: unknown): MindEmotion | undefined {
   };
 }
 
+/** Long event START/END; START sanitizes the kind and caps wake keywords at eight. */
 function parseLongEvent(value: unknown): LongEventDraft | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -1619,6 +1652,7 @@ function parseLongEvent(value: unknown): LongEventDraft | undefined {
   };
 }
 
+/** Coerces a model-supplied timestamp to ISO form; unparseable values become null. */
 function parseIso(value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) {
     return null;
@@ -1627,16 +1661,19 @@ function parseIso(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/** Guards enum-like fields the model may invent, falling back to a safe member. */
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : fallback;
 }
 
+/** Character-budget cut used for tool results echoed back into the loop. */
 function truncate(value: string, max: number): string {
   return truncateText(value, max);
 }
 
+/** Trims and cuts to a character budget, defaulting to the prompt's 300-char norm. */
 function trim(value: string, max = 300): string {
   return truncate(value.trim(), max);
 }
@@ -1670,6 +1707,7 @@ function relationshipDetailLines(
       ];
 }
 
+/** One-line body read: each metric plus the behavior it implies, for the prompt. */
 function describeState(state: PersonaState): string {
   const energy =
     state.energy < 30 ? '没力气，回复更短' : state.energy >= 70 ? '有精神，愿意多聊' : '正常';
@@ -1701,6 +1739,7 @@ function describeState(state: PersonaState): string {
   ].join('；');
 }
 
+/** Mood word from valence, prefixed by arousal when it is extreme. */
 function moodLabel(state: PersonaState): string {
   const base =
     state.moodValence > 30
@@ -1717,6 +1756,7 @@ function moodLabel(state: PersonaState): string {
   return base;
 }
 
+/** Sleep block for the prompt; the nap/sleep suggestion is framed as advice, not an order. */
 function formatSleepBrief(brief: MindSleepBrief): string {
   const last = brief.lastSleep
     ? `上次睡觉「${brief.lastSleep.title}」实际 ${formatDuration(brief.lastSleep.minutes)}${
@@ -1751,6 +1791,7 @@ function formatSleepBrief(brief: MindSleepBrief): string {
     .join('\n');
 }
 
+/** Calendar day in the persona's zone; unparseable input degrades to a raw slice. */
 function formatLocalDay(iso: string, timeZone: string | null): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -1759,6 +1800,7 @@ function formatLocalDay(iso: string, timeZone: string | null): string {
   return localDateKey(date, timeZone);
 }
 
+/** Human duration in Chinese; sub-minute spans round up so "0 分钟" never appears. */
 function formatDuration(minutes: number): string {
   const rounded = Math.max(1, Math.round(minutes));
   const hours = Math.floor(rounded / 60);
@@ -1769,6 +1811,7 @@ function formatDuration(minutes: number): string {
   return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
 }
 
+/** Speech-habit block from card values; empty fields are omitted rather than shown blank. */
 function buildStyleSection(values: Record<string, unknown> | null): string {
   if (!values) {
     return '';
@@ -1776,7 +1819,9 @@ function buildStyleSection(values: Record<string, unknown> | null): string {
   const emojiLevel = readNumber(values['emoji_level'], -1);
   const typoLevel = readNumber(values['typo_level'], -1);
   const selfControl = personaValueText(values, 'self_control');
+  /** A card field as display text; empty means the line below skips it entirely. */
   const text = (key: string): string => personaValueText(values, key).trim();
+  /** A card list field with blank entries removed; an empty list drops its line. */
   const list = (key: string): string[] =>
     readStringArray(values[key])
       .map((item) => item.trim())
@@ -1829,6 +1874,7 @@ function buildStyleSection(values: Record<string, unknown> | null): string {
   return lines.filter(Boolean).join('\n');
 }
 
+/** Scene-writing guidance, used only when scene detail is not OFF. */
 function buildSceneStyleSection(values: Record<string, unknown> | null): string {
   if (!values) {
     return '';
@@ -1845,11 +1891,14 @@ function buildSceneStyleSection(values: Record<string, unknown> | null): string 
     .join('\n');
 }
 
+/** Card background marked as reference only, so the model does not recite it as a topic. */
 function buildPersonaCardSection(values: Record<string, unknown> | null): string {
   if (!values) {
     return '';
   }
+  /** A background field as display text; empty means the line below skips it. */
   const text = (key: string): string => personaValueText(values, key).trim();
+  /** A multi-value background field with blank entries removed. */
   const list = (key: string): string[] =>
     readStringArray(values[key])
       .map((item) => item.trim())
@@ -1879,6 +1928,7 @@ function buildPersonaCardSection(values: Record<string, unknown> | null): string
   return lines.filter(Boolean).join('\n');
 }
 
+/** Maps the card's 0-4 emoji level to a concrete usage rule. */
 function emojiStyle(level: number): string {
   if (level <= 0) return '不用 emoji';
   if (level <= 2) return '很少用，最多偶尔一个';
@@ -1886,6 +1936,7 @@ function emojiStyle(level: number): string {
   return '可以常用，但不要整段都是 emoji';
 }
 
+/** Maps the card's typo tolerance to wording the model can follow. */
 function typoStyle(level: number): string {
   if (level <= 0) return '不写错别字';
   if (level <= 2) return '偶尔一个手滑错字，不要刻意';
@@ -1893,6 +1944,7 @@ function typoStyle(level: number): string {
   return '错字较多，但不要影响理解';
 }
 
+/** Localized date line with weekday and time period; falls back to server time on a bad zone. */
 function formatNowLabel(date: Date, timeZone: string | null): string {
   try {
     const formatted = new Intl.DateTimeFormat('zh-CN', {
@@ -1919,6 +1971,7 @@ function formatNowLabel(date: Date, timeZone: string | null): string {
   }
 }
 
+/** Clock time in the given zone; invalid input is returned as-is instead of throwing. */
 function formatClockTime(iso: string, timeZone?: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -1935,6 +1988,7 @@ function formatClockTime(iso: string, timeZone?: string): string {
   }
 }
 
+/** Minimal do-not-speak plan, used whenever the model output cannot be trusted. */
 function silencePlan(reason: string): ActionPlan {
   return {
     engage: false,
@@ -1972,6 +2026,11 @@ const CLOSURE_REASON_LABEL: Record<string, string> = {
   natural: '自然收尾',
 };
 
+/**
+ * Renders the last closure for the prompt. Records older than a week are
+ * dropped; one reopened within ten minutes is flagged so the model does not
+ * repeat the previous sign-off.
+ */
 export function formatClosureRecord(
   record?: ConversationClosureRecord | null,
   now = Date.now(),
@@ -2000,6 +2059,7 @@ export function formatClosureRecord(
     : `${line}这段已经收过尾；除非有自然的新由头，不要为了续上旧话题硬找话。`;
 }
 
+/** Coarse "how long ago" wording; anything past two days switches to days. */
 function closureAgo(at: number, now: number): string {
   const minutes = Math.max(0, Math.round((now - at) / 60_000));
   if (minutes < 1) return '刚刚';
@@ -2009,6 +2069,7 @@ function closureAgo(at: number, now: number): string {
   return `${Math.round(hours / 24)} 天前`;
 }
 
+/** Conversation-rhythm block; adds an explicit "no need to reply" line when interest is low. */
 function formatConversationRead(read: ConversationRead): string {
   const { rhythm, signals } = read;
   const next = rhythmAdvice(read);
@@ -2030,16 +2091,19 @@ function formatConversationRead(read: ConversationRead): string {
   return lines.filter(Boolean).join('\n');
 }
 
+/** Three-bucket wording for the topic-closure score. */
 function closureWord(value: number): string {
   if (value >= 80) return '已经收住';
   if (value >= 55) return '在收';
   return '还开着';
 }
 
+/** Wording for the fatigue score; only the dense half needs a label. */
 function densityWord(value: number): string {
   return value >= 50 ? '偏密' : '正常';
 }
 
+/** Describes burst shape so the model knows who spoke last and how much. */
 function describeRhythm(rhythm: ConversationRead['rhythm']): string {
   const parts: string[] = [];
   if (rhythm.peerBurst > 0) {
@@ -2057,6 +2121,7 @@ function describeRhythm(rhythm: ConversationRead['rhythm']): string {
   return parts.join('；');
 }
 
+/** First matching rhythm rule wins: open question, own last word, then burst shape. */
 function rhythmAdvice(read: ConversationRead): string {
   const { rhythm, signals, verdict, interest } = read;
   if (signals.awaitingTheirAnswer) {

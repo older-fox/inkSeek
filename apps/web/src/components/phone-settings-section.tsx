@@ -35,6 +35,10 @@ interface PhoneSettingsSectionProps {
   phone: PhoneSettings;
 }
 
+/**
+ * Wireless ADB console: lists connected devices, pairs a new phone, and
+ * disconnects one; all actions write back into the shared settings query.
+ */
 export function PhoneSettingsSection({ phone }: PhoneSettingsSectionProps) {
   const queryClient = useQueryClient();
   const connectForm = useForm<ConnectValues>({
@@ -46,6 +50,7 @@ export function PhoneSettingsSection({ phone }: PhoneSettingsSectionProps) {
     defaultValues: { address: '', code: '' },
   });
 
+  /** Patches only the phone slice of the cached settings overview, so no refetch is needed; a no-op on an empty cache. */
   const applyPhone = (next: PhoneSettings) => {
     queryClient.setQueryData<SettingsOverview>(settingsQuery.queryKey, (current) =>
       current ? { ...current, phone: next } : current,
@@ -263,6 +268,7 @@ export function PhoneSettingsSection({ phone }: PhoneSettingsSectionProps) {
   );
 }
 
+/** One connected device line with its state badge and disconnect action. */
 function DeviceRow({
   device,
   pending,

@@ -431,6 +431,7 @@ export function relationshipAttributePatch(
 
 type NormalizedAttribute = { ok: true; value: unknown } | { ok: false; reason: string };
 
+/** Coerces a raw value to its declared kind, clamping scores; rejections carry a reason. */
 function normalizeAttribute(
   attribute: RelationshipAttributeMeta,
   raw: unknown,
@@ -491,6 +492,7 @@ function normalizeAttribute(
   return { ok: true, value: raw.slice(0, 4000) };
 }
 
+/** Writes one typed column, normalizing list shapes and the SCENE fallback. */
 function writeField(
   fields: RelationshipAttributePatch['fields'],
   field: RelationshipFieldKey,
@@ -517,6 +519,7 @@ function writeField(
   }
 }
 
+/** Reads the stored value behind an attribute; unset extras read as null. */
 function readAttribute(
   attribute: RelationshipAttributeMeta,
   record: PersonaRelationshipRecord,
@@ -545,6 +548,7 @@ function readAttribute(
   }
 }
 
+/** Accepts numeric strings as scores; anything unparseable reads as null. */
 function readNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -556,6 +560,10 @@ function readNumber(value: unknown): number | null {
   return null;
 }
 
+/**
+ * Accepts arrays or 、/comma/newline text; trims entries, drops blanks and caps
+ * the result at 50 items of 400 chars.
+ */
 function readTextList(value: unknown): string[] | null {
   const items = Array.isArray(value)
     ? value
@@ -571,12 +579,14 @@ function readTextList(value: unknown): string[] | null {
     .slice(0, 50);
 }
 
+/** Only strings survive; non-array input yields an empty list. */
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
 }
 
+/** Safe object view of an unknown JSON column; arrays and primitives yield {}. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

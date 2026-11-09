@@ -14,6 +14,7 @@ import { BilibiliAuthService } from '../config/bilibili-auth.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 
+/** Promise wrapper around child_process.execFile for the ffmpeg calls below. */
 const execFileAsync = promisify(execFile);
 
 const VIDEO_ROOT = fileURLToPath(new URL('../../../../data/videos/', import.meta.url));
@@ -139,6 +140,7 @@ export class VideoInsightService {
     private readonly bilibili: BilibiliAuthService,
   ) {}
 
+  /** Dedupes concurrent watches of the same video id so only one pipeline runs. */
   async watch(input: string, options: VideoWatchOptions = {}): Promise<VideoWatchResult> {
     const target = await this.resolveTarget(input);
     const key = `bilibili:${cacheVideoId(target.bvid, target.page)}`;
@@ -190,6 +192,11 @@ export class VideoInsightService {
     };
   }
 
+  /**
+   * Cache-first pipeline: serves fresh rows (backfilling transcripts or
+   * re-focusing stored frames when possible), otherwise re-fetches metadata,
+   * subtitles, comments and frames, then upserts the insight row.
+   */
   private async watchResolved(
     target: { bvid: string; aid?: number; page: number; url: string },
     options: VideoWatchOptions,
@@ -440,6 +447,7 @@ export class VideoInsightService {
     return { row: updated, result: toResult(updated, true) };
   }
 
+  /** Lists the frame sheets still on disk, rejecting dirs that resolve outside the video root. */
   private async readyFrameFiles(dir: string): Promise<string[]> {
     const root = resolve(VIDEO_ROOT, dir);
     if (!root.startsWith(resolve(VIDEO_ROOT))) {
@@ -459,6 +467,10 @@ export class VideoInsightService {
     return found;
   }
 
+  /**
+   * Asks the vision model for a summary using text plus up to three frame
+   * images; retries text-only on failure and ends with a local digest.
+   */
   private async describe(input: {
     title: string;
     author: string;
@@ -522,6 +534,10 @@ export class VideoInsightService {
     }
   }
 
+  /**
+   * Normalizes links, b23.tv short urls and BV/av ids into a bvid + page
+   * target; short links are expanded via redirect, av ids via the view api.
+   */
   private async resolveTarget(
     input: string,
   ): Promise<{ bvid: string; aid?: number; page: number; url: string }> {
@@ -570,11 +586,16 @@ export class VideoInsightService {
     throw new Error('无法识别视频：请传 bilibili.com/video/BV…、b23.tv/… 或 BV/av 号');
   }
 
+  /** Fetches video metadata by bvid, preferring an explicit aid when resolved. */
   private async fetchView(target: { bvid: string; aid?: number; page: number }): Promise<BiliView> {
     const query = target.aid ? `aid=${target.aid}` : `bvid=${target.bvid}`;
     return this.api<BiliView>(`/x/web-interface/view?${query}`);
   }
 
+  /**
+   * Returns subtitle text joined by newlines (possibly AI-generated), capped
+   * at MAX_TRANSCRIPT; empty string when no readable track exists.
+   */
   private async fetchSubtitles(bvid: string, cid: number): Promise<string> {
     // AI/auto subtitles are only exposed to logged-in requests, and the
     // signed endpoint is the one that returns them; plain /x/player/v2 is the
@@ -615,6 +636,7 @@ export class VideoInsightService {
       .slice(0, MAX_TRANSCRIPT);
   }
 
+  /** Calls the WBI-signed player endpoint, the only one exposing AI subtitles. */
   private async fetchPlayerSubtitles(
     bvid: string,
     cid: number,
@@ -625,6 +647,7 @@ export class VideoInsightService {
     return this.api(`/x/player/wbi/v2?${query}`, { cookie });
   }
 
+  /** Derives the WBI mixin key from nav image names, cached in memory for WBI_TTL_MS. */
   private async wbiMixinKey(cookie: string): Promise<string> {
     if (this.wbi && Date.now() - this.wbi.at < WBI_TTL_MS) {
       return this.wbi.key;
@@ -646,6 +669,7 @@ export class VideoInsightService {
     return key;
   }
 
+  /** Flattens the top hot replies into one short text block for the prompt. */
   private async fetchComments(aid: number): Promise<string> {
     const data = await this.api<{ replies?: BiliReply[] }>(
       `/x/v2/reply?type=1&oid=${aid}&sort=2&ps=20`,
@@ -658,6 +682,11 @@ export class VideoInsightService {
       .slice(0, MAX_COMMENTS);
   }
 
+  /**
+   * Downloads the stream for short videos and tiles ffmpeg-extracted frames
+   * into one grid sheet; fails when no single-file url exists or the size cap
+   * is exceeded.
+   */
   private async framesFromVideo(
     bvid: string,
     cid: number,
@@ -731,6 +760,7 @@ export class VideoInsightService {
     }
   }
 
+  /** For long videos, saves Bilibili's storyboard snapshot sheets instead of downloading. */
   private async framesFromStoryboard(
     bvid: string,
     cid: number,
@@ -758,6 +788,7 @@ export class VideoInsightService {
     return { dir: relativeToRoot(dir), frameCount };
   }
 
+  /** GETs a Bilibili JSON endpoint with browser-like headers and unwraps code/data. */
   private async api<T>(path: string, options: { cookie?: string | null } = {}): Promise<T> {
     const headers: Record<string, string> = { 'user-agent': USER_AGENT, referer: REFERER };
     if (options.cookie) {
@@ -778,6 +809,7 @@ export class VideoInsightService {
   }
 }
 
+/** Assembles the analysis material and output rules, framing text-only cases honestly. */
 function buildPrompt(input: {
   title: string;
   author: string;
@@ -806,8 +838,10 @@ function buildPrompt(input: {
   return parts.filter(Boolean).join('\n');
 }
 
+/** Prefers human zh subtitles, then AI-zh, then any zh track, else the first usable one. */
 function pickSubtitle(subtitles: BiliSubtitle[]): BiliSubtitle | undefined {
   const usable = subtitles.filter((item) => Boolean(item.subtitle_url));
+  /** Track language as Bilibili reports it; machine tracks prefix it with "ai-". */
   const language = (item: BiliSubtitle) => item.lan ?? '';
   return (
     usable.find((item) => /^zh/i.test(language(item)) && !/^ai-/i.test(language(item))) ??
@@ -836,6 +870,7 @@ function signWbiQuery(params: Record<string, string | number>, mixinKey: string)
   return `${query}&w_rid=${wRid}`;
 }
 
+/** Splits model output into a summary paragraph plus up to five bullet key points. */
 function parseInsight(
   text: string,
   title: string,
@@ -845,6 +880,7 @@ function parseInsight(
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  /** Bullet or numbered lines are the ones worth lifting as key points. */
   const isPoint = (line: string) => /^([-•*]|\d+[.、])\s*/.test(line);
   const points = lines
     .filter(isPoint)
@@ -861,6 +897,7 @@ function parseInsight(
   return { summary: summary || points[0] || title, keyPoints: points };
 }
 
+/** Local digest from title/description/comments when no model result is available. */
 function fallbackInsight(input: {
   title: string;
   description: string;
@@ -878,6 +915,7 @@ function fallbackInsight(input: {
   return { summary: summary.slice(0, 800), keyPoints };
 }
 
+/** Projects a stored row into the trimmed result shape, flagging cache hits. */
 function toResult(
   row: {
     platform: string;
@@ -908,18 +946,22 @@ function toResult(
   };
 }
 
+/** On-disk directory holding the cached frames for one video key. */
 function videoDir(videoKey: string): string {
   return join(VIDEO_ROOT, 'bilibili', videoKey);
 }
 
+/** Multi-page videos are cached per page through a `_pN` id suffix. */
 function cacheVideoId(bvid: string, page: number): string {
   return page > 1 ? `${bvid}_p${page}` : bvid;
 }
 
+/** Stores frame dirs relative to the video root with forward slashes. */
 function relativeToRoot(path: string): string {
   return path.slice(resolve(VIDEO_ROOT).length + 1).replaceAll('\\', '/');
 }
 
+/** Adds https to bare or protocol-relative urls before fetching them. */
 function normalizeUrl(value: string): string {
   const text = value.trim();
   if (text.startsWith('//')) {
@@ -928,10 +970,12 @@ function normalizeUrl(value: string): string {
   return /^https?:\/\//i.test(text) ? text : `https://${text}`;
 }
 
+/** Bilibili serves protocol-relative media urls; upgrade them to https. */
 function normalizeMediaUrl(value: string): string {
   return value.startsWith('//') ? `https:${value}` : value;
 }
 
+/** Evenly spaced timestamps, trimming 4% off each end to skip intro and outro. */
 function sampleTimestamps(durationSec: number, count: number): number[] {
   const safeDuration = Math.max(durationSec, 1);
   const start = safeDuration * 0.04;
@@ -942,6 +986,7 @@ function sampleTimestamps(durationSec: number, count: number): number[] {
   );
 }
 
+/** Formats seconds as short Chinese 分/秒 text for the prompt. */
 function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(total / 60);
@@ -949,6 +994,10 @@ function formatDuration(seconds: number): string {
   return minutes > 0 ? `${minutes} 分 ${rest} 秒` : `${rest} 秒`;
 }
 
+/**
+ * Streams a media url to disk enforcing the byte cap mid-stream, so an
+ * absent or underestimated content-length cannot blow past maxBytes.
+ */
 async function download(url: string, dest: string, maxBytes: number): Promise<number> {
   await mkdir(dirname(dest), { recursive: true });
   const response = await fetch(url, {
@@ -964,6 +1013,7 @@ async function download(url: string, dest: string, maxBytes: number): Promise<nu
   }
   let size = 0;
   const limiter = new Transform({
+    /** Counts bytes while streaming so an oversized video fails before hitting disk. */
     transform(chunk: Buffer, _encoding, callback) {
       size += chunk.length;
       if (size > maxBytes) {
@@ -981,11 +1031,13 @@ async function download(url: string, dest: string, maxBytes: number): Promise<nu
   return size;
 }
 
+/** Bilibili uses placeholder dashes for empty descriptions; normalize them away. */
 function cleanDescription(value: string | undefined): string {
   const text = value?.trim() ?? '';
   return text === '-' || text === '—' ? '' : text;
 }
 
+/** Best-effort error text for debug logging. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

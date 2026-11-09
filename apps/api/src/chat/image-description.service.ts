@@ -42,6 +42,7 @@ export class ImageDescriptionService {
     private readonly llm: LlmService,
   ) {}
 
+  /** Describes the image behind a reference, reusing the stored description unless forced. */
   async describe(
     input: ImageDescriptionInput & { source?: string },
   ): Promise<ImageDescriptionResult> {
@@ -126,6 +127,7 @@ export class ImageDescriptionService {
   }
 }
 
+/** Splits a data: image URL into mime type and raw bytes; anything else is rejected. */
 function parseImageDataUrl(dataUrl: string): {
   mimeType: string;
   base64: string;
@@ -142,11 +144,13 @@ function parseImageDataUrl(dataUrl: string): {
   };
 }
 
+/** Treats blank provider/model overrides as "use the configured default". */
 function emptyToNull(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? '';
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** Counts code points rather than UTF-16 units, so emoji are never split mid-character. */
 function truncate(value: string, length: number): string {
   const chars = Array.from(value);
   return chars.length > length ? `${chars.slice(0, length).join('')}…` : value;

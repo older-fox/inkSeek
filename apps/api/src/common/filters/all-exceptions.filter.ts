@@ -18,6 +18,10 @@ interface HttpErrorPayload {
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
+  /**
+   * Normalizes every failure into `{ error: { code, message, fieldErrors? } }`;
+   * unexpected errors are logged with their stack and hidden behind a generic message.
+   */
   catch(exception: unknown, host: ArgumentsHost): void {
     const reply = host.switchToHttp().getResponse<FastifyReply>();
 

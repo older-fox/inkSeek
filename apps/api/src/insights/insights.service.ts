@@ -92,6 +92,7 @@ export class InsightsService {
     private readonly llm: LlmService,
   ) {}
 
+  /** Runs every detector for one channel and returns the highest-signal cards. */
   async getFeed(input: MindInsightQueryInput): Promise<MindInsightFeed> {
     const channel = await this.prisma.chatChannel.findUnique({
       where: { id: input.channelId },
@@ -177,6 +178,7 @@ export class InsightsService {
     };
   }
 
+  /** Sums run usage plus unattributed vision calls, grouped by trigger. */
   private async tokenUsage(
     channelId: string,
     personaId: string,
@@ -241,6 +243,7 @@ export class InsightsService {
     };
   }
 
+  /** Answers from one card's evidence; a failed or empty completion falls back to a template. */
   async ask(input: MindInsightAskInput): Promise<MindInsightAskResult> {
     const feed = await this.getFeed({ channelId: input.channelId, days: input.days });
     const card = feed.cards.find((item) => item.id === input.cardId);
@@ -298,6 +301,7 @@ export class InsightsService {
     };
   }
 
+  /** Flags contacts whose net relationship change is large enough to be worth a look. */
   private async relationshipShifts(
     channel: ChatChannel,
     persona: ChatChannelPersona,
@@ -377,6 +381,7 @@ export class InsightsService {
       }
       const relationship = relationshipByContact.get(contactId) as
         Record<string, unknown> | undefined;
+      /** Live column first; the logged value is only a fallback for deleted rows. */
       const currentOf = (field: string): number => {
         const value = relationship?.[field];
         if (typeof value === 'number') {
@@ -385,6 +390,7 @@ export class InsightsService {
         const latest = entries.find((entry) => entry.field === field)?.afterValue;
         return typeof latest === 'number' ? latest : 0;
       };
+      /** Value before this window; without a logged baseline, undo the summed deltas. */
       const previousOf = (field: string): number =>
         fieldStarts.get(field) ?? currentOf(field) - (fieldTotals.get(field) ?? 0);
       // Use the actual value change, not the sum of logged deltas: capped
@@ -484,6 +490,7 @@ export class InsightsService {
     return candidates.sort((left, right) => right.score - left.score).slice(0, MAX_PER_KIND);
   }
 
+  /** Compares message volume against the previous window and requires real silence. */
   private async conversationCooling(
     channel: ChatChannel,
     persona: ChatChannelPersona,
@@ -597,6 +604,7 @@ export class InsightsService {
     return candidates.sort((left, right) => right.score - left.score).slice(0, MAX_PER_KIND);
   }
 
+  /** Groups recently reinforced style notes by dimension to surface new habits. */
   private async styleDrifts(
     persona: ChatChannelPersona,
     currentStart: Date,
@@ -683,6 +691,7 @@ export class InsightsService {
   }
 }
 
+/** Renders card metrics as a single prompt line, including prior values when known. */
 function formatMetrics(metrics: readonly MindInsightMetric[]): string {
   if (metrics.length === 0) {
     return '没有额外指标';
@@ -695,6 +704,7 @@ function formatMetrics(metrics: readonly MindInsightMetric[]): string {
     .join('；');
 }
 
+/** Renders evidence as a bullet list so the model can cite it verbatim. */
 function formatEvidence(evidence: readonly MindInsightEvidence[]): string {
   if (evidence.length === 0) {
     return '没有证据条目';
@@ -704,6 +714,7 @@ function formatEvidence(evidence: readonly MindInsightEvidence[]): string {
     .join('\n');
 }
 
+/** One-line token summary, including the per-trigger split. */
 function formatUsage(usage: MindInsightFeed['usage']): string {
   if (usage.runs === 0) {
     return '窗口内没有心智运行记录';
@@ -716,6 +727,7 @@ function formatUsage(usage: MindInsightFeed['usage']): string {
   }`;
 }
 
+/** Deterministic answer used when the model is unavailable. */
 function fallbackAnswer(card: MindInsightCard): string {
   const basis = card.evidence
     .slice(0, 2)
@@ -724,18 +736,22 @@ function fallbackAnswer(card: MindInsightCard): string {
   return `现有数据里能确认的是：${card.summary}${basis ? ` 依据：${basis}。` : ''}`;
 }
 
+/** Short month-day label for evidence timestamps. */
 function formatDay(value: Date): string {
   return DAY_FORMAT.format(value);
 }
 
+/** Always shows the sign so readers can tell direction at a glance. */
 function signed(value: number): string {
   return value >= 0 ? `+${value}` : String(value);
 }
 
+/** Trims first so leading whitespace does not eat the character budget. */
 function truncate(value: string, max: number): string {
   return truncateText(value.trim(), max);
 }
 
+/** Rounds, then clamps, so scores stay inside the advertised confidence range. */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }

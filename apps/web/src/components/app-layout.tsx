@@ -7,6 +7,10 @@ import { api } from '@/lib/api';
 import { meQuery } from '@/lib/queries';
 import { routeSection } from '@/lib/route-section';
 
+/**
+ * Authenticated shell wrapper: gates on the current user, wires logout, and
+ * fades page content in on route changes so each section animates on entry.
+ */
 export function AppLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();

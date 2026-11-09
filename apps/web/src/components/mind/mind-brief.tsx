@@ -24,6 +24,10 @@ const METRICS = [
   { key: 'grooming', label: '整洁' },
 ] as const;
 
+/**
+ * Overview card for the selected persona: current mood, body metrics, the
+ * active long event (with an optional end action) and recent wake history.
+ */
 export function MindBrief({
   name,
   identity,
@@ -239,6 +243,10 @@ export function MindBrief({
   );
 }
 
+/**
+ * Status chip for the active focus: phone use or replying, with the current
+ * step and pause state.
+ */
 function FocusChip({ focus }: { focus: PersonaFocusRecord }) {
   const state =
     focus.state && typeof focus.state === 'object' && !Array.isArray(focus.state)
@@ -274,6 +282,7 @@ function FocusChip({ focus }: { focus: PersonaFocusRecord }) {
   );
 }
 
+/** Human-readable elapsed time since an ISO timestamp, blank when under a minute. */
 function activityDuration(iso: string | null): string {
   if (!iso) {
     return '';

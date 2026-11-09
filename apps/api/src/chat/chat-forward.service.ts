@@ -151,6 +151,7 @@ export class ChatForwardService {
     };
   }
 
+  /** Builds one archived node within the shared budget; null once the node budget is spent. */
   private async buildNode(
     client: OneBotRequester,
     raw: OneBotForwardNode,
@@ -185,6 +186,7 @@ export class ChatForwardService {
     };
   }
 
+  /** Saves image/voice segments under the card's media budget, keeping their segment positions. */
   private async storeNodeMedia(
     segments: readonly OneBotSegment[],
     client: OneBotRequester,
@@ -226,6 +228,7 @@ export class ChatForwardService {
     return { images, voices };
   }
 
+  /** Expands nested forwards up to MAX_FORWARD_DEPTH, using visited ids to break cycles. */
   private async expandNested(
     client: OneBotRequester,
     segments: readonly OneBotSegment[],
@@ -293,6 +296,7 @@ export class ChatForwardService {
     };
   }
 
+  /** Fetches one forward level via get_forward_msg; any failure marks the card truncated. */
   private async fetchLevel(
     client: OneBotRequester,
     forwardId: string,
@@ -334,12 +338,14 @@ export class ChatForwardService {
     }
   }
 
+  /** Keeps the first reason a card is incomplete; later reasons do not overwrite it. */
   private noteTruncated(budget: ExpansionBudget, code: string): void {
     budget.truncated = true;
     budget.errorCode ??= code;
   }
 }
 
+/** One-line placeholder shown where the card sits in the transcript. */
 export function forwardSummaryText(forward: ForwardWrite): string {
   if (forward.status === 'FAILED') {
     return '[合并转发] 聊天记录无法展开';
@@ -404,6 +410,7 @@ export interface ForwardDetailRecord {
   }>;
 }
 
+/** Rebuilds the node tree from flat rows and normalizes the stored status for the client. */
 export function toForwardDetail(record: ForwardDetailRecord): ChatForwardDetail {
   const parentIds = new Set(
     record.nodes
@@ -446,6 +453,7 @@ export function toForwardDetail(record: ForwardDetailRecord): ChatForwardDetail 
   };
 }
 
+/** Maps a stored node to the client shape, rendering ordered parts from its segments. */
 function toNodeSummary(
   node: ForwardDetailRecord['nodes'][number],
   hasChildren: boolean,
@@ -485,6 +493,7 @@ function toNodeSummary(
   };
 }
 
+/** Upstream forward ids arrive as numbers or strings; anything else counts as missing. */
 function readForwardId(value: unknown): string | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return String(value);
@@ -492,12 +501,14 @@ function readForwardId(value: unknown): string | null {
   return typeof value === 'string' ? externalIdOf(value) : null;
 }
 
+/** Keeps only object entries, since NapCat occasionally injects nulls into the list. */
 function readNodeArray(value: unknown): OneBotForwardNode[] {
   return Array.isArray(value)
     ? value.filter((item): item is OneBotForwardNode => Boolean(item) && typeof item === 'object')
     : [];
 }
 
+/** Reconciles the two upstream node shapes into sender identity, timestamp and segments. */
 function normalizeNode(raw: OneBotForwardNode): NormalizedNode {
   const data = raw.data && typeof raw.data === 'object' ? raw.data : {};
   const message = data.message ?? raw.message ?? data.content;
@@ -520,6 +531,7 @@ function normalizeNode(raw: OneBotForwardNode): NormalizedNode {
   };
 }
 
+/** First non-blank candidate, used to pick a nickname from several upstream fields. */
 function firstText(...values: Array<string | undefined>): string | null {
   for (const value of values) {
     const trimmed = value?.trim();
@@ -530,6 +542,7 @@ function firstText(...values: Array<string | undefined>): string | null {
   return null;
 }
 
+/** Accepts epoch seconds as a number or string, or a parseable date; null when unusable. */
 function readSentAt(value: unknown): Date | null {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return new Date(value * 1000);
@@ -547,6 +560,7 @@ function readSentAt(value: unknown): Date | null {
   return null;
 }
 
+/** Card title from the first few distinct sender names, mirroring QQ's own wording. */
 function deriveTitle(nodes: ReadonlyArray<{ senderName: string }>): string {
   const names = Array.from(new Set(nodes.map((node) => node.senderName.trim())))
     .filter((name) => name.length > 0)
@@ -573,6 +587,7 @@ function stripNestedForwardContent(segments: readonly OneBotSegment[]): OneBotSe
   });
 }
 
+/** Deepest level in the persisted tree, counting the root level as one. */
 function maxDepthOf(nodes: readonly ForwardNodeWrite[]): number {
   return nodes.reduce(
     (max, node) => Math.max(max, node.depth, maxDepthOf(node.children)),

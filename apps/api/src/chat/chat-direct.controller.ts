@@ -19,6 +19,7 @@ import { ChatDirectService } from './chat-direct.service.js';
 export class ChatDirectController {
   constructor(private readonly direct: ChatDirectService) {}
 
+  /** Idempotently opens (or reuses) the direct conversation backing a web test chat. */
   @Post('conversations')
   @ApiOperation({ summary: '打开一条绕过 QQ 的直连会话' })
   ensure(
@@ -28,6 +29,7 @@ export class ChatDirectController {
     return this.direct.ensure(input);
   }
 
+  /** Feeds a user message into the agent pipeline as if it had arrived from QQ. */
   @Post('conversations/:id/messages')
   @HttpCode(201)
   @ApiOperation({ summary: '以指定身份直接对人格说话（不经过 QQ）' })

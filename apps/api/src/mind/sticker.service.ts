@@ -28,6 +28,7 @@ export class StickerService {
     private readonly llm: LlmService,
   ) {}
 
+  /** Enabled stickers for one channel, most recently used first, capped at 300. */
   async list(channelId: string): Promise<StickerRecord[]> {
     const rows = await this.prisma.stickerAsset.findMany({
       where: { channelId, enabled: true },
@@ -37,6 +38,11 @@ export class StickerService {
     return rows.map(toRecord);
   }
 
+  /**
+   * Copies a received image into the channel sticker library keyed by sha256
+   * (re-imports re-enable and refresh metadata instead of duplicating), with
+   * an optional vision description when none is stored yet.
+   */
   async importFromReceived(input: StickerCollectInput, channelId: string): Promise<StickerRecord> {
     const found = await this.findReceivedMedia(input.mediaId, input.imageUrl, channelId);
     if (!found) {
@@ -96,6 +102,7 @@ export class StickerService {
     return toRecord(row);
   }
 
+  /** Locates the source media by channel image url or media id, across channels for urls. */
   private async findReceivedMedia(
     mediaId: string | undefined,
     imageUrl: string | undefined,
@@ -127,6 +134,10 @@ export class StickerService {
     return null;
   }
 
+  /**
+   * Ranks enabled stickers by cosine similarity of a deterministic local
+   * embedding; the 500-row scan cap bounds per-channel library growth.
+   */
   async search(query: string, channelId: string, limit = 5): Promise<StickerRecord[]> {
     const rows = await this.prisma.stickerAsset.findMany({
       where: { channelId, enabled: true },
@@ -181,6 +192,7 @@ export class StickerService {
     return toRecord(updated);
   }
 
+  /** Base64 data url for sending; rejects missing, illegal-path or oversized files. */
   async toDataUrl(id: string, channelId: string): Promise<string> {
     const row = await this.prisma.stickerAsset.findFirst({ where: { id, channelId } });
     if (!row) {
@@ -207,6 +219,7 @@ export class StickerService {
     return row?.description.trim() ?? '';
   }
 
+  /** Bumps usage stats so recent picks surface first in list ordering. */
   async recordUsage(id: string, channelId: string): Promise<void> {
     await this.prisma.stickerAsset.updateMany({
       where: { id, channelId },
@@ -227,6 +240,7 @@ export class StickerService {
     }
   }
 
+  /** One-line vision caption for a sticker, optionally steered by a focus question. */
   private async describeImage(
     buffer: Buffer,
     mimeType: string,
@@ -249,6 +263,7 @@ export class StickerService {
   }
 }
 
+/** True when a file is present and readable. */
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -258,6 +273,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** Extension-to-mime map for stored stickers; unknown extensions default to jpeg. */
 function mimeForExtension(extension: string): string {
   switch (extension) {
     case '.png':
@@ -273,12 +289,14 @@ function mimeForExtension(extension: string): string {
   }
 }
 
+/** Absolute path only when filePath matches the sha-named layout; else null (fail closed). */
 function stickerPath(row: { channelId: string; filePath: string }): string | null {
   return STICKER_PATH_PATTERN.test(row.filePath)
     ? channelMediaPath(row.channelId, 'stickers', row.filePath)
     : null;
 }
 
+/** Projects a db row into the shared record shape with its served url. */
 function toRecord(row: StickerAsset): StickerRecord {
   return {
     id: row.id,

@@ -34,6 +34,10 @@ export class LlmCallLogService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Persists one call and then trims the tail: kept rows lose their raw text,
+   * rows nobody can attribute are deleted. Logging failures never break the caller.
+   */
   async record(input: LlmCallLogInput): Promise<void> {
     try {
       await this.prisma.llmCallLog.create({

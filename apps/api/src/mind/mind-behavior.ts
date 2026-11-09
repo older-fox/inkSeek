@@ -265,12 +265,14 @@ const STANCE_BEHAVIOR: Record<StanceField, (value: number) => string> = {
         : '不太怕被围观，敢在群里直说',
 };
 
+/** Coarse low/mid/high bucket, leaving a dead zone around the middle so mild values stay vague. */
 function band(value: number): 'low' | 'mid' | 'high' {
   if (value >= 65) return 'high';
   if (value < 35) return 'low';
   return 'mid';
 }
 
+/** Accepts numbers or numeric strings from loose persona JSON; anything else means "unset". */
 function readNumeric(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.round(value);
@@ -282,10 +284,12 @@ function readNumeric(value: unknown): number | null {
   return null;
 }
 
+/** Narrows arbitrary keys to the driftable self-trait set. */
 export function isSelfTraitKey(key: string): key is SelfTraitKey {
   return (SELF_TRAIT_KEYS as readonly string[]).includes(key);
 }
 
+/** Missing traits stay null so callers omit them rather than inventing a neutral 50. */
 export function selfTraitValue(
   values: Record<string, unknown> | null | undefined,
   key: SelfTraitKey,
@@ -293,6 +297,7 @@ export function selfTraitValue(
   return readNumeric(values?.[key]);
 }
 
+/** One prompt line pairing the trait label and number with its behavioral band. */
 export function describeTrait(key: SelfTraitKey, value: number): string {
   const definition = TRAITS[key];
   const level = band(value);
@@ -319,6 +324,7 @@ export function selfTraitLines(
 
 export type RelationshipNumbers = Record<RelationDimension, number>;
 
+/** One prompt line pairing a relation dimension with its behavioral reading. */
 export function describeRelationDimension(key: RelationDimension, value: number): string {
   return `${RELATION_LABELS[key]} ${value}：${RELATION_BEHAVIOR[key](value)}`;
 }
@@ -349,6 +355,7 @@ export function relationshipLines(
     .map((item) => describeRelationDimension(item.key, item.value));
 }
 
+/** Group stance is sparse by design, so near-zero values are dropped instead of read as neutral. */
 export function stanceLines(
   stance: Partial<Record<StanceField, number>> | null | undefined,
   limit = 3,
@@ -371,6 +378,7 @@ export function stanceLines(
     );
 }
 
+/** Finite-number guard that also narrows `undefined` away. */
 function typeOfNumber(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }

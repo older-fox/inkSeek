@@ -15,6 +15,7 @@ export class MindClosureService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Closure record for the conversation, or null if it was never closed. */
   async load(conversationId: string): Promise<ConversationClosureRecord | null> {
     const row = await this.prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -59,6 +60,7 @@ export class MindClosureService {
     });
   }
 
+  /** Best-effort write: text is clamped and write errors are logged, not thrown. */
   async recordClose(
     conversationId: string,
     input: { reason?: string | null; summary?: string | null; nextOpening?: string | null },
@@ -83,6 +85,7 @@ export class MindClosureService {
   }
 }
 
+/** Trims input and clamps it to max; blank input becomes null so columns stay empty. */
 function clean(value: string | null | undefined, max: number): string | null {
   const text = value?.trim() ?? '';
   return text ? text.slice(0, max) : null;

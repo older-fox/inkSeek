@@ -55,6 +55,11 @@ export const ADVANCED_FIELD_COUNT = ADVANCED_GROUPS.reduce(
   0,
 );
 
+/**
+ * Collapsible groups of the persona's fixed trait fields (address forms,
+ * boundaries, body preferences); each group can be restored to recommended
+ * defaults, and every edit is reported upward for the draft to collect.
+ */
 export function PersonaAdvancedPanel({
   value,
   onChange,
@@ -64,10 +69,12 @@ export function PersonaAdvancedPanel({
 }) {
   const defaults = createDefaultPersonaAdvanced();
 
+  /** Emits one onChange per key so a group can be rolled back to recommended defaults. */
   const restore = (keys: readonly AdvancedKey[]) => {
     keys.forEach((key) => onChange(key, defaults[key]));
   };
 
+  /** Markup for one group id; an unknown id renders nothing so groups stay independently collapsible. */
   const renderFields = (groupId: string) => {
     switch (groupId) {
       case 'voice':

@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { THEMES, getThemeDefinition, useTheme } from '@/lib/theme';
 
+/**
+ * Palette dropdown that persists the chosen color theme and closes itself on
+ * outside pointer-down or Escape.
+ */
 export function ThemeSwitcher({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -15,12 +19,14 @@ export function ThemeSwitcher({ className }: { className?: string }) {
       return;
     }
 
+    /** Closes the menu when a press lands outside the switcher root, leaving the theme unchanged. */
     const handlePointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false);
       }
     };
 
+    /** Escape dismisses the menu without switching away from the active theme. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpen(false);

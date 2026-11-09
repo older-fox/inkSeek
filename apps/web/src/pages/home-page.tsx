@@ -157,13 +157,16 @@ const SEVERITY_META: Record<
   },
 };
 
+/** Clock time for event rows. */
 function clock(value: string): string {
   return timeFormatter.format(new Date(value));
 }
 
+/** Relative date heading for event groups: today, yesterday, or month-day. */
 function dayLabel(value: string): string {
   const date = new Date(value);
   const now = new Date();
+  /** Compares calendar dates only, ignoring the time of day, so grouping stays correct across midnight. */
   const sameDay = (left: Date, right: Date) =>
     left.getFullYear() === right.getFullYear() &&
     left.getMonth() === right.getMonth() &&
@@ -175,6 +178,7 @@ function dayLabel(value: string): string {
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
 }
 
+/** Human-friendly age of a timestamp for header pills. */
 function timeAgo(value: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60_000));
   if (minutes < 1) return '刚刚';
@@ -184,6 +188,7 @@ function timeAgo(value: string): string {
   return dayLabel(value);
 }
 
+/** Duration since a timestamp in minutes or hours, used for "how long" captions. */
 function elapsed(value: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60_000));
   if (minutes < 1) return '不到 1 分钟';
@@ -193,6 +198,7 @@ function elapsed(value: string): string {
   return rest > 0 ? `${hours} 小时 ${rest} 分` : `${hours} 小时`;
 }
 
+/** Chinese mood word for a valence score. */
 function moodLabel(value: number): string {
   if (value >= 60) return '愉快';
   if (value >= 20) return '轻松';
@@ -201,17 +207,20 @@ function moodLabel(value: number): string {
   return '沉重';
 }
 
+/** Bar tint by level, from calm jade down to alert signal. */
 function barColor(value: number): string {
   if (value >= 70) return 'bg-jade-400/80';
   if (value >= 40) return 'bg-brass-400/80';
   return 'bg-signal-400/80';
 }
 
+/** Collapses whitespace and truncates long text with an ellipsis. */
 function clipText(value: string, max: number): string {
   const text = value.replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+/** Explains when the persona is expected to wake, or why the heartbeat is idle. */
 function nextWakeText(channel: OverviewChannel): string {
   if (!channel.state) return '状态还没建立';
   if (channel.mind && !channel.mind.heartbeatEnabled) return '心跳已关闭';
@@ -219,6 +228,7 @@ function nextWakeText(channel: OverviewChannel): string {
   return `下次醒来 ${clock(channel.state.nextWakeAt)}`;
 }
 
+/** Splits the 24h event feed into consecutive day buckets. */
 function groupEvents(
   events: OverviewEvent[],
 ): Array<{ key: string; label: string; items: OverviewEvent[] }> {
@@ -235,6 +245,7 @@ function groupEvents(
   return groups;
 }
 
+/** Overview duty desk: channel vitals, the last 24h event feed and items needing attention. */
 export function HomePage() {
   const { data: user } = useQuery(meQuery);
   const overview = useQuery(overviewQuery);
@@ -443,6 +454,7 @@ export function HomePage() {
   );
 }
 
+/** Section title row with eyebrow, rule, count and an optional action link. */
 function SectionHeading({
   eyebrow,
   meta,
@@ -466,6 +478,7 @@ function SectionHeading({
   );
 }
 
+/** Small status pill used in the header to summarize health counts. */
 function HealthPill({
   icon: Icon,
   label,
@@ -496,6 +509,7 @@ function HealthPill({
   );
 }
 
+/** Per-channel card: current activity, vitals, 24h counters and quick links. */
 function ChannelCard({ channel, index }: { channel: OverviewChannel; index: number }) {
   const status = STATUS_META[channel.status];
   const mode = channel.mind ? MODE_META[channel.mind.mode] : null;
@@ -681,6 +695,7 @@ function ChannelCard({ channel, index }: { channel: OverviewChannel; index: numb
   );
 }
 
+/** Single vital readout with an optional level bar. */
 function Vital({
   label,
   value,
@@ -708,6 +723,7 @@ function Vital({
   );
 }
 
+/** One line in the 24h feed with kind badge, time and optional deep link. */
 function EventRow({ event }: { event: OverviewEvent }) {
   const meta = EVENT_META[event.kind];
   const Icon = meta.icon;
@@ -748,6 +764,7 @@ function EventRow({ event }: { event: OverviewEvent }) {
   );
 }
 
+/** One item the operator should look at, styled by severity. */
 function AttentionRow({ attention }: { attention: OverviewAttention }) {
   const meta = SEVERITY_META[attention.severity];
   const Icon = meta.icon;
@@ -779,6 +796,7 @@ function AttentionRow({ attention }: { attention: OverviewAttention }) {
   );
 }
 
+/** Compact shortcut tile to a frequently used screen. */
 function QuickLink({
   link,
   icon: Icon,
@@ -800,6 +818,7 @@ function QuickLink({
   );
 }
 
+/** Renders a backend-provided link target as the matching typed router Link. */
 function OverviewNavLink({
   link,
   className,
@@ -853,6 +872,7 @@ function OverviewNavLink({
   }
 }
 
+/** First-run state pointing at the connections page. */
 function EmptyChannels() {
   return (
     <div className="mt-10 flex flex-col items-center rounded-3xl border border-mist-100/[0.07] bg-ink-900/35 px-6 py-14 text-center">
@@ -873,6 +893,7 @@ function EmptyChannels() {
   );
 }
 
+/** Failure state for the overview query with a retry action. */
 function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="mt-10 flex flex-col items-center rounded-3xl border border-signal-400/15 bg-signal-400/[0.03] px-6 py-12 text-center">
@@ -893,6 +914,7 @@ function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
+/** Placeholder blocks shown while the overview loads. */
 function HomeSkeleton() {
   return (
     <div className="mt-10 animate-pulse">

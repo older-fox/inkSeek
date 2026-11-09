@@ -27,11 +27,13 @@ interface FocusStartInput {
 export class MindFocusService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Looks up any focus by id, including finished ones. */
   async byId(id: string): Promise<PersonaFocusRecord | null> {
     const row = await this.prisma.personaFocus.findUnique({ where: { id } });
     return row ? toRecord(row) : null;
   }
 
+  /** Most recent ACTIVE or PAUSED focus, optionally narrowed to one kind. */
   async active(
     personaId: string,
     kind?: PersonaFocusKind,
@@ -68,6 +70,7 @@ export class MindFocusService {
     return toRecord(row);
   }
 
+  /** PAUSED is a no-op when the row is not ACTIVE; safe to call twice. */
   async pause(id: string): Promise<void> {
     await this.prisma.personaFocus.updateMany({
       where: { id, status: 'ACTIVE' },
@@ -75,6 +78,7 @@ export class MindFocusService {
     });
   }
 
+  /** Reactivates a paused focus; ignored unless the row is PAUSED. */
   async resume(id: string): Promise<void> {
     await this.prisma.personaFocus.updateMany({
       where: { id, status: 'PAUSED' },
@@ -82,6 +86,7 @@ export class MindFocusService {
     });
   }
 
+  /** Ends a focus (DONE unless overridden); state patch is merged, not replaced. */
   async finish(
     id: string,
     patch?: { state?: Record<string, unknown>; status?: PersonaFocusStatus },
@@ -120,6 +125,7 @@ export class MindFocusService {
     });
   }
 
+  /** Overwrites workbook fields without touching the step counter. */
   async updateState(id: string, patch: Record<string, unknown>): Promise<void> {
     const row = await this.prisma.personaFocus.findUnique({ where: { id } });
     if (!row) {
@@ -131,6 +137,7 @@ export class MindFocusService {
     });
   }
 
+  /** Current focus plus a newest-first history page for the panel. */
   async overview(personaId: string, limit = 12): Promise<Omit<MindFocusOverview, 'now'>> {
     const [active, recent] = await Promise.all([
       this.active(personaId),
@@ -146,6 +153,8 @@ export class MindFocusService {
     };
   }
 
+  /** Daily quota check: rows are fetched over a 48h window, then bucketed by
+   *  the persona's local date so timezone offsets are honoured. */
   async countStartedToday(
     personaId: string,
     kind: PersonaFocusKind,
@@ -197,6 +206,7 @@ export class MindFocusService {
   }
 }
 
+/** Shallow-merges a workbook patch over the stored JSON object. */
 function mergeState(current: Prisma.JsonValue, patch: Record<string, unknown>): Prisma.InputJsonValue {
   const base =
     current && typeof current === 'object' && !Array.isArray(current)
@@ -205,6 +215,7 @@ function mergeState(current: Prisma.JsonValue, patch: Record<string, unknown>): 
   return { ...base, ...patch } as Prisma.InputJsonValue;
 }
 
+/** Flattens a focus row into the API shape with ISO timestamps. */
 function toRecord(row: PersonaFocus): PersonaFocusRecord {
   return {
     id: row.id,

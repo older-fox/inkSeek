@@ -27,6 +27,7 @@ const PRIVATE_ICONS: Record<string, LucideIcon> = {
   profile: User,
 };
 
+/** Joins the relation tags into a readable label, or a placeholder when unset. */
 function relationLabel(values: Record<string, PersonaValue> | null): string {
   const tags = values?.relation_tags;
   if (Array.isArray(tags) && tags.length > 0) {
@@ -35,6 +36,11 @@ function relationLabel(values: Record<string, PersonaValue> | null): string {
   return '还没有立住这段关系';
 }
 
+/**
+ * Dialog for the per-contact persona snapshot of a private chat: grouped
+ * fields, live saving, and the relationship summary in the header. Editing is
+ * held back until the server copy loads so nothing overwrites it blind.
+ */
 export function PrivatePersonaPanel({
   conversation,
   channel,
@@ -61,6 +67,7 @@ export function PrivatePersonaPanel({
     }
   }, [conversationId]);
 
+  /** Closes the panel, flushing any pending debounced edits first. */
   const close = useCallback(() => {
     flush();
     onClose();
@@ -71,6 +78,7 @@ export function PrivatePersonaPanel({
       return undefined;
     }
 
+    /** Escape closes and flushes pending edits, but is skipped while an input or textarea has focus so typing can't lose work. */
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
@@ -96,6 +104,7 @@ export function PrivatePersonaPanel({
     return null;
   }
 
+  /** Adapter for the field controls; update() itself drops writes until the server copy and contact record exist. */
   const handleChange = (key: string, value: PersonaValue) => {
     update(key, value);
   };

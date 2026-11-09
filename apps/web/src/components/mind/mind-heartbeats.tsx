@@ -45,6 +45,10 @@ const ACTION_LABELS: Record<string, string> = {
   TODO: '待办',
 };
 
+/**
+ * Lists recent heartbeats with their outcome; selecting one opens the detail
+ * drawer, which can jump into the linked run trace.
+ */
 export function HeartbeatLogView({
   personaId,
   onOpenRun,
@@ -146,6 +150,10 @@ export function HeartbeatLogView({
   );
 }
 
+/**
+ * Full breakdown of one heartbeat log: gate, plan, tool calls, actions and the
+ * wake brief, with a link into the run trace.
+ */
 function HeartbeatDetail({
   log,
   onOpenRun,
@@ -373,6 +381,7 @@ function HeartbeatDetail({
   );
 }
 
+/** Titled section wrapper used to group heartbeat detail blocks. */
 function DetailBlock({
   title,
   meta,
@@ -397,6 +406,7 @@ function DetailBlock({
   );
 }
 
+/** Small monospace pill for inline metadata. */
 function Chip({ children }: { children: ReactNode }) {
   return (
     <span className="rounded-full border border-mist-100/[0.08] px-2 py-0.5 font-mono text-[0.64rem] text-mist-500">
@@ -412,6 +422,7 @@ interface BeatView {
   faceId?: string;
 }
 
+/** Normalizes raw plan beats into view models, dropping malformed entries. */
 function readBeats(plan: Record<string, unknown> | null): BeatView[] {
   const beats = plan?.['beats'];
   if (!Array.isArray(beats)) {
@@ -433,12 +444,14 @@ function readBeats(plan: Record<string, unknown> | null): BeatView[] {
   });
 }
 
+/** Chinese label for a beat kind (text, sticker, QQ face). */
 function beatLabel(kind: string): string {
   if (kind === 'sticker') return '表情';
   if (kind === 'face') return 'QQ 表情';
   return '文字';
 }
 
+/** Keeps only object entries from an unknown array value. */
 function listOfRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
     ? value.flatMap((item) => {
@@ -448,16 +461,19 @@ function listOfRecords(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
+/** Narrows an unknown value to a plain object, or null when it is not one. */
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
+/** Returns a string field unchanged, or '' for non-strings. */
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Returns a finite number, or null for anything else. */
 function numOf(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }

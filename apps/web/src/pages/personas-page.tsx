@@ -11,6 +11,7 @@ import { ApiError, api } from '@/lib/api';
 import { matchesPersona, personaViewOf } from '@/lib/personas';
 import { chatChannelsQuery, personasQuery } from '@/lib/queries';
 
+/** Persona card library: browse, flip cards, search, create, edit and delete persona records. */
 export function PersonasPage() {
   const queryClient = useQueryClient();
   const query = useQuery(personasQuery);
@@ -44,6 +45,7 @@ export function PersonasPage() {
   const searching = normalized.length > 0;
   const total = records.length;
 
+  /** Clears the editing record alongside closing the dialog, so the next open always starts as a fresh persona. */
   const closeWizard = () => {
     setWizardOpen(false);
     setEditing(null);

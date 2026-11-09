@@ -22,6 +22,8 @@ export class MindSituationService {
     private readonly focus: MindFocusService,
   ) {}
 
+  /** Renders the live situation paragraph, line by line, from persisted focus
+   *  and state rows; returns an empty string when nothing is worth saying. */
   async describe(personaId: string): Promise<string> {
     const [phone, chat, state, lastPhone] = await Promise.all([
       this.focus.active(personaId, 'PHONE'),
@@ -134,12 +136,14 @@ export class MindSituationService {
     return lines.join('\n');
   }
 
+  /** Active focus (any kind) plus the same paragraph, for panel and prompt reuse. */
   async brief(personaId: string): Promise<{ active: PersonaFocusRecord | null; line: string }> {
     const active = await this.focus.active(personaId);
     return { active, line: await this.describe(personaId) };
   }
 }
 
+/** Focus workbook as a plain object; non-object JSON degrades to {}. */
 function readState(focus: PersonaFocusRecord | null): Record<string, unknown> {
   const value = focus?.state;
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -147,18 +151,22 @@ function readState(focus: PersonaFocusRecord | null): Record<string, unknown> {
     : {};
 }
 
+/** Defensive accessor for untyped workbook fields: trims and caps at 120 chars. */
 function trim(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 120) : '';
 }
 
+/** Whole minutes since an ISO timestamp, never negative (clock skew safe). */
 function minutesAgo(iso: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
 }
 
+/** Finite-number guard for values that arrive as untyped JSON. */
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+/** Battery snapshot, or null when the level is missing or outside 0..100. */
 function readBattery(state: Record<string, unknown>): MindPhoneBattery | null {
   const value = state['battery'];
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -172,6 +180,7 @@ function readBattery(state: Record<string, unknown>): MindPhoneBattery | null {
 }
 
 
+/** Narrows a Prisma focus row to the shared record shape used by readState. */
 function toFocusRecord(row: {
   id: string;
   personaId: string;

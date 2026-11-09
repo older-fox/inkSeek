@@ -72,6 +72,7 @@ export class VoiceTranscriptionService {
     return null;
   }
 
+  /** One fetch_ptt_text attempt; any failure means "no transcript yet", not an error. */
   private async request(client: OneBotRequester, externalId: string): Promise<string | null> {
     try {
       const response = await client.call<{ text?: string }>(
@@ -90,6 +91,7 @@ export class VoiceTranscriptionService {
   }
 }
 
+/** Waits between transcription retries; QQ needs a moment to finish ASR. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

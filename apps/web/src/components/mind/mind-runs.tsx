@@ -28,6 +28,10 @@ import {
   renderPayload,
 } from './mind-ui';
 
+/**
+ * Trace tab: switches between agent runs, LLM prompt logs and heartbeat logs,
+ * and surfaces pending actions that await approval.
+ */
 export function MindRunsTab({
   personaId,
   approvalMode,
@@ -128,6 +132,10 @@ const VERDICT_LABELS: Record<string, string> = {
   close: '已经收尾',
 };
 
+/**
+ * Run list with paging and polling, plus pending approvals above it; selecting
+ * a run opens the trace drawer.
+ */
 function RunsList({
   personaId,
   approvalMode,
@@ -388,6 +396,10 @@ function RunsList({
   );
 }
 
+/**
+ * Full trace of one run: trigger message, judgement, prompts, tool calls,
+ * response and scene, each in its own block.
+ */
 function RunTrace({
   detail,
   prompts,
@@ -492,6 +504,10 @@ function RunTrace({
   );
 }
 
+/**
+ * Shows why the persona spoke or stayed silent: decision reason, social read
+ * scores and conversation-pacing advice.
+ */
 function JudgementTrace({
   decision,
   social,
@@ -600,6 +616,10 @@ function JudgementTrace({
   );
 }
 
+/**
+ * Prompt log for this run, newest expanded first, each entry exposing system,
+ * prompt and response text.
+ */
 function PromptTrace({
   prompts,
   loading,
@@ -667,6 +687,10 @@ function PromptTrace({
   );
 }
 
+/**
+ * Tool calls made during the run, collapsed by default with input and output
+ * JSON panels.
+ */
 function ToolTrace({ steps }: { steps: AgentStepRecord[] }) {
   return (
     <DetailBlock title="工具调用" meta={`${steps.length} 次`}>
@@ -704,6 +728,10 @@ function ToolTrace({ steps }: { steps: AgentStepRecord[] }) {
   );
 }
 
+/**
+ * The plan's outgoing beats with stance and felt emotion, plus the raw plan for
+ * inspection.
+ */
 function ResponseTrace({
   plan,
   decision,
@@ -766,6 +794,7 @@ function ResponseTrace({
   );
 }
 
+/** Actions the run produced, with delivery status and idempotency key. */
 function ActionTrace({ actions }: { actions: AgentRunDetail['actions'] }) {
   return (
     <DetailBlock title="动作执行" meta={`${actions.length} 个动作`}>
@@ -806,6 +835,7 @@ function ActionTrace({ actions }: { actions: AgentRunDetail['actions'] }) {
   );
 }
 
+/** The conversation snapshot the mind saw, highlighting the triggering message. */
 function SceneTrace({ scene, trigger }: { scene: AgentRunScene | null; trigger: string }) {
   if (!scene) {
     return null;
@@ -846,6 +876,7 @@ function SceneTrace({ scene, trigger }: { scene: AgentRunScene | null; trigger: 
   );
 }
 
+/** Renders one scene message's text and image descriptions, styled by context. */
 function MessageBody({
   message,
   tone = 'normal',
@@ -888,6 +919,7 @@ function MessageBody({
   );
 }
 
+/** Non-tool execution steps with input/output JSON, collapsed by default. */
 function StepTrace({ steps }: { steps: AgentStepRecord[] }) {
   return (
     <DetailBlock title="执行步骤" meta={`${steps.length} 步（不含工具）`}>
@@ -930,6 +962,7 @@ function StepTrace({ steps }: { steps: AgentStepRecord[] }) {
   );
 }
 
+/** Titled section wrapper used to group run trace blocks. */
 function DetailBlock({
   title,
   meta,
@@ -954,6 +987,7 @@ function DetailBlock({
   );
 }
 
+/** Small monospace pill for inline run metadata. */
 function Chip({ children }: { children: ReactNode }) {
   return (
     <span className="rounded-full border border-mist-100/[0.08] px-2 py-0.5 font-mono text-[0.64rem] text-mist-500">
@@ -962,6 +996,7 @@ function Chip({ children }: { children: ReactNode }) {
   );
 }
 
+/** Labelled read-only JSON panel used for step input and output. */
 function JsonPanel({ label, value }: { label: string; value: unknown }) {
   return (
     <div>
@@ -981,6 +1016,7 @@ interface BeatView {
   delayMs?: number;
 }
 
+/** Normalizes raw plan beats into view models, keeping delays and dropping malformed entries. */
 function readBeats(plan: Record<string, unknown> | null): BeatView[] {
   const beats = plan?.['beats'];
   if (!Array.isArray(beats)) {
@@ -1006,12 +1042,14 @@ function readBeats(plan: Record<string, unknown> | null): BeatView[] {
   });
 }
 
+/** Chinese label for a beat kind (text, sticker, QQ face). */
 function beatLabel(kind: string): string {
   if (kind === 'sticker') return '表情';
   if (kind === 'face') return 'QQ 表情';
   return '文字';
 }
 
+/** Finds the newest message in the scene that the persona did not send itself. */
 function lastInboundMessage(scene: AgentRunScene | null): AgentRunSceneMessage | null {
   if (!scene) {
     return null;
@@ -1025,26 +1063,34 @@ function lastInboundMessage(scene: AgentRunScene | null): AgentRunSceneMessage |
   return null;
 }
 
+/** Run payloads arrive as loose JSON, so this narrows a value to a plain object. */
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
+/** Reads an unknown JSON field as display text, falling back to an empty string. */
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Reads an unknown JSON field as a finite number; null lets callers show a dash. */
 function numOf(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** Keeps only the string entries of an unknown JSON array, dropping anything else. */
 function listOf(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
 }
 
+/**
+ * LLM request logs across every source, not scoped to one run: filterable, manually
+ * refreshable, and each row opens a drawer with its system, prompt and response text.
+ */
 function PromptList() {
   const queryClient = useQueryClient();
   const [source, setSource] = useState('');

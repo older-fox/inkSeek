@@ -28,15 +28,21 @@ export class BootstrapService {
     private readonly redis: RedisProbeService,
   ) {}
 
+  /** Reports setup state from the onboarding flag rather than counting users. */
   async getStatus(): Promise<BootstrapStatus> {
     return { initialized: await this.config.isInitialized() };
   }
 
+  /** Read-only Redis ping; refuses once the system is initialized. */
   async probeRedis(connection: RedisConnectionInput): Promise<RedisProbeResult> {
     await this.assertNotInitialized();
     return this.redis.probe(connection);
   }
 
+  /**
+   * One-shot setup: probes Redis, then creates the admin, stores the credentials and
+   * flips the onboarding flag inside a serializable transaction so it runs only once.
+   */
   async initialize(input: BootstrapInput, meta: SessionMeta = {}): Promise<InitializeResult> {
     await this.assertNotInitialized();
     await this.redis.probe(input.redis);
@@ -111,6 +117,7 @@ export class BootstrapService {
     return { user: toAuthUser(user), ...session };
   }
 
+  /** Guards every setup mutation against a second run. */
   private async assertNotInitialized(): Promise<void> {
     if (await this.config.isInitialized()) {
       throw new ConflictException({
@@ -121,6 +128,7 @@ export class BootstrapService {
   }
 }
 
+/** Structural check instead of `instanceof`, since Prisma errors arrive as plain objects. */
 function hasPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' &&

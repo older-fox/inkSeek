@@ -7,6 +7,10 @@ const REVISION_PAGE_SIZE = 25;
 
 const COLUMNS = ['时间', '来源', '内容', '原因'] as const;
 
+/**
+ * Read-only history of persona field edits for one channel, newest first.
+ * Rows paginate automatically as the sentinel scrolls into view.
+ */
 export function PersonaRevisionList({
   channel,
   scrollRootRef,

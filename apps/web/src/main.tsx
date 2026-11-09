@@ -12,6 +12,7 @@ import { ThemeProvider, getThemeDefinition, useTheme } from '@/lib/theme';
 import { router } from '@/router';
 import './styles.css';
 
+/** Separate component because it calls useTheme, so it has to render inside ThemeProvider rather than beside it. */
 function ThemedToaster() {
   const { theme } = useTheme();
 

@@ -30,6 +30,8 @@ export class MindHeartbeatLogService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Appends one journal row and prunes older rows beyond the per-persona cap.
+   *  Logging failures are swallowed so a heartbeat never dies over telemetry. */
   async record(input: MindHeartbeatLogInput): Promise<void> {
     try {
       await this.prisma.mindHeartbeatLog.create({
@@ -69,6 +71,7 @@ export class MindHeartbeatLogService {
     }
   }
 
+  /** Newest-first journal page; limit is clamped to 1..200, offset floors at 0. */
   async list(personaId: string, limit = 60, offset = 0): Promise<MindHeartbeatLogRecord[]> {
     const rows = await this.prisma.mindHeartbeatLog.findMany({
       where: { personaId },
@@ -80,6 +83,7 @@ export class MindHeartbeatLogService {
   }
 }
 
+/** Maps a journal row to the API shape with an ISO timestamp. */
 function toRecord(row: MindHeartbeatLog): MindHeartbeatLogRecord {
   return {
     id: row.id,

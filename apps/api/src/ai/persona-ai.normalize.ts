@@ -7,6 +7,7 @@ import {
 
 type Rec = Record<string, unknown>;
 
+/** Pulls the first JSON object out of a model reply, fenced or bare, and fails loudly. */
 export function extractJsonObject(raw: string): unknown {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const source = (fenced?.[1] ?? raw).trim();
@@ -20,6 +21,10 @@ export function extractJsonObject(raw: string): unknown {
   return JSON.parse(source.slice(start, end + 1));
 }
 
+/**
+ * Coerces a loose model payload into a schema-valid draft: every field is trimmed,
+ * deduplicated and clamped, and missing values fall back to the shared defaults.
+ */
 export function normalizePersonaDraft(input: unknown): PersonaDraft {
   const root = asRecord(input);
   const defaults = createDefaultPersonaDraft();
@@ -133,10 +138,12 @@ export function normalizePersonaDraft(input: unknown): PersonaDraft {
   return personaDraftSchema.parse(draft);
 }
 
+/** Safe navigation helper; non-objects degrade to an empty record. */
 function asRecord(value: unknown): Rec {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Rec) : {};
 }
 
+/** Trims to `max` characters, stringifying scalars; anything else becomes an empty string. */
 function text(value: unknown, max: number): string {
   if (typeof value === 'string') {
     return value.trim().slice(0, max);
@@ -149,6 +156,7 @@ function text(value: unknown, max: number): string {
   return '';
 }
 
+/** Normalizes list fields, splitting delimited strings, dropping blanks and duplicates. */
 function strings(value: unknown, maxItems: number | null, perItem: number): string[] {
   const list = Array.isArray(value)
     ? value
@@ -178,6 +186,7 @@ function strings(value: unknown, maxItems: number | null, perItem: number): stri
   return result;
 }
 
+/** Accepts the usual true/false spellings in English and Chinese; otherwise uses the fallback. */
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') {
     return value;
@@ -198,14 +207,17 @@ function bool(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+/** Five-step discrete level shared by typo, split, emoji and similar settings. */
 function level(value: unknown, fallback: number): number {
   return clampInt(value, 0, 4, fallback);
 }
 
+/** Zero-to-hundred slider value used by the persona state traits. */
 function slider(value: unknown, fallback: number): number {
   return clampInt(value, 0, 100, fallback);
 }
 
+/** Rounds and clamps to the inclusive range; unparseable input keeps the fallback. */
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   const numeric = typeof value === 'number' ? value : Number.parseFloat(String(value ?? '').trim());
 

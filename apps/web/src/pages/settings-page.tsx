@@ -18,6 +18,7 @@ const EMPTY_PHONE = {
   error: '',
 };
 
+/** Admin-only settings screen: cache, phone bridge, Bilibili, banned words and model providers. */
 export function SettingsPage() {
   const { data: user } = useQuery(meQuery);
   const settings = useQuery(settingsQuery);

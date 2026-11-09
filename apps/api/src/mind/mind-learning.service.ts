@@ -33,6 +33,7 @@ export class MindLearningService {
     private readonly styleNotes: PersonaStyleNoteService,
   ) {}
 
+  /** Opens a RUNNING ledger row and returns its id for the matching finish(). */
   async start(input: {
     personaId: string;
     channelId: string;
@@ -52,6 +53,8 @@ export class MindLearningService {
     return row.id;
   }
 
+  /** Closes the ledger row; blobs are sanitised and truncated so a runaway
+   *  model response cannot bloat the row. */
   async finish(id: string, input: LearningFinishInput): Promise<void> {
     await this.prisma.mindLearningLog.update({
       where: { id },
@@ -101,6 +104,7 @@ export class MindLearningService {
     return { due: true, reason: '学习时间到了' };
   }
 
+  /** Assembles the learning panel snapshot for one conversation. */
   async overview(
     personaId: string,
     channelId: string,
@@ -139,6 +143,7 @@ export class MindLearningService {
     };
   }
 
+  /** Newest-first ledger page for one conversation, limit clamped to 1..100. */
   async logs(personaId: string, channelId: string, limit = 20): Promise<MindLearningLogRecord[]> {
     const rows = await this.prisma.mindLearningLog.findMany({
       where: { personaId, channelId },
@@ -149,6 +154,7 @@ export class MindLearningService {
   }
 }
 
+/** Maps a ledger row to the shared shape, defaulting unknown statuses. */
 function toRecord(row: MindLearningLog): MindLearningLogRecord {
   return {
     id: row.id,
@@ -171,6 +177,7 @@ function toRecord(row: MindLearningLog): MindLearningLogRecord {
   };
 }
 
+/** Clamps source fields and drops duplicate URLs, keeping at most 40 entries. */
 function normalizeSources(
   value: readonly (StyleNoteSource & { at?: string })[] | undefined,
 ): (StyleNoteSource & { at: string })[] {
@@ -195,6 +202,7 @@ function normalizeSources(
   return out;
 }
 
+/** Clamps learned-item text, discards empties, keeping at most 60 entries. */
 function normalizeItems(
   value: readonly MindLearningItemRecord[] | undefined,
 ): MindLearningItemRecord[] {
@@ -209,6 +217,7 @@ function normalizeItems(
     .slice(0, 60);
 }
 
+/** Keeps only plain objects from a JSON column; anything else decodes to []. */
 function jsonObjects(value: Prisma.JsonValue): Record<string, unknown>[] {
   if (!Array.isArray(value)) {
     return [];
@@ -222,6 +231,7 @@ function jsonObjects(value: Prisma.JsonValue): Record<string, unknown>[] {
   return out;
 }
 
+/** Lenient decode of stored sources; rows without a URL are dropped. */
 function parseSources(
   value: Prisma.JsonValue,
 ): (StyleNoteSource & { at?: string })[] {
@@ -235,6 +245,7 @@ function parseSources(
     .filter((item) => item.url);
 }
 
+/** Lenient decode of stored learned items; entries without content are dropped. */
 function parseItems(value: Prisma.JsonValue): MindLearningItemRecord[] {
   return jsonObjects(value)
     .map((item) => ({

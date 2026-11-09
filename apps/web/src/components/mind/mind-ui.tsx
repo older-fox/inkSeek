@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/** Centered placeholder box for empty or unavailable tab content. */
 export function EmptyState({ text, compact = false }: { text: string; compact?: boolean }) {
   return (
     <div
@@ -19,6 +20,7 @@ export function EmptyState({ text, compact = false }: { text: string; compact?: 
   );
 }
 
+/** Titled card shell used by every mind tab. */
 export function MindSection({
   title,
   count,
@@ -70,6 +72,7 @@ export function MindDrawer({
     if (!open) {
       return undefined;
     }
+    /** Escape closes the drawer, mirroring the overlay click and the close button. */
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
@@ -166,9 +169,14 @@ export function LazyList<T>({
     if (!node || !root || visible >= items.length) {
       return;
     }
+    /** Reveals one more batch of rows, capped at the list length. */
     const loadMore = () => {
       setVisible((count) => Math.min(items.length, count + step));
     };
+    /**
+     * Checked on every scroll and once when the effect runs, so a list shorter than the
+     * viewport still fills itself; the observer below only fires when intersection changes.
+     */
     const onScroll = () => {
       if (node.getBoundingClientRect().top <= root.getBoundingClientRect().bottom + 240) {
         loadMore();
@@ -201,6 +209,10 @@ export function LazyList<T>({
   );
 }
 
+/**
+ * Clamped numeric input that keeps raw text while focused so clearing a digit
+ * does not snap to min, committing on blur.
+ */
 export function NumberField({
   label,
   hint,
@@ -229,6 +241,7 @@ export function NumberField({
     }
   }, [value, focused]);
 
+  /** Clamps the raw text on blur; an empty or unparsable entry keeps the stored value. */
   const commit = () => {
     const next = Number(text);
     const clamped =
@@ -277,6 +290,7 @@ export function NumberField({
   );
 }
 
+/** Slider with a filled track and the current value shown beside its label. */
 export function RangeField({
   label,
   value,
@@ -318,6 +332,7 @@ export function RangeField({
   );
 }
 
+/** Single-line labelled input with an optional hint below it. */
 export function TextField({
   label,
   hint,
@@ -344,6 +359,7 @@ export function TextField({
   );
 }
 
+/** Multi-line labelled textarea with an optional hint below it. */
 export function TextAreaField({
   label,
   hint,
@@ -371,6 +387,7 @@ export function TextAreaField({
   );
 }
 
+/** Labeled on/off switch row used across the settings form. */
 export function ToggleRow({
   label,
   hint,
@@ -410,6 +427,7 @@ export function ToggleRow({
   );
 }
 
+/** Colored dot keyed off an agent run status. */
 export function StatusDot({ status }: { status: string }) {
   const color =
     status === 'SUCCEEDED'
@@ -422,6 +440,7 @@ export function StatusDot({ status }: { status: string }) {
   return <span className={cn('size-1.5 rounded-full', color)} />;
 }
 
+/** Status dot plus uppercase status text in a bordered pill. */
 export function StatusPill({ status }: { status: string }) {
   return (
     <span
@@ -440,6 +459,7 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
+/** Collapsible raw-JSON block with a title, hidden entirely when empty. */
 export function TraceBlock({ title, value }: { title: string; value: unknown }) {
   if (!value) return null;
   return (
@@ -455,6 +475,7 @@ export function TraceBlock({ title, value }: { title: string; value: unknown }) 
   );
 }
 
+/** Scrollable monospace block for one prompt or response text. */
 export function PromptBlock({ title, text }: { title: string; text: string }) {
   return (
     <div>
@@ -466,6 +487,7 @@ export function PromptBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
+/** Renders an action payload as display text: message body, sticker, or JSON. */
 export function renderPayload(value: unknown): string {
   if (!value || typeof value !== 'object') return String(value ?? '');
   const record = value as Record<string, unknown>;
@@ -474,6 +496,7 @@ export function renderPayload(value: unknown): string {
   return formatJson(value);
 }
 
+/** Pretty-prints a value as JSON, falling back to plain text for cycles. */
 export function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);

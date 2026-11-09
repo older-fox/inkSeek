@@ -21,6 +21,7 @@ export class InsightsController {
 
   @Get()
   @ApiOperation({ summary: '读取渠道的纵向洞察流' })
+  /** Returns the detector output for one channel; ordering is stable so the UI can diff. */
   feed(
     @Query(new ZodValidationPipe(mindInsightQuerySchema)) query: MindInsightQueryInput,
   ): Promise<MindInsightFeed> {
@@ -30,6 +31,7 @@ export class InsightsController {
   @Post('ask')
   @HttpCode(200)
   @ApiOperation({ summary: '针对一条洞察追问，回答只基于卡片证据' })
+  /** Single-turn follow-up; the answer is deliberately limited to the card's evidence. */
   ask(
     @Body(new ZodValidationPipe(mindInsightAskSchema)) input: MindInsightAskInput,
   ): Promise<MindInsightAskResult> {

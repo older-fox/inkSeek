@@ -21,6 +21,7 @@ const SCOPES = [
   { value: 'GROUP', label: '群内态度' },
 ] as const;
 
+/** Paginated log of state, relation and group changes, filterable by scope. */
 export function MindChangesTab({ personaId }: { personaId: string }) {
   const [scope, setScope] = useState('');
   const [limit, setLimit] = useState(100);

@@ -85,6 +85,7 @@ export class ApiError extends Error {
   }
 }
 
+/** Performs a credentialed JSON request and turns API error bodies into ApiError. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 
@@ -405,6 +406,7 @@ export const api = {
     }),
 };
 
+/** Builds the memory list query string, omitting inactive filters and defaulting the page size. */
 function memoryQueryParams(query: PersonaMemoryQueryInput): URLSearchParams {
   const params = new URLSearchParams({
     personaId: query.personaId,

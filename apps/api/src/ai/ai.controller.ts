@@ -19,6 +19,7 @@ export class AiController {
 
   @Get('persona-providers')
   @ApiOperation({ summary: '列出可用于生成人格卡的模型提供商' })
+  /** Providers exposed to the persona editor; models are truncated to keep the picker readable. */
   providers(): Promise<PersonaAiProviderOption[]> {
     return this.ai.listProviders();
   }
@@ -26,6 +27,7 @@ export class AiController {
   @Post('persona-draft')
   @HttpCode(200)
   @ApiOperation({ summary: '根据提示词生成人格卡草稿' })
+  /** Generates a draft only; nothing is persisted, the editor decides whether to save. */
   generate(
     @Body(new ZodValidationPipe(personaAiGenerateSchema)) input: PersonaAiGenerateInput,
   ): Promise<PersonaAiGeneration> {

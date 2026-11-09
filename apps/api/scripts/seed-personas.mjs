@@ -208,6 +208,10 @@ const CARDS = [
   },
 ];
 
+/**
+ * Expands one static card into the persona draft stored in `data` and in version 1,
+ * mapping the Chinese trait and physical keys onto the shared draft field names.
+ */
 function draftOf(card) {
   return {
     ...createDefaultPersonaDraft(),

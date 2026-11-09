@@ -101,12 +101,14 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly llm: LlmService) {}
 
+  /** Starts the idle-session sweep so abandoned contexts do not leak between runs. */
   onModuleInit(): void {
     this.sweepTimer = setInterval(() => {
       void this.sweep();
     }, SWEEP_MS);
   }
 
+  /** Stops the sweep timer and closes every session before the module is torn down. */
   async onModuleDestroy(): Promise<void> {
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
@@ -115,6 +117,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     await this.closeAll();
   }
 
+  /** Navigates to a public http(s) URL and returns its first snapshot; rejects local or non-web hosts. */
   async open(personaId: string, rawUrl: string): Promise<BrowserSnapshot> {
     const url = normalizePublicUrl(rawUrl);
     await assertPublicHost(url);
@@ -124,10 +127,12 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Re-reads the current page's elements and text without navigating. */
   async snapshot(personaId: string): Promise<BrowserSnapshot> {
     return this.run(personaId, (session) => this.snapshotOf(session));
   }
 
+  /** Clicks a snapshotted element by ref or visible text, then re-snapshots once the page settles. */
   async click(personaId: string, input: { ref?: string; text?: string }): Promise<BrowserSnapshot> {
     return this.run(personaId, async (session) => {
       const ref = input.ref?.trim();
@@ -150,6 +155,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Fills a ref-targeted field (text capped at 500 chars), optionally pressing Enter, then re-snapshots. */
   async type(
     personaId: string,
     input: { ref: string; text: string; submit?: boolean },
@@ -169,6 +175,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Wheels the page by whole-viewport fractions, clamped to 1-8 pages per call. */
   async scroll(personaId: string, direction: 'down' | 'up', pages = 1): Promise<BrowserSnapshot> {
     return this.run(personaId, async (session) => {
       const page = session.page;
@@ -180,6 +187,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Steps back in history when possible; a missing previous entry is swallowed, not an error. */
   async back(personaId: string): Promise<BrowserSnapshot> {
     return this.run(personaId, async (session) => {
       await session.page
@@ -190,6 +198,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Returns the current page's visible body text, trimmed to a 1k-12k character budget. */
   async read(
     personaId: string,
     maxChars = 6000,
@@ -208,6 +217,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Screenshots the viewport and has the vision model describe it; returns a stub if the model returns nothing. */
   async screenshot(
     personaId: string,
     focus?: string,
@@ -237,6 +247,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Closes a persona's session, keeping its visit history for later citation; true only when one existed. */
   async close(personaId: string): Promise<boolean> {
     const running = this.sessions.get(personaId);
     const live = this.live.get(personaId);
@@ -266,6 +277,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     return [...byUrl.values()].sort((left, right) => left.at.localeCompare(right.at));
   }
 
+  /** Merges a session's visits into the per-persona history, de-duplicated by URL and capped at 120. */
   private retainVisits(personaId: string, visits: readonly BrowserVisit[]): void {
     if (visits.length === 0) {
       return;
@@ -277,6 +289,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     this.history.set(personaId, [...byUrl.values()].slice(-120));
   }
 
+  /** Serializes a task onto the persona's session queue and stamps last-use on success. */
   private run<T>(personaId: string, task: (session: BrowserSession) => Promise<T>): Promise<T> {
     return this.session(personaId).then((session) => {
       const run = session.queue
@@ -292,6 +305,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Returns the persona's session, launching it on demand; a failed launch is evicted so the next call retries. */
   private session(personaId: string): Promise<BrowserSession> {
     const existing = this.sessions.get(personaId);
     if (existing) {
@@ -315,6 +329,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     return created;
   }
 
+  /** Opens a fresh context for one persona, blocking non-public hosts and media/font requests at the router. */
   private async createSession(): Promise<BrowserSession> {
     const browser = await this.ensureBrowser();
     if (!browser) {
@@ -362,6 +377,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     return session;
   }
 
+  /** Lazily launches the shared browser; a dead or missing launch is retried only after the backoff window. */
   private async ensureBrowser(): Promise<Browser | null> {
     if (!this.browserPromise) {
       // No Chrome/Edge is an environment fact, not a transient failure: retry
@@ -380,6 +396,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
+  /** Finds an installed Chrome/Edge and launches it headless; returns null when none can start. */
   private async launch(): Promise<Browser | null> {
     const executablePath = await findBrowserExecutable();
     if (!executablePath) {
@@ -409,12 +426,14 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Navigates to a URL and records the visit once the page has settled. */
   private async navigate(session: BrowserSession, url: string): Promise<void> {
     const page = session.page;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
     await this.settle(session);
   }
 
+  /** Waits for the page to calm down, then appends or refreshes the current URL in the capped visit list. */
   private async settle(session: BrowserSession): Promise<void> {
     await session.page.waitForTimeout(900).catch(() => undefined);
     const title = await session.page.title().catch(() => '');
@@ -438,6 +457,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Evaluates the snapshot script and normalizes element/scroll output, capping the element list. */
   private async snapshotOf(session: BrowserSession): Promise<BrowserSnapshot> {
     const raw = (await session.page.evaluate(SNAPSHOT_SCRIPT)) as {
       title?: string;
@@ -459,6 +479,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /** Periodically closes sessions idle past the timeout, retaining their visits before dropping them. */
   private async sweep(): Promise<void> {
     const now = Date.now();
     for (const [personaId, running] of this.sessions) {
@@ -476,6 +497,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Tears down every session and the shared browser during module shutdown, retaining all visits. */
   private async closeAll(): Promise<void> {
     const sessions = [...this.sessions.entries()];
     this.sessions.clear();
@@ -492,6 +514,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
+/** Probes the platform's common Chrome/Edge install paths and returns the first executable found. */
 async function findBrowserExecutable(): Promise<string | null> {
   const candidates =
     process.platform === 'win32'
@@ -527,6 +550,7 @@ async function findBrowserExecutable(): Promise<string | null> {
   return null;
 }
 
+/** Lowercased host of a URL, or an empty string when it cannot be parsed. */
 function safeHostname(rawUrl: string): string {
   try {
     return new URL(rawUrl).hostname.trim().toLowerCase();
@@ -535,6 +559,7 @@ function safeHostname(rawUrl: string): string {
   }
 }
 
+/** True for localhost and private/link-reserved ranges that headless browsing must never reach. */
 function isLocalHost(host: string): boolean {
   if (host === 'localhost' || host.endsWith('.localhost')) {
     return true;

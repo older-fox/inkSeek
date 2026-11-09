@@ -12,6 +12,7 @@ import { SessionService } from './session.service.js';
 export class AuthGuard implements CanActivate {
   constructor(private readonly sessions: SessionService) {}
 
+  /** Resolves the session cookie, then attaches the user and raw token to the request. */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const token = request.cookies?.[SESSION_COOKIE_NAME];

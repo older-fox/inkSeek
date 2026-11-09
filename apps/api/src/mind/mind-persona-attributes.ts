@@ -26,6 +26,7 @@ const GROUP_BASELINES = '数值基线';
 const GROUP_BOUNDARIES = '边界与同意';
 const GROUP_META = '元信息';
 
+/** Builds one metadata group so each entry only has to declare its label. */
 const group = (name: string, entries: Record<string, string>) =>
   Object.fromEntries(
     Object.entries(entries).map(([key, label]) => [key, { label, group: name }]),
@@ -270,10 +271,12 @@ const STATE_ATTRIBUTE_WRITES: Record<string, StateWriteRule> = {
   location: { field: 'location', kind: 'string', maxLength: 100 },
 };
 
+/** Write rule for a state-backed key, or null when the key is read-only. */
 export function stateAttributeWrite(key: string): StateWriteRule | null {
   return STATE_ATTRIBUTE_WRITES[key] ?? null;
 }
 
+/** Display label, preferring live state naming and falling back to the raw key. */
 export function personaAttributeLabel(key: string): string {
   return STATE_ATTRIBUTES[key]?.label ?? PERSONA_ATTRIBUTE_META[key]?.label ?? key;
 }
@@ -283,6 +286,7 @@ const MAX_GET_KEYS = 20;
 const MAX_STRING = 4000;
 const MAX_LIST_ITEMS = 50;
 
+/** Card values, live state and top-level columns merged into one ordered catalog for discovery. */
 export function listPersonaAttributes(
   persona: MindPersona,
   state: PersonaState,
@@ -301,6 +305,7 @@ export function listPersonaAttributes(
   return [...entries.values()].sort(compareEntries);
 }
 
+/** Resolves requested keys with a behavioral hint for numbers; unknown keys are reported, not invented. */
 export function readPersonaAttributes(
   persona: MindPersona,
   state: PersonaState,
@@ -339,6 +344,7 @@ export function readPersonaAttributes(
   return { attributes, missing };
 }
 
+/** Accepts `keys` or `key` as an array or delimited string, deduping and capping the request. */
 export function readAttributeKeys(input: Record<string, unknown>): string[] {
   const raw = input['keys'] ?? input['key'];
   const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[,，、\s]+/) : [];
@@ -361,6 +367,7 @@ export function readAttributeKeys(input: Record<string, unknown>): string[] {
   return keys;
 }
 
+/** Metadata lookup that keeps unknown keys visible under a fallback group. */
 function entryOf(key: string, value: unknown, source: 'persona' | 'state'): PersonaAttributeEntry {
   const stateMeta = source === 'state' ? STATE_ATTRIBUTES[key] : undefined;
   const meta = stateMeta
@@ -379,6 +386,7 @@ function entryOf(key: string, value: unknown, source: 'persona' | 'state'): Pers
 const META_ORDER = new Map(Object.keys(PERSONA_ATTRIBUTE_META).map((key, index) => [key, index]));
 const STATE_ORDER = new Map(Object.keys(STATE_ATTRIBUTES).map((key, index) => [key, index]));
 
+/** Card attributes first, then live state; within each, declaration order then key name. */
 function compareEntries(left: PersonaAttributeEntry, right: PersonaAttributeEntry): number {
   if (left.source !== right.source) {
     return left.source === 'state' ? 1 : -1;
@@ -389,6 +397,7 @@ function compareEntries(left: PersonaAttributeEntry, right: PersonaAttributeEntr
   return leftOrder - rightOrder || left.key.localeCompare(right.key);
 }
 
+/** Coarse type tag the UI uses to pick a renderer. */
 function valueType(value: unknown): string {
   if (Array.isArray(value)) return 'list';
   if (typeof value === 'boolean') return 'boolean';
@@ -397,12 +406,14 @@ function valueType(value: unknown): string {
   return value === null || value === undefined ? 'empty' : 'json';
 }
 
+/** Blank strings and empty lists count as empty so the UI can show a placeholder. */
 function hasValue(value: unknown): boolean {
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return value !== null && value !== undefined;
 }
 
+/** Truncates long text and caps lists so tool output stays inside the prompt budget. */
 function compactValue(value: unknown): unknown {
   if (typeof value === 'string') {
     return truncateText(value, MAX_STRING);
@@ -415,12 +426,14 @@ function compactValue(value: unknown): unknown {
   return value;
 }
 
+/** Treats a non-object JSON column as empty instead of throwing. */
 function jsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** Human-readable mood: valence wording prefixed by arousal when either is extreme. */
 function moodLabel(state: PersonaState): string {
   const base =
     state.moodValence > 30

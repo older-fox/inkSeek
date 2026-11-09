@@ -32,6 +32,11 @@ const QUESTION_PATTERN = /[?？]|吗|呢|怎么|为什么|要不要|能不能|�
 
 @Injectable()
 export class MindSocialService {
+  /**
+   * Deterministic social read for one turn: scores attention/desire/risk from
+   * relationships, state and stance keywords, then decides engage/silence.
+   * Pure computation, no db writes.
+   */
   buildDecision(input: {
     scene: MindScene;
     state: PersonaState;
@@ -216,6 +221,7 @@ export class MindSocialService {
   }
 }
 
+/** Mentions only count in the last four inbound messages, via flag or name match. */
 function isMentioned(scene: MindScene, personas: Record<string, unknown> | null): boolean {
   const names = [
     scene.persona.name,
@@ -259,6 +265,7 @@ function isActiveExchange(scene: MindScene): boolean {
   );
 }
 
+/** Keyword-and-relationship heuristic for the felt emotion shown to the planner. */
 function inferFelt(input: {
   text: string;
   affinity: number;
@@ -290,6 +297,7 @@ function inferFelt(input: {
   return { label: '平静', intensity: 30, target: input.targetName };
 }
 
+/** First-match rule table from hard blocks down to the neutral default stance. */
 function pickStance(input: {
   blocked: boolean;
   mentionOnly: boolean;
@@ -316,6 +324,7 @@ function pickStance(input: {
   return '自然';
 }
 
+/** Composes the global mood label from valence bands plus an arousal prefix. */
 function moodLabel(state: PersonaState): string {
   const base =
     state.moodValence > 30
@@ -332,6 +341,7 @@ function moodLabel(state: PersonaState): string {
   return base;
 }
 
+/** Engagement gate; private chats need less attention than group floor clearing. */
 function decideEngage(input: {
   scene: MindScene;
   read: SocialRead;
@@ -353,6 +363,7 @@ function decideEngage(input: {
   return true;
 }
 
+/** Picks the most plausible of the fixed silence explanations. */
 function explainSilence(read: SocialRead, mentioned: boolean, sleeping: boolean): string {
   if (sleeping) return '不在活跃状态，先不打断';
   if (!mentioned && read.attention < 30) return '没有足够引起注意';

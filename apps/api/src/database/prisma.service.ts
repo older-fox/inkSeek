@@ -17,11 +17,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     super({ adapter: new PrismaPg({ connectionString }) });
   }
 
+  /** Opens the pool at startup so the first request does not pay the handshake cost. */
   async onModuleInit(): Promise<void> {
     await this.$connect();
     this.logger.log('Database connection established');
   }
 
+  /** Releases the pool on shutdown so restarts do not leak connections. */
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }

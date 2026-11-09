@@ -27,6 +27,10 @@ interface ChannelAvatarProps {
   className?: string;
 }
 
+/**
+ * Square channel avatar: remote image when available, otherwise the first
+ * character of the initials on an accent-tinted surface.
+ */
 export function ChannelAvatar({
   initials,
   accent,
@@ -67,6 +71,10 @@ interface PlatformChipProps {
   className?: string;
 }
 
+/**
+ * Compact platform badge; `connector` appends the bridge name (e.g. NapCat)
+ * so rows make clear which adapter carries the channel.
+ */
 export function PlatformChip({ platform, connector = false, className }: PlatformChipProps) {
   const definition = PLATFORMS[platform];
 
@@ -94,6 +102,7 @@ export function PlatformChip({ platform, connector = false, className }: Platfor
   );
 }
 
+/** Jade pill with a pulsing dot used while a channel is syncing. */
 export function SyncPill({ label = '同步中', className }: { label?: string; className?: string }) {
   return (
     <span
@@ -131,6 +140,10 @@ const STATUS_SURFACE: Record<ChannelStatus, { label: string; className: string }
   },
 };
 
+/**
+ * Status pill for a channel connection, color-coded per state with a dot that
+ * pulses only while online or connecting.
+ */
 export function ConnectionStatusPill({
   status,
   className,

@@ -114,6 +114,10 @@ export function relationshipPatchFromValues(
   return patch;
 }
 
+/**
+ * Complete stance patch, so saving one field never drops the others; ratios are
+ * converted back to 0-100 percentages.
+ */
 export function stancePatchFromValues(
   values: ConversationPersonaValues,
 ): PersonaGroupStanceUpdateInput {
@@ -133,6 +137,7 @@ export function stancePatchFromValues(
   };
 }
 
+/** Copies only the listed keys that are actually present, dropping undefined. */
 function extrasOf(
   values: ConversationPersonaValues,
   keys: readonly string[],
@@ -146,11 +151,16 @@ function extrasOf(
   return extras;
 }
 
+/** Joins the multi-select into a comma list capped at 32 chars; empty means SCENE. */
 function disclosureScope(value: ConversationPersonaValue | undefined): string {
   const parts = readArray(value);
   return (parts.join(',') || 'SCENE').slice(0, 32);
 }
 
+/**
+ * ISO-normalized mute expiry; blank text, the "未设置" placeholder and
+ * unparseable dates all mean not muted.
+ */
 function mutedUntil(value: ConversationPersonaValue | undefined): string | null {
   const text = readString(value);
   if (!text || text === '未设置') {
@@ -160,6 +170,7 @@ function mutedUntil(value: ConversationPersonaValue | undefined): string | null 
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/** Ratio (0-1) to integer percent, clamped; non-numeric input falls back to 50. */
 function ratioPercent(value: ConversationPersonaValue | undefined): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number)
@@ -167,15 +178,18 @@ function ratioPercent(value: ConversationPersonaValue | undefined): number {
     : 50;
 }
 
+/** Integer percent clamped to 0-100; non-numeric input falls back to 50. */
 function clampPercent(value: ConversationPersonaValue | undefined): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : 50;
 }
 
+/** Keeps ratios at two decimals so round-tripped edits stay stable. */
 function roundRatio(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** Splits free-text rules on 、, comma or newline, trimming away empty parts. */
 function splitRules(value: string): string[] {
   return value
     .split(/[、,\n]/)
@@ -183,23 +197,28 @@ function splitRules(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Integer score clamped to -100..100; non-numeric input falls back to 50. */
 function clampScore(value: ConversationPersonaValue | undefined): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) ? Math.max(-100, Math.min(100, Math.round(number))) : 50;
 }
 
+/** Keeps the fallback when the stored column is missing or not a finite number. */
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+/** Empty string for anything that is not a string, so callers never see undefined. */
 function readString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Editor values arrive untyped; only string arrays survive, anything else is empty. */
 function readArray(value: ConversationPersonaValue | undefined): string[] {
   return asStringArray(value);
 }
 
+/** Keeps only the string entries of an unknown array; non-arrays become empty. */
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string');
@@ -207,12 +226,14 @@ function asStringArray(value: unknown): string[] {
   return [];
 }
 
+/** Safe object view of an unknown JSON column; arrays and primitives become {}. */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** Preserves scalars and string arrays; any other shape degrades to a string array. */
 function toPersonaValue(value: unknown): ConversationPersonaValue {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;

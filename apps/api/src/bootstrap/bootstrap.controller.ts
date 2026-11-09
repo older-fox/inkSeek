@@ -21,6 +21,7 @@ export class BootstrapController {
 
   @Get('status')
   @ApiOperation({ summary: '查询系统是否已完成初始化' })
+  /** Public probe the login page uses to decide between setup and sign-in. */
   status(): Promise<BootstrapStatus> {
     return this.bootstrap.getStatus();
   }
@@ -28,6 +29,7 @@ export class BootstrapController {
   @Post('test-redis')
   @HttpCode(200)
   @ApiOperation({ summary: '校验 Redis 连接参数' })
+  /** Dry-run connection check so credentials can be corrected before committing setup. */
   testRedis(
     @Body(new ZodValidationPipe(redisConnectionSchema)) input: RedisConnectionInput,
   ): Promise<RedisProbeResult> {
@@ -36,6 +38,7 @@ export class BootstrapController {
 
   @Post()
   @ApiOperation({ summary: '完成首次初始化：写入 Redis 配置并创建管理员账户' })
+  /** Creates the first admin and, on success, signs the caller in directly. */
   async initialize(
     @Body(new ZodValidationPipe(bootstrapSchema)) input: BootstrapInput,
     @Req() request: FastifyRequest,

@@ -31,6 +31,7 @@ export class MindTurnInterruptedError extends Error {
   }
 }
 
+/** True for aborts and superseded turns; callers stop quietly instead of retrying. */
 export function isMindTurnInterrupted(error: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) {
     return true;
@@ -299,6 +300,7 @@ export function elapsedLabel(value: Date | string): string {
   return `${Math.round(ms / 86_400_000)} 天`;
 }
 
+/** Rounds, then bounds a number into an inclusive range. */
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
@@ -326,14 +328,17 @@ export function relationScoreOf(
   );
 }
 
+/** Defensive read of loose persona JSON; non-strings yield the fallback. */
 export function readString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+/** Defensive read of loose persona JSON; non-numeric or non-finite values yield the fallback. */
 export function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+/** Filters a loose JSON value down to non-empty strings. */
 export function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -341,6 +346,7 @@ export function readStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
+/** Recovers the first JSON object from model text, tolerating fences and truncation. */
 export function parseJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = stripCodeFence(text);
   const start = trimmed.indexOf('{');
@@ -408,6 +414,7 @@ export function parseToolCallEnvelopes(text: string): ParsedToolCall[] {
   return calls;
 }
 
+/** Splits the `name{...}` shorthand; a name without a dot is not a tool name. */
 function splitToolNameAndArguments(body: string): { name: string; input: unknown } | null {
   const match = /^([A-Za-z_][\w.-]*)\s*(\{[\s\S]*)$/u.exec(body);
   const name = match?.[1];
@@ -418,6 +425,7 @@ function splitToolNameAndArguments(body: string): { name: string; input: unknown
   return parsed ? { name, input: parsed } : null;
 }
 
+/** Arguments sometimes arrive as a JSON string; anything unparsable becomes an empty object. */
 function normalizeToolInput(value: unknown): unknown {
   if (typeof value !== 'string') {
     return value ?? {};
@@ -475,6 +483,7 @@ export function parseDsmlToolCalls(text: string): ParsedToolCall[] {
   return calls;
 }
 
+/** `string="true"` parameters stay raw text; the rest are tried as JSON first. */
 function dsmlParameterValue(raw: string, attributes: string): unknown {
   const value = raw.trim();
   if (/string\s*=\s*"true"/iu.test(attributes)) {
@@ -490,6 +499,7 @@ function dsmlParameterValue(raw: string, attributes: string): unknown {
   }
 }
 
+/** Removes a surrounding markdown fence so the body can be parsed. */
 function stripCodeFence(text: string): string {
   return text
     .trim()
@@ -497,6 +507,7 @@ function stripCodeFence(text: string): string {
     .replace(/\s*```$/, '');
 }
 
+/** JSON.parse that only accepts plain objects, swallowing syntax errors. */
 function tryParseObject(text: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -568,6 +579,7 @@ function repairTruncatedJson(text: string): string | null {
   return null;
 }
 
+/** Balances unclosed strings and brackets, trimming a dangling comma or colon first. */
 function closeTruncatedJson(text: string): string | null {
   let inString = false;
   let escape = false;
@@ -613,6 +625,7 @@ function closeTruncatedJson(text: string): string | null {
   return result;
 }
 
+/** Index of the last comma at the outermost object level, or -1 if there is none. */
 function lastTopLevelComma(text: string): number {
   let inString = false;
   let escape = false;
@@ -645,6 +658,7 @@ function lastTopLevelComma(text: string): number {
   return last;
 }
 
+/** First `[...]` slice of the text, returned only when it parses to an array. */
 export function parseJsonArray(text: string): unknown[] | null {
   const trimmed = text
     .trim()
@@ -663,10 +677,12 @@ export function parseJsonArray(text: string): unknown[] | null {
   }
 }
 
+/** Promise-based delay; negative durations resolve on the next tick. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
+/** Calendar day in the given zone as YYYY-MM-DD; bad zones fall back to server time. */
 export function localDateKey(date: Date, timeZone?: string | null): string {
   try {
     if (timeZone) {
@@ -736,6 +752,7 @@ export function normalizeTimeZone(raw: string | null | undefined): string | null
   return isValidTimeZone(compact) ? compact : null;
 }
 
+/** Probes Intl for the zone name, which throws on anything unrecognised. */
 function isValidTimeZone(value: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value });
@@ -745,6 +762,7 @@ function isValidTimeZone(value: string): boolean {
   }
 }
 
+/** Coarse part-of-day wording used in prompts, derived from the local hour. */
 export function timePeriodLabel(date: Date, timeZone?: string | null): string {
   const hour = localHour(date, timeZone);
   if (hour < 5) return '凌晨';
@@ -757,6 +775,7 @@ export function timePeriodLabel(date: Date, timeZone?: string | null): string {
   return '深夜';
 }
 
+/** Hour of day in the given zone; bad zones fall back to the server's local hour. */
 export function localHour(date: Date, timeZone?: string | null): number {
   try {
     if (timeZone) {
@@ -774,6 +793,7 @@ export function localHour(date: Date, timeZone?: string | null): number {
   return date.getHours();
 }
 
+/** Quiet windows wrap past midnight when start > end; missing config falls back to 0–7. */
 export function isQuietHour(hour: number, quietHours: unknown): boolean {
   if (!quietHours || typeof quietHours !== 'object' || Array.isArray(quietHours)) {
     return hour >= 0 && hour < 7;
@@ -787,6 +807,7 @@ export function isQuietHour(hour: number, quietHours: unknown): boolean {
   return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
+/** Renders messages as sequential prompt lines, annotating day changes and long silences. */
 export function formatSceneForPrompt(
   messages: readonly SceneMessage[],
   timeZone?: string | null,
@@ -825,6 +846,7 @@ export function formatSceneForPrompt(
     .join('\n');
 }
 
+/** HH:MM in the target zone; falls back to server local time on bad zones. */
 function formatLocalClock(date: Date, timeZone?: string | null): string {
   try {
     return new Intl.DateTimeFormat('en-GB', {
@@ -838,6 +860,7 @@ function formatLocalClock(date: Date, timeZone?: string | null): string {
   }
 }
 
+/** Short gap wording that promotes to the largest sensible unit. */
 function formatElapsed(ms: number): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
   if (minutes < 60) {
@@ -853,6 +876,7 @@ function formatElapsed(ms: number): string {
   return leftover === 0 ? `${days} 天` : `${days} 天 ${leftover} 小时`;
 }
 
+/** Renders a card value as prompt text; lists join with 、 and unknown shapes yield empty. */
 export function personaValueText(
   values: Record<string, unknown> | null | undefined,
   key: string,

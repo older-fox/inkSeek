@@ -14,6 +14,10 @@ interface AuthShellProps {
   footerNote?: string;
 }
 
+/**
+ * Split-screen frame for login and registration: marketing pitch plus feature
+ * highlights on the left, the auth form card on the right, theme toggle on top.
+ */
 export function AuthShell({
   eyebrow,
   title,

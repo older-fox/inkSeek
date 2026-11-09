@@ -81,6 +81,7 @@ const GROUP_FIELD_COUNTS: Record<string, number> = Object.fromEntries(
   ]),
 );
 
+/** Formats a duration in seconds as human-readable Chinese for read-only fields. */
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds)) {
     return '—';
@@ -99,6 +100,7 @@ function formatDuration(seconds: number): string {
   return `${seconds} 秒`;
 }
 
+/** Reads a string persona value for the header, keeping the snapshot fallback when unset. */
 function textValue(
   values: Record<string, PersonaValue> | null,
   key: string,
@@ -108,6 +110,7 @@ function textValue(
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+/** Save/cancel pair shared by inline editors; commit is disabled while the value is invalid. */
 function EditorActions({
   disabled = false,
   onCancel,
@@ -138,6 +141,10 @@ function EditorActions({
   );
 }
 
+/**
+ * Inline editor for one persona field, converting the raw text back into that field's
+ * kind. Enter commits (Ctrl/Cmd+Enter in textareas) and Escape cancels without saving.
+ */
 function PersonaFieldEditor({
   field,
   value,
@@ -159,6 +166,7 @@ function PersonaFieldEditor({
   const numeric = Number(text);
   const numericValid = text.trim() !== '' && Number.isFinite(numeric);
 
+  /** Re-parses the raw text into the field's kind; an invalid number drops the edit. */
   const commit = () => {
     switch (field.kind) {
       case 'tags':
@@ -208,6 +216,7 @@ function PersonaFieldEditor({
     }
   };
 
+  /** Escape cancels the edit; a bare Enter commits, so single-line fields need no button. */
   const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -220,6 +229,7 @@ function PersonaFieldEditor({
     }
   };
 
+  /** Escape cancels; only Ctrl/Cmd+Enter commits, so a plain Enter keeps adding newlines. */
   const handleTextareaKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -333,6 +343,7 @@ function PersonaFieldEditor({
   );
 }
 
+/** Boolean persona field shown as an accessible switch labelled 开启 / 关闭. */
 function SwitchFieldControl({
   field,
   value,
@@ -383,6 +394,7 @@ function SwitchFieldControl({
   );
 }
 
+/** Ordinal field rendered as clickable level segments; the stored value is the index. */
 function LevelFieldControl({
   field,
   value,
@@ -442,6 +454,7 @@ function LevelFieldControl({
   );
 }
 
+/** Timezone persona field that delegates to the shared TimeZonePicker. */
 function TimezoneFieldControl({
   field,
   value,
@@ -465,6 +478,10 @@ function TimezoneFieldControl({
   );
 }
 
+/**
+ * Read-only presentation of a persona value, formatted per field kind. A value the
+ * channel has never reported shows 未同步 instead of an empty slot.
+ */
 function PersonaFieldValue({
   field,
   value,
@@ -596,6 +613,10 @@ function PersonaFieldValue({
   }
 }
 
+/**
+ * One persona attribute: label, key, live-state badge and either its value, an
+ * inline editor, or an always-inline control (boolean, level, timezone).
+ */
 function PersonaFieldCard({
   field,
   value,
@@ -665,6 +686,7 @@ function PersonaFieldCard({
   );
 }
 
+/** Renders every section of a persona group as a responsive grid of field cards. */
 function GroupSection({
   group,
   values,
@@ -702,6 +724,11 @@ function GroupSection({
   );
 }
 
+/**
+ * Portal dialog editing one channel's independent persona snapshot. Edits autosave after
+ * a short debounce and patch the chat-channel cache; fields flagged 实时 round-trip through
+ * the mind-state API instead of the saved values.
+ */
 export function ChannelPersonaPanel({
   channel,
   onClose,
@@ -732,6 +759,11 @@ export function ChannelPersonaPanel({
   const activeCount = activeGroup ? (GROUP_FIELD_COUNTS[activeGroup.id] ?? 0) : 0;
   const displayValues = values ? mergeStateValues(values, liveState) : null;
 
+  /**
+   * Flushes the queued edit immediately. Serialized via savingRef so a second
+   * request never races the first; edits that arrive mid-save are re-flushed
+   * from the finally block instead of being dropped.
+   */
   const saveNow = useCallback(async () => {
     if (savingRef.current) {
       return;
@@ -766,6 +798,7 @@ export function ChannelPersonaPanel({
     }
   }, [queryClient]);
 
+  /** Debounces edits by 450ms so slider drags and typing do not spam the API. */
   const queueSave = useCallback(
     (channelId: string, next: Record<string, PersonaValue>, nextMeta: PersonaMetadata) => {
       pendingRef.current = {
@@ -806,6 +839,7 @@ export function ChannelPersonaPanel({
     };
   }, [channel?.id, channel?.persona?.id]);
 
+  /** Persists a live-state field (mood, energy…) straight to the mind-state API, bypassing card edits. */
   const saveStateField = useCallback(
     async (key: string, value: PersonaValue) => {
       const channelId = channel?.id;
@@ -880,6 +914,7 @@ export function ChannelPersonaPanel({
     };
   }, [saveNow]);
 
+  /** Closes the panel, flushing any debounced edit first so nothing typed is lost. */
   const close = useCallback(() => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
@@ -894,6 +929,7 @@ export function ChannelPersonaPanel({
       return undefined;
     }
 
+    /** Escape closes the panel, skipped while an input or textarea owns the focus. */
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
@@ -919,6 +955,11 @@ export function ChannelPersonaPanel({
     return null;
   }
 
+  /**
+   * Applies one field edit: live-state fields go to their own endpoint, writes that change
+   * nothing are dropped, and everything else is logged in the persona history before the
+   * debounced autosave is queued.
+   */
   const handleChange = (key: string, value: PersonaValue | undefined) => {
     if (!channel || !values || !meta) {
       return;
@@ -1229,6 +1270,7 @@ export function ChannelPersonaPanel({
   );
 }
 
+/** Narrows persona values to the primitive/array shape the persona save endpoint accepts. */
 function toChatValues(values: Record<string, PersonaValue>): Record<string, ChatPersonaValue> {
   const result: Record<string, ChatPersonaValue> = {};
   for (const [key, value] of Object.entries(values)) {

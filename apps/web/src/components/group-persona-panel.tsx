@@ -18,6 +18,7 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
   binding: SlidersHorizontal,
 };
 
+/** Returns the stored string for a key, or the fallback when blank/missing. */
 function textValue(
   values: Record<string, PersonaValue> | null,
   key: string,
@@ -27,6 +28,10 @@ function textValue(
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+/**
+ * Dialog for the group-level persona snapshot: scene, session and binding
+ * traits for one chat group, saved on edit and flushed when closing.
+ */
 export function GroupPersonaPanel({
   conversation,
   channel,
@@ -53,6 +58,7 @@ export function GroupPersonaPanel({
     }
   }, [conversationId]);
 
+  /** Closes the panel, flushing any pending debounced edits first. */
   const close = useCallback(() => {
     flush();
     onClose();
@@ -63,6 +69,7 @@ export function GroupPersonaPanel({
       return undefined;
     }
 
+    /** Escape closes the panel, skipped while an input or textarea owns the focus. */
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
@@ -88,6 +95,10 @@ export function GroupPersonaPanel({
     return null;
   }
 
+  /**
+   * Adapter from the field cards' (key, value) callback to the persona hook, which owns
+   * the local draft and its debounced save.
+   */
   const handleChange = (key: string, value: PersonaValue) => {
     update(key, value);
   };

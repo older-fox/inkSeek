@@ -15,6 +15,7 @@ import { PLATFORMS, useChannels, type Channel } from '@/lib/connections';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/** Channel card: account facts, per-kind counters, persona entry and confirmed removal. */
 function ChannelCard({
   channel,
   onRemove,
@@ -186,6 +187,7 @@ function ChannelCard({
   );
 }
 
+/** Dashed tile that opens the connect dialog. */
 function AddChannelTile({ onAdd }: { onAdd: () => void }) {
   return (
     <button
@@ -208,6 +210,7 @@ function AddChannelTile({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+/** Decorative diagram of the persona-to-QQ bridge on the empty state. */
 function BridgeSketch() {
   return (
     <div className="relative mx-auto w-full max-w-[17rem] rounded-2xl border border-mist-100/[0.07] bg-ink-950/25 p-5">
@@ -241,6 +244,7 @@ function BridgeSketch() {
   );
 }
 
+/** First-run state explaining what connecting a channel does, with the add action. */
 function EmptyChannels({ onAdd }: { onAdd: () => void }) {
   return (
     <motion.section
@@ -302,6 +306,7 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+/** Connections hub: lists channels, connects new ones and opens the persona side panel. */
 export function ConnectionsPage() {
   const channels = useChannels();
   const queryClient = useQueryClient();
@@ -337,6 +342,7 @@ export function ConnectionsPage() {
     },
   });
 
+  /** Invalidates the chat cache so the new channel's synced data shows, then toasts the persona-copy result. */
   const handleConnected = (channel: Channel) => {
     void queryClient.invalidateQueries({ queryKey: ['chat'] });
     toast.success(`已接入 ${PLATFORMS[channel.platform].name} · ${channel.displayName}`, {
@@ -346,6 +352,7 @@ export function ConnectionsPage() {
     });
   };
 
+  /** Delegates to deleteMutation, which also clears the channel's persona overrides on success. */
   const handleRemove = (channel: Channel) => {
     deleteMutation.mutate(channel);
   };

@@ -38,6 +38,11 @@ export class WebSearchService {
     private readonly cache: RedisCacheService,
   ) {}
 
+  /**
+   * Searches via the configured endpoint or the keyless DuckDuckGo fallback,
+   * caching results in Redis for 15 minutes (best-effort). Failures degrade to
+   * an empty disabled response rather than throwing.
+   */
   async search(query: string, limit = 5): Promise<WebSearchResponse> {
     const trimmed = query.trim();
     if (!trimmed) {
@@ -131,6 +136,7 @@ export class WebSearchService {
     throw new Error('网页重定向次数过多');
   }
 
+  /** Calls a configured search api via {query} template or appended query params. */
   private async searchEndpoint(
     endpoint: string,
     apiKey: string,
@@ -151,6 +157,7 @@ export class WebSearchService {
     return normalizeResults(payload).slice(0, limit);
   }
 
+  /** Instant-answer API used when no endpoint is configured; abstract + related topics. */
   private async searchDuckDuckGo(query: string, limit: number): Promise<WebSearchResult[]> {
     const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
     const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
@@ -186,6 +193,7 @@ export class WebSearchService {
   }
 }
 
+/** Coerces varied search payload shapes (arrays or wrapped lists) into results. */
 function normalizeResults(payload: unknown): WebSearchResult[] {
   if (Array.isArray(payload)) {
     return payload
@@ -209,6 +217,7 @@ function normalizeResults(payload: unknown): WebSearchResult[] {
   return [];
 }
 
+/** SSRF url guard: http(s) only, standard ports, no credentials, hash dropped. */
 export function normalizePublicUrl(value: string): URL {
   let url: URL;
   try {
@@ -229,6 +238,7 @@ export function normalizePublicUrl(value: string): URL {
   return url;
 }
 
+/** Resolves the hostname and rejects localhost or any record pointing at a private address. */
 export async function assertPublicHost(url: URL): Promise<void> {
   const host = url.hostname.trim().toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost')) {
@@ -243,6 +253,7 @@ export async function assertPublicHost(url: URL): Promise<void> {
   }
 }
 
+/** True for loopback, RFC1918/link-local/CGNAT ranges and anything malformed. */
 function isPrivateAddress(address: string): boolean {
   const value = address.trim().toLowerCase();
   if (value.includes(':')) {
@@ -283,10 +294,12 @@ function isPrivateAddress(address: string): boolean {
   return a === 198 && (b === 18 || b === 19);
 }
 
+/** Statuses that carry a Location header we must follow and re-validate ourselves. */
 function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/** Extracts and decodes the <title> tag text, falling back to an empty string. */
 function extractTitle(html: string): string {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   const title = match?.[1];
@@ -297,6 +310,7 @@ function extractTitle(html: string): string {
     : '';
 }
 
+/** Crude html-to-text: drops script/style/comments and maps block ends to newlines. */
 function htmlToText(html: string): string {
   return decodeEntities(
     html
@@ -313,6 +327,7 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+/** Expands the common named and numeric html entities left after tag stripping. */
 function decodeEntities(text: string): string {
   return text
     .replace(/&nbsp;/gi, ' ')
@@ -325,6 +340,7 @@ function decodeEntities(text: string): string {
     .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)));
 }
 
+/** Small base36 hash used to key cache entries by query text. */
 function hashKey(value: string): string {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {

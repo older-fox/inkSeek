@@ -19,6 +19,7 @@ export interface IssuedSession {
 export class SessionService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Only the hash is stored, so a database leak cannot be replayed as a cookie value. */
   async create(userId: string, meta: SessionMeta = {}): Promise<IssuedSession> {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -36,6 +37,10 @@ export class SessionService {
     return { token, expiresAt };
   }
 
+  /**
+   * Validates a raw token, lazily deleting expired rows and refreshing lastUsedAt on each hit.
+   * Returns null instead of throwing so callers can choose the auth error they surface.
+   */
   async resolve(token: string): Promise<AuthUser | null> {
     const session = await this.prisma.session.findUnique({
       where: { tokenHash: hashToken(token) },
@@ -59,11 +64,13 @@ export class SessionService {
     return toAuthUser(session.user);
   }
 
+  /** Drops the session by hash; deleteMany keeps it silent when the token is already invalid. */
   async revoke(token: string): Promise<void> {
     await this.prisma.session.deleteMany({ where: { tokenHash: hashToken(token) } });
   }
 }
 
+/** Tokens are hashed before storage and lookup so plaintext never touches the database. */
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }

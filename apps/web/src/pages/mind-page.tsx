@@ -32,6 +32,7 @@ import { ApiError, api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { chatChannelsQuery } from '@/lib/queries';
 
+/** Mind observability screen: brief panel plus tabs for runs, relations, memories and plans. */
 export function MindPage() {
   const search = useSearch({ strict: false }) as { channelId?: string; tab?: string };
   const navigate = useNavigate();
@@ -113,10 +114,12 @@ export function MindPage() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : '结束失败'),
   });
 
+  /** Writes the channel to both state and URL, keeping the active tab; every mind query is keyed by channelId, so all panels refetch. */
   const selectChannel = (value: string) => {
     setChannelId(value);
     void navigate({ to: '/mind', search: { channelId: value, tab }, replace: true });
   };
+  /** Mirrors the tab into state and URL, omitting channelId from the search when no channel is selected yet. */
   const selectTab = (value: MindTabKey) => {
     setTab(value);
     void navigate({
@@ -125,10 +128,12 @@ export function MindPage() {
       replace: true,
     });
   };
+  /** Persists the polling interval to localStorage so the chosen cadence survives reloads. */
   const changeRefreshMs = (value: number) => {
     setRefreshMs(value);
     window.localStorage.setItem(REFRESH_STORAGE_KEY, String(value));
   };
+  /** Blows away every ['mind'] query at once; manual-only escape hatch since polling already covers the normal case. */
   const refreshNow = async () => {
     setManualRefreshing(true);
     try {
@@ -323,6 +328,7 @@ export function MindPage() {
   );
 }
 
+/** Keeps only numeric card values and drops metadata keys before rendering the brief. */
 function numericBase(values: Record<string, unknown>): Record<string, number> {
   const metadata = new Set([
     'card_serial',

@@ -87,6 +87,7 @@ export function checkTodoConsent(scene: MindScene, consent: TodoConsent | undefi
   return { ok: true };
 }
 
+/** Invitation must look like an ask, not a passing mention; overlong text is rejected outright. */
 function isInvitation(text: string): boolean {
   const value = text.trim();
   if (!value || value.length > 200) {
@@ -95,6 +96,7 @@ function isInvitation(text: string): boolean {
   return INVITE_PATTERN.test(value);
 }
 
+/** Short hedges and questions are hearsay, not agreement, even when they contain a yes-like token. */
 function isAcceptance(text: string): boolean {
   const value = text
     .trim()
@@ -108,6 +110,7 @@ function isAcceptance(text: string): boolean {
   return ACCEPT_STRONG.test(value) || ACCEPT_BARE.test(value);
 }
 
+/** Group messages count as directed only when they name or @ the persona or one of its aliases. */
 function mentionsPersona(scene: MindScene, message: SceneMessage): boolean {
   const values = scene.persona.values as Record<string, unknown> | null;
   const names = [scene.persona.name, ...readStringArray(values?.['aliases'])]

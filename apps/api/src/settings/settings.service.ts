@@ -46,6 +46,7 @@ export class SettingsService {
     private readonly phone: PhoneService,
   ) {}
 
+  /** Reads every settings block in parallel; secrets are reduced to hints before returning. */
   async getOverview(): Promise<SettingsOverview> {
     const [redisRecord, providers, bilibili, phone, bannedRecord] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
@@ -66,28 +67,37 @@ export class SettingsService {
     };
   }
 
+  /** Normalizes and stores the list; an empty list is persisted and disables filtering. */
   async updateMindBannedWords(input: MindBannedWordsInput): Promise<MindBannedWordsResult> {
     const words = normalizeMindBannedWords(input.words) ?? [];
     await this.config.set(CONFIG_KEYS.mindGlobalBannedWords, words);
     return { words };
   }
 
+  /** Delegates validation and storage to the Bilibili service. */
   async updateBilibili(input: BilibiliSettingsInput): Promise<BilibiliSettingsResult> {
     return { bilibili: await this.bilibili.save(input) };
   }
 
+  /** Pass-through to adb over the address saved in settings. */
   async connectPhone(input: PhoneConnectInput): Promise<PhoneSettingsResult> {
     return { phone: await this.phone.connect(input.address) };
   }
 
+  /** Pass-through pairing call; the one-time code is consumed by adb. */
   async pairPhone(input: PhonePairInput): Promise<PhoneSettingsResult> {
     return { phone: await this.phone.pair(input.address, input.code) };
   }
 
+  /** Pass-through disconnect; the paired device stays trusted. */
   async disconnectPhone(input: PhoneDisconnectInput): Promise<PhoneSettingsResult> {
     return { phone: await this.phone.disconnect(input.address) };
   }
 
+  /**
+   * Reuses the stored password unless explicitly cleared, probes the new config,
+   * and only then persists it so a typo cannot take the cache offline.
+   */
   async updateRedis(input: RedisSettingsInput): Promise<RedisSettingsResult> {
     const record = await this.prisma.systemConfig.findUnique({
       where: { key: CONFIG_KEYS.redisConnection },
@@ -117,6 +127,7 @@ export class SettingsService {
     };
   }
 
+  /** Probes before insert; the stored model list is capped and the true count kept separately. */
   async createProvider(input: ModelProviderInput): Promise<ModelProviderSaveResult> {
     const probe = await this.providerProbe.probe(input);
     const models = probe.models.slice(0, STORED_MODEL_LIMIT);
@@ -155,6 +166,7 @@ export class SettingsService {
     };
   }
 
+  /** Re-runs the probe against the stored credentials and refreshes the model list. */
   async retestProvider(id: string): Promise<ModelProviderSaveResult> {
     const existing = await this.prisma.modelProvider.findUnique({ where: { id } });
 
@@ -190,6 +202,7 @@ export class SettingsService {
     };
   }
 
+  /** Deletes by id and reports a missing row as 404 instead of a raw Prisma error. */
   async deleteProvider(id: string): Promise<void> {
     try {
       await this.prisma.modelProvider.delete({ where: { id } });
@@ -206,6 +219,7 @@ export class SettingsService {
   }
 }
 
+/** Projects the stored connection into its masked settings view; invalid data reads as unset. */
 function toRedisSettings(value: unknown, updatedAt?: Date): RedisSettings | null {
   const parsed = redisConnectionSchema.safeParse(value);
 
@@ -225,6 +239,7 @@ function toRedisSettings(value: unknown, updatedAt?: Date): RedisSettings | null
   };
 }
 
+/** Masks the API key down to its last four characters. */
 function toProviderSummary(record: ModelProvider): ModelProviderSummary {
   const models = Array.isArray(record.models)
     ? record.models.filter((model): model is string => typeof model === 'string')
@@ -243,6 +258,7 @@ function toProviderSummary(record: ModelProvider): ModelProviderSummary {
   };
 }
 
+/** Structural check instead of `instanceof`, since Prisma errors arrive as plain objects. */
 function hasPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' &&

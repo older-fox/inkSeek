@@ -33,6 +33,7 @@ for (const candidate of [resolve(repoRoot, '.env'), resolve(scriptDir, '../.env'
 }
 
 const args = process.argv.slice(2);
+/** Reads the value following a CLI flag; undefined when the flag is absent. */
 const flag = (name) => {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
@@ -139,6 +140,7 @@ try {
   const senderName =
     senderArg || lastInbound?.sender?.nickname || lastInbound?.senderName || undefined;
 
+  /** Row counts across every table a rehearsal touches; diffing before/after exposes hidden writes. */
   const audit = async () => {
     const [agentRun, agentStep, llmPromptLog, memory, message, heartbeat, todo, intention] =
       await Promise.all([

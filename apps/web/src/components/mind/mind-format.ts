@@ -165,6 +165,7 @@ export const STATE_WAKE_REASON_LABELS: Record<string, string> = {
   REPLACED: '被新活动替换',
 };
 
+/** Maps a 0–4 sleep-depth score to the Chinese wake-difficulty label. */
 export function sleepDifficultyLabel(depth: number): string {
   if (depth >= 4) return '极难';
   if (depth === 3) return '偏难';
@@ -251,6 +252,7 @@ export type StanceDraft = Record<StanceDimension, number> & {
   explicitCap: string;
 };
 
+/** Renders JSON-ish field values (arrays, strings, objects) as editable multi-line text. */
 export function jsonText(value: unknown): string {
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string').join('\n');
@@ -264,6 +266,7 @@ export function jsonText(value: unknown): string {
   return '';
 }
 
+/** Splits newline- or comma-separated input into trimmed, non-empty list items. */
 export function listText(value: string): string[] {
   return value
     .split(/\r?\n|,|，/)
@@ -271,6 +274,7 @@ export function listText(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Parses text as JSON, falling back to the raw string and treating empty text as []. */
 export function jsonValue(value: string): unknown {
   const text = value.trim();
   if (!text) {
@@ -283,6 +287,7 @@ export function jsonValue(value: string): unknown {
   }
 }
 
+/** Parses text into a plain object; empty text yields {} and invalid input yields null. */
 export function jsonObject(value: string): Record<string, unknown> | null {
   const text = value.trim();
   if (!text) {
@@ -298,12 +303,14 @@ export function jsonObject(value: string): Record<string, unknown> | null {
   }
 }
 
+/** Narrows an unknown extras value to a plain object, defaulting to {} for anything else. */
 export function extrasRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** Converts a datetime-local string to ISO, returning null when empty or unparsable. */
 export function toIsoOrNull(value: string): string | null {
   const text = value.trim();
   if (!text) {
@@ -313,6 +320,10 @@ export function toIsoOrNull(value: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/**
+ * Builds editable relationship form state from a stored record, defaulting
+ * missing dimensions to 0.
+ */
 export function relationDraftOf(record: PersonaRelationshipRecord | null): RelationDraft {
   return {
     ...(Object.fromEntries(
@@ -331,6 +342,7 @@ export function relationDraftOf(record: PersonaRelationshipRecord | null): Relat
   };
 }
 
+/** Converts edited form state to the API payload, throwing when extras JSON is invalid. */
 export function relationInputFromDraft(
   contactId: string,
   draft: RelationDraft,
@@ -367,6 +379,10 @@ export function relationInputFromDraft(
   };
 }
 
+/**
+ * Builds editable group-stance form state, clamping dimensions to 0–100 and
+ * lifting scene extras into their own fields.
+ */
 export function stanceDraftOf(record: PersonaGroupStanceRecord | null): StanceDraft {
   const extras = extrasRecord(record?.extras);
   return {
@@ -387,6 +403,7 @@ export function stanceDraftOf(record: PersonaGroupStanceRecord | null): StanceDr
   };
 }
 
+/** Chinese mood label from valence, with arousal adding an excited or drained prefix. */
 export function stateMoodLabel(state: { moodValence: number; moodArousal: number }): string {
   const base =
     state.moodValence > 30
@@ -403,6 +420,7 @@ export function stateMoodLabel(state: { moodValence: number; moodArousal: number
   return base;
 }
 
+/** Short Chinese date-time for an ISO timestamp; unparsable values pass through. */
 export function formatTime(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -415,6 +433,7 @@ export function formatTime(value: string | null): string {
   });
 }
 
+/** Renders any state value for display, treating null/undefined as an em dash. */
 export function formatStateValue(value: unknown): string {
   if (value === null || value === undefined) {
     return '—';
@@ -425,6 +444,7 @@ export function formatStateValue(value: unknown): string {
   return String(value);
 }
 
+/** Formats an epoch millisecond timestamp as 24-hour clock time. */
 export function formatClock(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false });
 }

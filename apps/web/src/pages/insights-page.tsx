@@ -101,6 +101,7 @@ interface Exchange {
   citations: MindInsightEvidence[];
 }
 
+/** Insight feed: stats, token usage and evidence-backed cards that accept follow-up questions. */
 export function InsightsPage() {
   const search = useSearch({ strict: false }) as { channelId?: string; days?: number };
   const navigate = useNavigate();
@@ -125,9 +126,11 @@ export function InsightsPage() {
   const persona = channel?.persona ?? null;
   const feedQuery = useQuery(mindInsightsQuery(channelId, days));
 
+  /** Keyed navigation: the feed query is built from channelId + days, so switching channels refetches the cached insights while keeping the window. */
   const changeChannel = (value: string) => {
     void navigate({ to: '/insights', search: { channelId: value, days }, replace: true });
   };
+  /** Same feed-key effect as changeChannel but for the time window; omits channelId when none is chosen yet. */
   const changeDays = (value: number) => {
     void navigate({
       to: '/insights',
@@ -135,6 +138,7 @@ export function InsightsPage() {
       replace: true,
     });
   };
+  /** Manual escape hatch only — the feed otherwise reloads on key changes; the flag drives the button spinner. */
   const refreshNow = async () => {
     setRefreshing(true);
     try {
@@ -370,6 +374,7 @@ export function InsightsPage() {
   );
 }
 
+/** Token spend summary for the window, split by run trigger. */
 function UsageStrip({ usage }: { usage: MindInsightUsage }) {
   const delta =
     usage.previousTotalTokens && usage.previousTotalTokens > 0
@@ -457,6 +462,7 @@ function UsageStrip({ usage }: { usage: MindInsightUsage }) {
   );
 }
 
+/** One headline number in the top stat strip. */
 function StatCell({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
     <div className="bg-ink-900/60 px-4 py-4">
@@ -469,6 +475,7 @@ function StatCell({ label, value, hint }: { label: string; value: number; hint: 
   );
 }
 
+/** One insight: metrics, evidence list, confidence and an inline follow-up thread. */
 function InsightCard({
   card,
   channelId,
@@ -526,12 +533,14 @@ function InsightCard({
     },
   });
 
+  /** Trims and refuses empty or in-flight follow-ups, then clears the input eagerly; the answer lands in the thread on success and onSettled refocuses. */
   const submit = (question: string) => {
     const text = question.trim();
     if (!text || ask.isPending) return;
     setDraft('');
     ask.mutate(text);
   };
+  /** Prevents the native form reload before routing the draft through submit. */
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     submit(draft);
@@ -800,6 +809,7 @@ function InsightCard({
   );
 }
 
+/** Signed change between two numeric metric strings; null when not comparable. */
 function metricDelta(value: string, previous: string | undefined): number | null {
   if (previous === undefined) return null;
   const current = Number(value);
@@ -808,6 +818,7 @@ function metricDelta(value: string, previous: string | undefined): number | null
   return Math.round((current - before) * 10) / 10;
 }
 
+/** Centered empty or error message block with an optional action. */
 function Panel({
   icon,
   title,
@@ -836,6 +847,7 @@ function Panel({
   );
 }
 
+/** Skeleton layout shown while channels or the feed load. */
 function LoadingBlock() {
   return (
     <div className="mt-8 space-y-4">

@@ -22,6 +22,7 @@ type SnapshotSource = Pick<
 export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPersonaDraft {
   const { data, profile } = card;
   const values: Record<string, ChatPersonaValue> = {};
+  /** Writes only meaningful values: skips undefined, blank strings and arrays whose items are all blank, keeping the snapshot minimal. */
   const put = (key: string, value: ChatPersonaValue | undefined) => {
     if (value === undefined) {
       return;
@@ -162,6 +163,7 @@ export function buildChannelPersonaSnapshot(card: SnapshotSource): ChatChannelPe
   };
 }
 
+/** Falls back to composing length, punctuation and humor when no style is authored. */
 export function derivedLanguageStyle(data: PersonaDraft): string {
   const style = data.language_style.trim();
 

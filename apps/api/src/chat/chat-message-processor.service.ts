@@ -21,6 +21,10 @@ export class ChatMessageProcessor {
     private readonly burst: PrivateBurstService,
   ) {}
 
+  /**
+   * Dispatches by mind mode: OFF drops, SHADOW runs detached, private chats may be
+   * batched, everything else goes to the loop. Never throws back into ingest.
+   */
   async process(message: ChatMessageSnapshot): Promise<void> {
     try {
       if (message.isSelf) {
@@ -59,6 +63,7 @@ export class ChatMessageProcessor {
     }
   }
 
+  /** Records the merged-away messages as one batch, then runs the turn on the last one. */
   private async handleBurst(messages: ChatMessageSnapshot[], quietSeconds: number): Promise<void> {
     const last = messages[messages.length - 1];
     if (!last) {

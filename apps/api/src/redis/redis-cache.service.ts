@@ -22,6 +22,7 @@ export class RedisCacheService implements OnModuleDestroy {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Returns `null` on any failure, which callers treat as a cache miss. */
   async get(key: string): Promise<string | null> {
     const client = await this.clientFor();
     if (!client) {
@@ -39,6 +40,7 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Writes with a TTL rounded up to at least one second; failures are swallowed. */
   async set(key: string, value: string, ttlSeconds: number): Promise<void> {
     const client = await this.clientFor();
     if (!client) {
@@ -77,6 +79,7 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Best-effort removal; a missed delete only costs an early expiry. */
   async delete(key: string): Promise<void> {
     const client = await this.clientFor();
     if (!client) {
@@ -92,11 +95,16 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Drops the connection on shutdown; the next call simply reconnects lazily. */
   onModuleDestroy(): void {
     this.client?.disconnect();
     this.client = null;
   }
 
+  /**
+   * Reuses the live client while the stored connection is unchanged. Concurrent
+   * callers share one connect attempt so a cold start opens a single socket.
+   */
   private async clientFor(): Promise<Redis | null> {
     const connection = await this.readConnection();
     if (!connection) {
@@ -121,6 +129,7 @@ export class RedisCacheService implements OnModuleDestroy {
     return this.connecting;
   }
 
+  /** No automatic retries: a failed connect surfaces once and the next call retries. */
   private async connect(connection: RedisConnectionInput): Promise<Redis | null> {
     const client = new Redis({
       host: connection.host,
@@ -147,6 +156,7 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Invalid or missing config reads as "no cache" instead of throwing. */
   private async readConnection(): Promise<RedisConnectionInput | null> {
     const record = await this.prisma.systemConfig.findUnique({
       where: { key: CONFIG_KEYS.redisConnection },
@@ -155,6 +165,7 @@ export class RedisCacheService implements OnModuleDestroy {
     return parsed.success ? parsed.data : null;
   }
 
+  /** Discards a broken client, guarding against a newer one having replaced it. */
   private resetClient(client: Redis): void {
     if (this.client === client) {
       client.disconnect();
@@ -163,6 +174,7 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Logs the outage once so a down Redis does not flood the log. */
   private warnOnce(error: unknown): void {
     if (this.warned) {
       return;
@@ -173,6 +185,7 @@ export class RedisCacheService implements OnModuleDestroy {
   }
 }
 
+/** Races a command against a deadline so a hung connection cannot stall the caller. */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {

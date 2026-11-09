@@ -29,6 +29,10 @@ interface BilibiliSettingsSectionProps {
   bilibili: BilibiliSettings | null;
 }
 
+/**
+ * Settings card for the Bilibili subtitle credential. The cookie is verified
+ * server-side before saving, never echoed back, and can be cleared explicitly.
+ */
 export function BilibiliSettingsSection({ bilibili }: BilibiliSettingsSectionProps) {
   const queryClient = useQueryClient();
   const [showCookie, setShowCookie] = useState(false);

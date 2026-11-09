@@ -17,6 +17,7 @@ export class AuthService {
     private readonly sessions: SessionService,
   ) {}
 
+  /** Lower-cases the username for lookup and fails with the same error for unknown user or bad password. */
   async login(input: LoginInput, meta: SessionMeta = {}): Promise<LoginResult> {
     const username = input.username.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { username } });
@@ -33,6 +34,7 @@ export class AuthService {
     return { user: toAuthUser(user), ...session };
   }
 
+  /** Loads a fresh user row so deleted accounts cannot keep a valid session alive. */
   async getProfile(userId: string): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
@@ -46,6 +48,7 @@ export class AuthService {
     return toAuthUser(user);
   }
 
+  /** Deletes the session row; idempotent when the token is already gone. */
   async logout(token: string): Promise<void> {
     await this.sessions.revoke(token);
   }

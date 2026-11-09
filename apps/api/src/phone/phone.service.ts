@@ -249,6 +249,7 @@ export class PhoneService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Runs adb once and reports availability plus the connected devices; never throws. */
   async status(): Promise<PhoneSettings> {
     const adbPath = this.adbPath();
     let version: string;
@@ -285,6 +286,7 @@ export class PhoneService {
     }
   }
 
+  /** Device-picker payload: like status(), but without the adb binary diagnostics. */
   async devices(): Promise<PhoneDeviceList> {
     const status = await this.status();
     return {
@@ -294,6 +296,7 @@ export class PhoneService {
     };
   }
 
+  /** Connects over TCP and reports the authorization prompt as a distinct error. */
   async connect(address: string): Promise<PhoneSettings> {
     await this.assertAdb();
     const target = normalizeAddress(address);
@@ -322,6 +325,7 @@ export class PhoneService {
     return this.status();
   }
 
+  /** Exchanges the wireless-debugging pairing code, then re-reads the device list. */
   async pair(address: string, code: string): Promise<PhoneSettings> {
     await this.assertAdb();
     const target = normalizeAddress(address);
@@ -340,6 +344,7 @@ export class PhoneService {
     return this.status();
   }
 
+  /** Drops the given TCP device, or every device when no address is given. */
   async disconnect(address?: string): Promise<PhoneSettings> {
     await this.assertAdb();
     const target = address?.trim() ? normalizeAddress(address) : '';
@@ -373,6 +378,7 @@ export class PhoneService {
     };
   }
 
+  /** Dumps the accessibility tree; needs an unlocked, awake screen or the dump is useless. */
   async screen(channelId: string): Promise<PhoneScreen> {
     const serial = await this.requireDevice(channelId);
     if ((await this.readScreenOn(serial)) === false) {
@@ -470,6 +476,7 @@ export class PhoneService {
     const output = await this.shell(serial, ['dumpsys', 'notification', '--noredact']);
     const records: PhoneNotification[] = [];
     let current: (PhoneNotification & { key: string }) | null = null;
+    /** Closes the block being parsed; notifications with neither title nor text are noise. */
     const flush = () => {
       if (!current) {
         return;
@@ -544,6 +551,7 @@ export class PhoneService {
     const output = await this.shell(serial, ['dumpsys', 'media_session']);
     const sessions: PhoneMediaSession[] = [];
     let current: (PhoneMediaSession & { rawState: number }) | null = null;
+    /** Closes the block being parsed; the framework's own server packages are not real sessions. */
     const flush = () => {
       if (!current) {
         return;
@@ -747,6 +755,7 @@ export class PhoneService {
       if (!line.startsWith('Row:')) {
         continue;
       }
+      /** Pulls one `key=value` column out of the raw `Row:` line; missing reads as empty. */
       const value = (key: string) => new RegExp(`${key}=([^,]+)`, 'u').exec(line)?.[1]?.trim() ?? '';
       const id = value('_id');
       if (!id) {
@@ -796,6 +805,10 @@ export class PhoneService {
     };
   }
 
+  /**
+   * Executes one input action, validating coordinates and key names first so adb
+   * is never invoked with malformed arguments.
+   */
   async act(channelId: string, input: PhoneActionInput): Promise<PhoneActionResult> {
     const serial = await this.requireDevice(channelId);
     const action = input.action.trim().toLowerCase();
@@ -1004,6 +1017,7 @@ export class PhoneService {
     return this.readScreenOn(await this.requireDevice(channelId));
   }
 
+  /** Prefers mScreenState and falls back to wakefulness; null means the phone would not say. */
   private async readScreenOn(serial: string): Promise<boolean | null> {
     const state = /mScreenState=(\w+)/u.exec(
       await this.shell(serial, ['dumpsys display | grep -m1 mScreenState=']).catch(() => ''),
@@ -1017,6 +1031,7 @@ export class PhoneService {
     return wakefulness ? wakefulness === 'Awake' : null;
   }
 
+  /** Reads installed packages from pm; -3 limits the listing to user-installed apps. */
   private async listApps(serial: string, includeSystem: boolean): Promise<PhoneApp[]> {
     const output = await this.shell(serial, [
       'pm',
@@ -1076,6 +1091,7 @@ export class PhoneService {
     throw new Error(`找不到应用“${raw}”；可用 phone.apps 查看已安装应用`);
   }
 
+  /** Parses dumpsys battery; null rather than an exception when the output is unreadable. */
   private async batteryOf(
     serial: string,
   ): Promise<{ level: number; charging: boolean } | null> {
@@ -1092,10 +1108,15 @@ export class PhoneService {
     };
   }
 
+  /** Runs a device shell command against one serial with the shared adb timeout. */
   private async shell(serial: string, args: string[]): Promise<string> {
     return this.runText(['-s', serial, 'shell', ...args], ADB_TIMEOUT_MS);
   }
 
+  /**
+   * Resolves the channel's saved serial and enforces that it is a wireless device
+   * currently in the connected state; every failure has a user-facing message.
+   */
   private async requireDevice(channelId: string): Promise<string> {
     const status = await this.status();
     if (!status.adbAvailable) {
@@ -1125,6 +1146,7 @@ export class PhoneService {
     return serial;
   }
 
+  /** Parses `adb devices -l`; USB serials are dropped because only wireless debugging is supported. */
   private async listDevices(): Promise<PhoneDeviceInfo[]> {
     const output = await this.runText(['devices', '-l'], 10_000);
     const devices: PhoneDeviceInfo[] = [];
@@ -1156,6 +1178,7 @@ export class PhoneService {
     return devices;
   }
 
+  /** Caches the resolved adb binary so filesystem probing happens at most once. */
   private adbPath(): string {
     if (!this.adb) {
       this.adb = findAdb();
@@ -1163,6 +1186,7 @@ export class PhoneService {
     return this.adb;
   }
 
+  /** Fails fast with an install hint when adb cannot be executed at all. */
   private async assertAdb(): Promise<void> {
     try {
       await this.runText(['version'], 8_000);
@@ -1174,6 +1198,7 @@ export class PhoneService {
     }
   }
 
+  /** adb wrapper decoding stdout as UTF-8; rejects with adb's own stderr on failure. */
   private async runText(args: string[], timeout: number): Promise<string> {
     const { stdout } = await execFileAsync(this.adbPath(), args, {
       timeout,
@@ -1184,6 +1209,7 @@ export class PhoneService {
     return stdout;
   }
 
+  /** adb wrapper for binary payloads such as screencap PNGs. */
   private async runBuffer(args: string[], timeout: number): Promise<Buffer> {
     const result = await execFileAsync(this.adbPath(), args, {
       timeout,
@@ -1196,6 +1222,7 @@ export class PhoneService {
   }
 }
 
+/** Probes ADB_PATH and the usual Android SDK locations, falling back to a bare `adb` on PATH. */
 function findAdb(): string {
   const name = process.platform === 'win32' ? 'adb.exe' : 'adb';
   const candidates = [
@@ -1233,6 +1260,7 @@ function isWirelessSerial(serial: string): boolean {
   );
 }
 
+/** Accepts a bare IPv4 by appending the default 5555 port; anything unparsable is a 400. */
 function normalizeAddress(input: string): string {
   const text = input.trim();
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(text)) {
@@ -1247,6 +1275,7 @@ function normalizeAddress(input: string): string {
   });
 }
 
+/** Requires a finite number and clamps it into a plausible screen range. */
 function coordinate(value: number | undefined, name: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`缺少坐标 ${name}`);
@@ -1254,6 +1283,7 @@ function coordinate(value: number | undefined, name: string): number {
   return Math.round(clamp(value, 0, 20_000));
 }
 
+/** Resolves an alias, single letter, digit or raw keycode; null means unsupported. */
 function keyCodeOf(key: string): number | null {
   if (!key) {
     return null;
@@ -1273,18 +1303,22 @@ function keyCodeOf(key: string): number | null {
   return KEY_CODES[key] ?? null;
 }
 
+/** Formats MediaStore's seconds-since-epoch; zero or NaN becomes an empty string. */
 function formatEpochSeconds(value: number): string {
   return Number.isFinite(value) && value > 0 ? new Date(value * 1000).toISOString() : '';
 }
 
+/** Constrains a number to the inclusive [min, max] range. */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** POSIX-single-quotes a value so spaces and metacharacters survive the remote shell. */
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+/** Uniform success envelope; the note tells the agent to re-read the screen to confirm. */
 function actionDone(action: string, detail: string): PhoneActionResult {
   return {
     ok: true,
@@ -1294,6 +1328,10 @@ function actionDone(action: string, detail: string): PhoneActionResult {
   };
 }
 
+/**
+ * Converts uiautomator XML into numbered tappable lines: a node inherits its nearest
+ * clickable ancestor's bounds so labels stay addressable. Output is capped at MAX_ELEMENTS.
+ */
 function summarizeUiDump(xml: string, device: string): PhoneScreen {
   const tagPattern = /<node\b([^>]*?)(\/?)>|<\/node>/gu;
   const stack: OpenNode[] = [];
@@ -1380,6 +1418,7 @@ function summarizeUiDump(xml: string, device: string): PhoneScreen {
   };
 }
 
+/** Pulls key="value" pairs out of a single node tag, ignoring namespace prefixes. */
 function parseAttributes(raw: string): Record<string, string> {
   const attributes: Record<string, string> = {};
   const pattern = /([A-Za-z][\w-]*)\s*=\s*"([^"]*)"/gu;
@@ -1393,6 +1432,7 @@ function parseAttributes(raw: string): Record<string, string> {
   return attributes;
 }
 
+/** Parses the [left,top][right,bottom] form; null when the attribute is missing or malformed. */
 function parseBounds(value: string | undefined): Bounds | null {
   const match = value?.match(/^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/u);
   if (!match) {
@@ -1405,12 +1445,14 @@ function parseBounds(value: string | undefined): Bounds | null {
   return { left, top, right, bottom };
 }
 
+/** Tap point for a rect, formatted as the "x,y" pair adb input expects. */
 function center(bounds: Bounds): string {
   return `${Math.round((bounds.left + bounds.right) / 2)},${Math.round(
     (bounds.top + bounds.bottom) / 2,
   )}`;
 }
 
+/** Expands the XML entities and numeric character references uiautomator emits. */
 function decodeEntities(value: string): string {
   return value
     .replaceAll('&quot;', '"')
@@ -1422,6 +1464,7 @@ function decodeEntities(value: string): string {
     .replace(/&#x([0-9a-f]+);/giu, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
 }
 
+/** Collapses whitespace and trims long adb output for use in error text. */
 function compact(value: string): string {
   return value.replace(/\s+/gu, ' ').trim().slice(0, 160);
 }
@@ -1434,6 +1477,7 @@ function pngSize(buffer: Buffer): { width: number; height: number } | null {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
+/** Prefers adb's own stderr over the generic exec message, trimmed for display. */
 function messageOf(error: unknown): string {
   if (error instanceof Error) {
     const candidate = error as Error & { stderr?: unknown };
@@ -1444,6 +1488,7 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
+/** Gives the device a moment to settle after an input command. */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);

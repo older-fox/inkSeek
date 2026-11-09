@@ -6,6 +6,10 @@ import { cn } from '@/lib/cn';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/**
+ * Tracks whether a clamped text block is truncated and re-measures on resize,
+ * so callers can decide whether to offer an expand affordance.
+ */
 export function useClampedOverflow<T extends HTMLElement>(content: string) {
   const ref = useRef<T>(null);
   const [overflow, setOverflow] = useState(false);
@@ -18,6 +22,7 @@ export function useClampedOverflow<T extends HTMLElement>(content: string) {
       return undefined;
     }
 
+    /** Compares scroll against client height with a 1px slack so rounding can't fake a truncation. */
     const measure = () => {
       setOverflow(element.scrollHeight - element.clientHeight > 1);
     };
@@ -32,6 +37,10 @@ export function useClampedOverflow<T extends HTMLElement>(content: string) {
   return { ref, overflow };
 }
 
+/**
+ * Small "[ 展开 ]" trigger for clamped text; stops propagation so clicking it
+ * inside a clickable card does not also open the card.
+ */
 export function ExpandButton({
   active,
   onClick,
@@ -60,6 +69,10 @@ export function ExpandButton({
   );
 }
 
+/**
+ * Modal that shows a persona field in full, portalled to the body. Locks page
+ * scroll and restores focus to the previously active element when closed.
+ */
 export function PersonaTextDialog({
   open,
   title,
@@ -81,6 +94,7 @@ export function PersonaTextDialog({
 
     const previousFocus = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
+    /** Escape closes the dialog, matching the backdrop click; only mounted while open. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();

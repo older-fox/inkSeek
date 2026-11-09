@@ -19,6 +19,10 @@ const SCENE_DETAILS: { value: MindSceneDetail; label: string; hint: string }[] =
   { value: 'EXPLICIT', label: '详细场景', hint: '二次扩写场景与动作' },
 ];
 
+/**
+ * Runtime settings form for one channel's mind: mode, heartbeat, wake pacing,
+ * proactivity, learning and phone options, saved as a single payload.
+ */
 export function MindSettingsPanel({
   channelId,
   personaName,
@@ -576,6 +580,10 @@ export function MindSettingsPanel({
   );
 }
 
+/**
+ * Builds the device picker options, appending the saved serial when it is
+ * currently offline so the selection is not silently lost.
+ */
 function phoneDeviceOptions(current: string, devices: PhoneDeviceInfo[]): DropdownOption[] {
   const options: DropdownOption[] = [{ value: '', label: '不使用手机' }];
   for (const device of devices) {
