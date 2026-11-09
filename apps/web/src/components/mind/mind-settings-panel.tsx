@@ -73,8 +73,11 @@ export function MindSettingsPanel({
 
   useEffect(() => {
     if (!settings) return;
-    if (appliedSettingsRef.current === settings.updatedAt) return;
-    appliedSettingsRef.current = settings.updatedAt;
+    // Include the channel so a stale timestamp from another channel cannot
+    // keep this panel populated with the previous channel's values.
+    const appliedKey = `${channelId}:${settings.updatedAt}`;
+    if (appliedSettingsRef.current === appliedKey) return;
+    appliedSettingsRef.current = appliedKey;
     setMode(settings.mode);
     setHeartbeat(settings.heartbeatEnabled);
     setProactive(settings.proactiveEnabled);

@@ -36,6 +36,8 @@ export class MindSocialService {
     scene: MindScene;
     state: PersonaState;
     memories: readonly PersonaMemoryRecord[];
+    /** Per-channel quiet window; omitted means the 00:00–07:00 default. */
+    quietHours?: unknown;
   }): SocialDecision {
     const { scene, state } = input;
     const lastInbound = [...scene.messages].reverse().find((message) => !message.isSelf) ?? null;
@@ -46,7 +48,7 @@ export class MindSocialService {
     const personas = scene.persona.values as Record<string, unknown> | null;
     const timeZone = normalizeTimeZone(readString(personas?.['time_zone']));
     const hour = localHour(new Date(), timeZone);
-    const quiet = isQuietHour(hour, null);
+    const quiet = isQuietHour(hour, input.quietHours ?? null);
     const mentioned = isMentioned(scene, personas);
     const activeExchange = isActiveExchange(scene);
     const boundaryEscalation = readBoundaryEscalation(scene);

@@ -70,8 +70,17 @@ const DRY_RUN_BLOCKED_TOOLS = new Set([
   'sticker.describe',
   'sticker.collect',
   'video.watch',
+  // A rehearsal must not share the persona's live browser context or navigate
+  // it; web.search/web.read stay available as read-only research.
+  'browser.open',
+  'browser.snapshot',
+  'browser.read',
   'browser.click',
   'browser.type',
+  'browser.scroll',
+  'browser.back',
+  'browser.screenshot',
+  'browser.close',
   'phone.screen',
   'phone.screenshot',
   'phone.act',

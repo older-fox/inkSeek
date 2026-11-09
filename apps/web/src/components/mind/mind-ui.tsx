@@ -218,6 +218,27 @@ export function NumberField({
   onChange: (value: number) => void;
   compact?: boolean;
 }) {
+  // Keep raw text while the field is focused so clearing or retyping a digit
+  // does not snap back to min; clamp on blur and on each valid keystroke.
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) {
+      setText(String(value));
+    }
+  }, [value, focused]);
+
+  const commit = () => {
+    const next = Number(text);
+    const clamped =
+      text.trim() !== '' && Number.isFinite(next)
+        ? Math.min(max, Math.max(min, Math.round(next)))
+        : value;
+    setText(String(clamped));
+    onChange(clamped);
+  };
+
   return (
     <label className="flex items-center justify-between gap-3">
       <span>
@@ -230,14 +251,22 @@ export function NumberField({
         type="number"
         min={min}
         max={max}
-        value={value}
+        value={text}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          commit();
+        }}
         onChange={(event) => {
-          if (event.target.value === '') {
-            onChange(min);
+          const raw = event.target.value;
+          setText(raw);
+          if (raw.trim() === '') {
             return;
           }
-          const next = Number(event.target.value);
-          onChange(Number.isFinite(next) ? next : min);
+          const next = Number(raw);
+          if (Number.isFinite(next)) {
+            onChange(Math.min(max, Math.max(min, Math.round(next))));
+          }
         }}
         className={cn(
           'rounded-lg border border-mist-100/[0.1] bg-ink-950/50 px-2 py-1.5 text-center font-mono text-mist-200 outline-none focus:border-brass-400/40',

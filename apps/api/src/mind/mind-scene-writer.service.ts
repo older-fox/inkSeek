@@ -55,10 +55,16 @@ export class MindSceneWriterService {
     const system = `你就是「${input.scene.persona.name}」，不是助手。只写场景、动作和身体反应，不写台词，不写标题，不解释，不提 AI、模型、提示词或系统。`;
     const first = await this.complete(input, prompt, system, SCENE_MAX_TOKENS);
     let completion = first;
+    let promptTokens = first.promptTokens ?? 0;
+    let completionTokens = first.completionTokens ?? 0;
+    let elapsedMs = first.latencyMs;
     let text = cleanSceneText(first.text);
     if (!text) {
       completion = await this.complete(input, prompt, system, SCENE_RETRY_MAX_TOKENS);
       text = cleanSceneText(completion.text);
+      promptTokens += completion.promptTokens ?? 0;
+      completionTokens += completion.completionTokens ?? 0;
+      elapsedMs += completion.latencyMs;
     }
     if (!text) {
       this.logger.warn('场景扩写返回空内容');
@@ -68,9 +74,9 @@ export class MindSceneWriterService {
       text: text.slice(0, SCENE_TEXT_LIMIT),
       providerId: completion.providerId,
       model: completion.model,
-      latencyMs: completion.latencyMs,
-      promptTokens: first.promptTokens ?? 0,
-      completionTokens: first.completionTokens ?? 0,
+      latencyMs: elapsedMs,
+      promptTokens,
+      completionTokens,
     };
   }
 

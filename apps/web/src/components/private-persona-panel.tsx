@@ -46,6 +46,7 @@ export function PrivatePersonaPanel({
 }) {
   const [activeGroupId, setActiveGroupId] = useState(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
   const contentRef = useRef<HTMLDivElement>(null);
+  const conversationId = conversation?.id ?? null;
   const persona = channel ? personaForChannel(channel) : null;
   const { values, ready, error, syncState, update, flush } = useConversationPersona(
     conversation,
@@ -55,10 +56,10 @@ export function PrivatePersonaPanel({
     PRIVATE_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? PRIVATE_PERSONA_GROUPS[0];
 
   useEffect(() => {
-    if (conversation) {
+    if (conversationId) {
       setActiveGroupId(PRIVATE_PERSONA_GROUPS[0]?.id ?? '');
     }
-  }, [conversation]);
+  }, [conversationId]);
 
   const close = useCallback(() => {
     flush();

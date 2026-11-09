@@ -22,6 +22,8 @@ import type {
   SaveChannelPersonaInput,
 } from '@inkseek/shared';
 import { buildChannelPersonaSnapshot } from '@inkseek/shared';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   ChatChannel,
@@ -33,6 +35,7 @@ import { PersonasService } from '../personas/personas.service.js';
 import { ChatEventsService } from './chat-events.service.js';
 import { ChatForwardService, toForwardDetail } from './chat-forward.service.js';
 import { ChatMessagesService, toMessageSummary } from './chat-messages.service.js';
+import { CHAT_CHANNEL_ROOT, isChannelId } from './chat-paths.js';
 import { ChatRuntimeService } from './chat-runtime.service.js';
 import { findForwardSegment } from './message-content.js';
 import { NapCatClient } from './napcat-client.js';
@@ -222,6 +225,18 @@ export class ChatService {
         });
       }
       throw error;
+    }
+
+    // The DB cascade owns metadata; media bytes live under the channel dir and
+    // would otherwise stay publicly served after the channel is gone.
+    if (isChannelId(id)) {
+      await rm(join(CHAT_CHANNEL_ROOT, id), { recursive: true, force: true }).catch(
+        (error: unknown) => {
+          this.logger.warn(
+            `渠道 ${id} 的媒体目录清理失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        },
+      );
     }
 
     this.logger.log(`已移除渠道 ${id} 及其命名空间数据`);

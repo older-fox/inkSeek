@@ -150,8 +150,21 @@ export class MindActionExecutor {
     if (action.status === 'SENT') {
       return toRecord(action);
     }
-    if (action.status !== 'PENDING' && action.status !== 'APPROVED') {
+    if (action.status !== 'PENDING') {
       throw new NotFoundException({ code: 'ACTION_NOT_PENDING', message: '动作不在待审状态' });
+    }
+    // Claim atomically so a double click or two tabs cannot send the same
+    // message twice; only one request can move PENDING to APPROVED.
+    const claimed = await this.prisma.agentAction.updateMany({
+      where: { id: actionId, status: 'PENDING' },
+      data: { status: 'APPROVED', approvedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      const current = await this.prisma.agentAction.findUnique({ where: { id: actionId } });
+      if (!current) {
+        throw new NotFoundException({ code: 'ACTION_NOT_FOUND', message: '动作不存在' });
+      }
+      return toRecord(current);
     }
     const scene = await this.sceneForAction(action);
     const beat = action.payload as unknown as OutgoingBeat;
@@ -161,7 +174,6 @@ export class MindActionExecutor {
         where: { id: action.id },
         data: {
           status: 'SENT',
-          approvedAt: new Date(),
           sentAt: new Date(),
           sentMessageId: sent ?? null,
           error: null,
@@ -172,7 +184,7 @@ export class MindActionExecutor {
       const message = error instanceof Error ? error.message : String(error);
       const updated = await this.prisma.agentAction.update({
         where: { id: action.id },
-        data: { status: 'FAILED', approvedAt: new Date(), error: message.slice(0, 1000) },
+        data: { status: 'FAILED', error: message.slice(0, 1000) },
       });
       return toRecord(updated);
     }

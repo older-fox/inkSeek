@@ -23,7 +23,7 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<BootstrapResult> {
     const { user, token, expiresAt } = await this.auth.login(input, readSessionMeta(request));
-    setSessionCookie(reply, token, expiresAt);
+    setSessionCookie(reply, token, expiresAt, request.protocol === 'https');
     return { user };
   }
 

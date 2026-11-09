@@ -341,7 +341,11 @@ function RunsList({
             {!reachedEnd ? (
               <button
                 type="button"
-                onClick={() => setOffset(runs.length)}
+                onClick={() =>
+                  setOffset((current) =>
+                    current === 0 ? LIST_PAGE_SIZE : current + LIST_PAGE_SIZE,
+                  )
+                }
                 disabled={offset > 0 && pageQuery.isPending}
                 className="mt-2 w-full rounded-lg border border-mist-100/[0.08] py-1.5 text-[0.72rem] text-mist-400 transition hover:border-mist-100/[0.16] hover:text-mist-200 disabled:opacity-50"
               >

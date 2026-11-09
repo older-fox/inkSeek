@@ -546,6 +546,15 @@ export function PersonaWizard({ open, onClose, persona }: PersonaWizardProps) {
   };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      if (confirmDiscard) {
+        setConfirmDiscard(false);
+        return;
+      }
+      handleCancel();
+      return;
+    }
     if (event.key !== 'Tab') {
       return;
     }

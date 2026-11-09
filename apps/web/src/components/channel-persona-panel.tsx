@@ -717,6 +717,7 @@ export function ChannelPersonaPanel({
   const contentRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
   const savingRef = useRef(false);
+  const hydratedChannelRef = useRef<string | null>(null);
   const pendingRef = useRef<{
     channelId: string;
     values: Record<string, PersonaValue>;
@@ -842,13 +843,17 @@ export function ChannelPersonaPanel({
 
   useEffect(() => {
     if (!channel?.persona) {
+      hydratedChannelRef.current = null;
       setValues(null);
       setMeta(null);
       return;
     }
-    if (pendingRef.current || savingRef.current) {
+    // A save from the previous channel may still be in flight while the user
+    // opens another one; that must not block hydrating the new channel.
+    if (hydratedChannelRef.current === channel.id && (pendingRef.current || savingRef.current)) {
       return;
     }
+    hydratedChannelRef.current = channel.id;
     const snapshot = channel.persona;
     const legacy = readChannelPersonaOverrides(channel.id);
     const next = { ...snapshot.values, ...legacy };

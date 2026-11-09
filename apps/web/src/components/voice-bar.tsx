@@ -41,6 +41,8 @@ export function VoiceBar({ voice, self }: { voice: ChatMessageVoiceSummary; self
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onMeta);
       audio.removeEventListener('ended', onEnd);
+      // Switching conversation or closing a forward must not leave audio playing.
+      audio.pause();
     };
   }, []);
 

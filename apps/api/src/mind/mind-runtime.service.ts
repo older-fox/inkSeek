@@ -161,7 +161,12 @@ export class MindRuntimeService implements OnModuleInit {
     }
     const trigger = input.trigger ?? 'MESSAGE';
     if (trigger !== 'MESSAGE') {
-      return this.executeTurn(input, undefined, false);
+      try {
+        return await this.executeTurn(input, undefined, false);
+      } catch (error) {
+        await this.failRunningRun(input.message.messageId, error).catch(() => undefined);
+        throw error;
+      }
     }
 
     const key = `${input.message.conversationId}:${input.message.senderId}`;
@@ -194,6 +199,11 @@ export class MindRuntimeService implements OnModuleInit {
     });
     try {
       return await this.executeTurn(input, controller.signal, Boolean(superseded));
+    } catch (error) {
+      // Every path after AgentRun.create is expected to finish the row itself;
+      // a throw here would otherwise leave the run RUNNING forever.
+      await this.failRunningRun(input.message.messageId, error).catch(() => undefined);
+      throw error;
     } finally {
       if (this.activeTurns.get(key)?.controller === controller) {
         this.activeTurns.delete(key);
@@ -413,7 +423,12 @@ export class MindRuntimeService implements OnModuleInit {
     const query = buildMemoryQuery(scene);
     const recall = await this.memories.recallForScene(scene, query, 12, { review: true });
     const memories = [...recall.core, ...recall.relevant];
-    const decision = this.social.buildDecision({ scene, state, memories });
+    const decision = this.social.buildDecision({
+      scene,
+      state,
+      memories,
+      quietHours: settings.quietHours,
+    });
     const conversationRead = readConversation({ scene, memories });
     if (signal?.aborted) {
       return skipped(INTERRUPTED_REASON);
@@ -623,6 +638,34 @@ export class MindRuntimeService implements OnModuleInit {
     }
 
     const plan = plannerResult.plan;
+    const turnResult = (): MindTurnResult => ({
+      runId: run.id,
+      engage: plan.engage,
+      reason: plan.reason,
+      plan,
+      socialRead: decision.read,
+      felt: plan.felt ?? decision.read.felt,
+      shown: plan.shown ?? plan.stance,
+      memories: memories.map(toPublicMemory),
+    });
+    const finishSucceeded = () =>
+      this.finishRun(run.id, 'SUCCEEDED', {
+        startedAt,
+        decision: {
+          engage: plan.engage,
+          reason: plan.reason,
+          stance: plan.stance,
+          felt: plan.felt ?? decision.read.felt,
+          shown: plan.shown ?? plan.stance,
+        },
+        socialRead: decision.read,
+        plan,
+        providerId: plannerResult.providerId,
+        model: plannerResult.model,
+        latencyMs: plannerResult.latencyMs,
+        promptTokens: plannerResult.promptTokens,
+        completionTokens: plannerResult.completionTokens,
+      });
     if (settings.styleLearningEnabled && plan.styleNotes?.length) {
       await this.styleNotes.addDrafts(
         scene.persona.id,
@@ -715,7 +758,7 @@ export class MindRuntimeService implements OnModuleInit {
     }
     await this.writeBack(run.id, scene, plan, decision.read, state, settings, conversationRead);
     void this.consolidateIfNeeded(scene.persona.id, scene, state);
-    await this.executor.execute({
+    const actions = await this.executor.execute({
       plan,
       scene,
       settings,
@@ -727,36 +770,16 @@ export class MindRuntimeService implements OnModuleInit {
       if (lockAcquired) {
         await this.replyLock.release(scene.conversation.id, run.id);
       }
+      // Aborting only stops the remaining beats; anything already sent makes
+      // this a partial success rather than a run that claims it never replied.
+      if (actions.some((action) => action.status === 'SENT')) {
+        await finishSucceeded();
+        return turnResult();
+      }
       return finishInterruptedTurn('表达中', plan);
     }
-    await this.finishRun(run.id, 'SUCCEEDED', {
-      startedAt,
-      decision: {
-        engage: plan.engage,
-        reason: plan.reason,
-        stance: plan.stance,
-        felt: plan.felt ?? decision.read.felt,
-        shown: plan.shown ?? plan.stance,
-      },
-      socialRead: decision.read,
-      plan,
-      providerId: plannerResult.providerId,
-      model: plannerResult.model,
-      latencyMs: plannerResult.latencyMs,
-      promptTokens: plannerResult.promptTokens,
-      completionTokens: plannerResult.completionTokens,
-    });
-
-    return {
-      runId: run.id,
-      engage: plan.engage,
-      reason: plan.reason,
-      plan,
-      socialRead: decision.read,
-      felt: plan.felt ?? decision.read.felt,
-      shown: plan.shown ?? plan.stance,
-      memories: memories.map(toPublicMemory),
-    };
+    await finishSucceeded();
+    return turnResult();
   }
 
   async heartbeat(
@@ -1076,7 +1099,12 @@ export class MindRuntimeService implements OnModuleInit {
     ].join('；');
     const recall = await this.memories.recallForScene(scene, query, 12, { review: true });
     const memories = [...recall.core, ...recall.relevant];
-    const decision = this.social.buildDecision({ scene, state, memories });
+    const decision = this.social.buildDecision({
+      scene,
+      state,
+      memories,
+      quietHours: settings.quietHours,
+    });
     const [intentionFeedback, activeIntentions] = await Promise.all([
       this.recentIntentionFeedback(personaId),
       this.activeIntentionsBrief(personaId),
@@ -1404,7 +1432,6 @@ export class MindRuntimeService implements OnModuleInit {
       await this.completeWakeItems(
         dueTodos.map((todo) => todo.id),
         dueIntentions.map((intent) => ({ id: intent.id, attempts: intent.attempts })),
-        plan,
         actions.some((action) => action.status === 'SENT'),
         plan.handledIntentionIds ?? [],
         startedAt,
@@ -1414,7 +1441,11 @@ export class MindRuntimeService implements OnModuleInit {
       }
       await this.consolidateIfNeeded(personaId, scene, state, run.id);
       const outcome =
-        mode === 'SHADOW' ? 'SHADOW' : plan.engage && plan.beats.length > 0 ? 'SENT' : 'SILENT';
+        mode === 'SHADOW'
+          ? 'SHADOW'
+          : actions.some((action) => action.status === 'SENT')
+            ? 'SENT'
+            : 'SILENT';
       await log('RUN', plan.reason, {
         ...heartbeatBase,
         runId: run.id,
@@ -1552,7 +1583,12 @@ export class MindRuntimeService implements OnModuleInit {
       markRecalled: false,
     });
     const memories = [...recall.core, ...recall.relevant];
-    const decision = this.social.buildDecision({ scene, state, memories });
+    const decision = this.social.buildDecision({
+      scene,
+      state,
+      memories,
+      quietHours: settings.quietHours,
+    });
     const conversationRead = readConversation({ scene, memories });
     const styleNotes = settings.styleLearningEnabled
       ? await this.styleNotes.activeFor(
@@ -1846,6 +1882,17 @@ export class MindRuntimeService implements OnModuleInit {
       socialRead: null,
     });
     return run.id;
+  }
+
+  private async failRunningRun(messageId: string | null, error: unknown): Promise<void> {
+    if (!messageId) {
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    await this.prisma.agentRun.updateMany({
+      where: { messageId, status: 'RUNNING' },
+      data: { status: 'FAILED', finishedAt: new Date(), error: message.slice(0, 1000) },
+    });
   }
 
   private async finishRun(
@@ -2299,13 +2346,14 @@ export class MindRuntimeService implements OnModuleInit {
   private async completeWakeItems(
     todoIds: string[],
     intentions: readonly { id: string; attempts: number }[],
-    plan: ActionPlan,
     hadActions: boolean,
     handledIntentionIds: readonly string[],
     turnStartedAt: Date,
   ): Promise<void> {
     if (todoIds.length > 0) {
-      const accomplished = plan.engage && plan.beats.length > 0;
+      // Only a beat that actually left the system completes a wake-up todo;
+      // approval/shadow/failed/budget-skipped beats do not.
+      const accomplished = hadActions;
       await this.prisma.agentTodo.updateMany({
         where: { id: { in: todoIds } },
         data: {

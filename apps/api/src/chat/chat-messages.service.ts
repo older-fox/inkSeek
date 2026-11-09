@@ -141,40 +141,59 @@ export class ChatMessagesService {
 
       // Persist the message before any media download, quote lookup or forward
       // expansion: a slow or failing remote must never cost the message itself.
-      const { id } = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.chatMessageRecord.create({
-          data: {
-            channelId: channel.id,
-            conversationId: conversation.id,
-            externalId: parsed.externalId,
-            senderId: senderContact.id,
-            senderName: parsed.senderName,
-            senderCard: parsed.senderCard,
-            isSelf: parsed.isSelf,
-            kind: content.kind,
-            text: content.text,
-            segments: sanitizeInlineMedia(parsed.segments) as unknown as Prisma.InputJsonValue,
-            sentAt: parsed.sentAt,
-          },
-          select: { id: true },
-        });
+      let id: string;
+      try {
+        ({ id } = await this.prisma.$transaction(async (tx) => {
+          const created = await tx.chatMessageRecord.create({
+            data: {
+              channelId: channel.id,
+              conversationId: conversation.id,
+              externalId: parsed.externalId,
+              senderId: senderContact.id,
+              senderName: parsed.senderName,
+              senderCard: parsed.senderCard,
+              isSelf: parsed.isSelf,
+              kind: content.kind,
+              text: content.text,
+              // Keep the inline payload until the media write succeeds; the
+              // second transaction strips it. Otherwise a failed download
+              // destroys the only copy of the image/voice.
+              segments: parsed.segments as unknown as Prisma.InputJsonValue,
+              sentAt: parsed.sentAt,
+            },
+            select: { id: true },
+          });
 
-        await tx.chatConversation.update({
-          where: { id: conversation.id },
-          data: {
-            lastMessageAt: parsed.sentAt,
-            lastMessagePreview: previewOf(
-              content.text,
-              content.kind,
-              imageSegments.length,
-              voiceSegments.length,
-            ),
-            lastMessageSender: parsed.senderCard ?? parsed.senderName,
-          },
-        });
+          // Parallel ingests may finish out of order; an older event must not
+          // overwrite the preview/time of a newer message.
+          await tx.chatConversation.updateMany({
+            where: {
+              id: conversation.id,
+              // `lte` matters: NapCat timestamps are whole seconds, so two
+              // messages can share one and the later ingest should win.
+              OR: [{ lastMessageAt: null }, { lastMessageAt: { lte: parsed.sentAt } }],
+            },
+            data: {
+              lastMessageAt: parsed.sentAt,
+              lastMessagePreview: previewOf(
+                content.text,
+                content.kind,
+                imageSegments.length,
+                voiceSegments.length,
+              ),
+              lastMessageSender: parsed.senderCard ?? parsed.senderName,
+            },
+          });
 
-        return created;
-      });
+          return created;
+        }));
+      } catch (error) {
+        // A concurrent handler won the same external id; its row owns the rest.
+        if (isUniqueViolation(error) && parsed.externalId) {
+          return;
+        }
+        throw error;
+      }
 
       let imageAssets: PositionedMedia[] = [];
       let voiceAssets: PositionedMedia[] = [];
@@ -289,8 +308,11 @@ export class ChatMessagesService {
             },
           });
 
-          await tx.chatConversation.update({
-            where: { id: conversation.id },
+          await tx.chatConversation.updateMany({
+            where: {
+              id: conversation.id,
+              OR: [{ lastMessageAt: null }, { lastMessageAt: { lte: parsed.sentAt } }],
+            },
             data: {
               lastMessagePreview: previewOf(
                 finalContent.text,
@@ -631,48 +653,64 @@ export class ChatMessagesService {
       imageAssets.length > 0 ? (input.text.length > 0 ? 'MIXED' : 'IMAGE') : 'TEXT';
     const text = input.text;
 
-    const { id } = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.chatMessageRecord.create({
-        data: {
-          channelId: channel.id,
-          conversationId: conversation.id,
-          externalId,
-          senderId: selfContact.id,
-          senderName: channel.displayName,
-          senderCard: null,
-          isSelf: true,
-          kind,
-          text,
-          segments: storedSegments as unknown as Prisma.InputJsonValue,
-          sentAt: now,
-          images: {
-            create: imageAssets.map((asset) => ({
-              mediaId: asset.mediaId,
-              url: asset.url,
-              fileName: asset.fileName,
-              mimeType: asset.mimeType,
-              byteSize: asset.byteSize,
-              width: asset.width,
-              height: asset.height,
-              remoteUrl: asset.remoteUrl,
-              position: asset.position,
-            })),
+    let id: string;
+    try {
+      ({ id } = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.chatMessageRecord.create({
+          data: {
+            channelId: channel.id,
+            conversationId: conversation.id,
+            externalId,
+            senderId: selfContact.id,
+            senderName: channel.displayName,
+            senderCard: null,
+            isSelf: true,
+            kind,
+            text,
+            segments: storedSegments as unknown as Prisma.InputJsonValue,
+            sentAt: now,
+            images: {
+              create: imageAssets.map((asset) => ({
+                mediaId: asset.mediaId,
+                url: asset.url,
+                fileName: asset.fileName,
+                mimeType: asset.mimeType,
+                byteSize: asset.byteSize,
+                width: asset.width,
+                height: asset.height,
+                remoteUrl: asset.remoteUrl,
+                position: asset.position,
+              })),
+            },
           },
-        },
-        select: { id: true },
-      });
+          select: { id: true },
+        });
 
-      await tx.chatConversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: now,
-          lastMessagePreview: previewOf(text, kind, imageAssets.length, 0),
-          lastMessageSender: channel.displayName,
-        },
-      });
+        await tx.chatConversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: now,
+            lastMessagePreview: previewOf(text, kind, imageAssets.length, 0),
+            lastMessageSender: channel.displayName,
+          },
+        });
 
-      return created;
-    });
+        return created;
+      }));
+    } catch (error) {
+      // The send echo was ingested first and already owns this external id;
+      // returning it avoids reporting a false failure and a duplicate retry.
+      if (isUniqueViolation(error) && externalId) {
+        const existing = await this.prisma.chatMessageRecord.findUnique({
+          where: { conversationId_externalId: { conversationId: conversation.id, externalId } },
+          select: { id: true },
+        });
+        if (existing) {
+          return toMessageSummary(await this.loadMessageView(existing.id));
+        }
+      }
+      throw error;
+    }
 
     const message = await this.loadMessageView(id);
 
@@ -745,30 +783,37 @@ export class ChatMessagesService {
       : [];
     const forwardRecordId = randomUUID();
 
-    await this.prisma.chatMessageRecord.update({
-      where: { id: messageId },
-      data: {
-        kind: 'FORWARD',
-        text: forwardSummaryText(forward),
-        segments: stripExpandedForward(segments, forward) as unknown as Prisma.InputJsonValue,
-        forward: {
-          create: {
-            id: forwardRecordId,
-            forwardId: forward.forwardId,
-            title: forward.title,
-            source: forward.source,
-            status: forward.status,
-            nodeCount: forward.nodes.length,
-            depth: forward.depth,
-            errorCode: forward.errorCode,
-            nodes: {
-              create: forward.nodes.map((node) => toForwardNodeCreate(node, forwardRecordId)),
+    try {
+      await this.prisma.chatMessageRecord.update({
+        where: { id: messageId },
+        data: {
+          kind: 'FORWARD',
+          text: forwardSummaryText(forward),
+          segments: stripExpandedForward(segments, forward) as unknown as Prisma.InputJsonValue,
+          forward: {
+            create: {
+              id: forwardRecordId,
+              forwardId: forward.forwardId,
+              title: forward.title,
+              source: forward.source,
+              status: forward.status,
+              nodeCount: forward.nodes.length,
+              depth: forward.depth,
+              errorCode: forward.errorCode,
+              nodes: {
+                create: forward.nodes.map((node) => toForwardNodeCreate(node, forwardRecordId)),
+              },
             },
           },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
+    } catch (error) {
+      // Another tab already expanded this legacy card; its rows win.
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+    }
   }
 
   async ensureSelfContact(channel: ChatChannel): Promise<ChatContact> {
@@ -879,13 +924,51 @@ export class ChatMessagesService {
     }
 
     if (parsed.kind === 'PRIVATE') {
+      try {
+        const created = await this.prisma.chatConversation.create({
+          data: {
+            channelId: channel.id,
+            kind: 'PRIVATE',
+            externalId: parsed.peerId,
+            name: parsed.isSelf ? `QQ ${parsed.peerId}` : parsed.senderName,
+            avatarUrl: userAvatarUrl(parsed.peerId),
+          },
+        });
+
+        this.events.emit({
+          type: 'conversation.updated',
+          channelId: channel.id,
+          conversationId: created.id,
+        });
+        return created;
+      } catch (error) {
+        // Two first messages can race on (channel, kind, externalId); the
+        // loser must reuse the winner's row instead of dropping its message.
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
+        return this.prisma.chatConversation.findUniqueOrThrow({
+          where: {
+            channelId_kind_externalId: {
+              channelId: channel.id,
+              kind: 'PRIVATE',
+              externalId: parsed.peerId,
+            },
+          },
+        });
+      }
+    }
+
+    const info = await this.fetchGroupInfo(client, parsed.peerId);
+    try {
       const created = await this.prisma.chatConversation.create({
         data: {
           channelId: channel.id,
-          kind: 'PRIVATE',
+          kind: 'GROUP',
           externalId: parsed.peerId,
-          name: parsed.isSelf ? `QQ ${parsed.peerId}` : parsed.senderName,
-          avatarUrl: userAvatarUrl(parsed.peerId),
+          name: info?.group_name?.trim() || `群 ${parsed.peerId}`,
+          avatarUrl: groupAvatarUrl(parsed.peerId),
+          memberCount: info?.member_count ?? null,
         },
       });
 
@@ -894,30 +977,24 @@ export class ChatMessagesService {
         channelId: channel.id,
         conversationId: created.id,
       });
+
+      void this.syncGroupMembers(channel, created.id, parsed.peerId, client);
+
       return created;
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+      return this.prisma.chatConversation.findUniqueOrThrow({
+        where: {
+          channelId_kind_externalId: {
+            channelId: channel.id,
+            kind: 'GROUP',
+            externalId: parsed.peerId,
+          },
+        },
+      });
     }
-
-    const info = await this.fetchGroupInfo(client, parsed.peerId);
-    const created = await this.prisma.chatConversation.create({
-      data: {
-        channelId: channel.id,
-        kind: 'GROUP',
-        externalId: parsed.peerId,
-        name: info?.group_name?.trim() || `群 ${parsed.peerId}`,
-        avatarUrl: groupAvatarUrl(parsed.peerId),
-        memberCount: info?.member_count ?? null,
-      },
-    });
-
-    this.events.emit({
-      type: 'conversation.updated',
-      channelId: channel.id,
-      conversationId: created.id,
-    });
-
-    void this.syncGroupMembers(channel, created.id, parsed.peerId, client);
-
-    return created;
   }
 
   private async fetchGroupInfo(
@@ -1253,6 +1330,10 @@ export class ChatMessagesService {
       this.logger.warn(`消息处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002';
 }
 
 export function toMessageSummary(record: MessageView): ChatMessageSummary {

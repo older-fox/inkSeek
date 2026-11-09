@@ -45,7 +45,7 @@ export class BootstrapController {
       ip: request.ip,
       userAgent: request.headers['user-agent'],
     });
-    setSessionCookie(reply, token, expiresAt);
+    setSessionCookie(reply, token, expiresAt, request.protocol === 'https');
     return { user };
   }
 }

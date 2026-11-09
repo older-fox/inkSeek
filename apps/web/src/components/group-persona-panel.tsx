@@ -38,6 +38,7 @@ export function GroupPersonaPanel({
 }) {
   const [activeGroupId, setActiveGroupId] = useState(GROUP_PERSONA_GROUPS[0]?.id ?? '');
   const contentRef = useRef<HTMLDivElement>(null);
+  const conversationId = conversation?.id ?? null;
   const persona = channel ? personaForChannel(channel) : null;
   const { values, ready, error, syncState, update, flush } = useConversationPersona(
     conversation,
@@ -47,10 +48,10 @@ export function GroupPersonaPanel({
     GROUP_PERSONA_GROUPS.find((group) => group.id === activeGroupId) ?? GROUP_PERSONA_GROUPS[0];
 
   useEffect(() => {
-    if (conversation) {
+    if (conversationId) {
       setActiveGroupId(GROUP_PERSONA_GROUPS[0]?.id ?? '');
     }
-  }, [conversation]);
+  }, [conversationId]);
 
   const close = useCallback(() => {
     flush();

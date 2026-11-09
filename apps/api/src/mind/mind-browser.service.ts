@@ -29,6 +29,7 @@ interface BrowserSession {
 
 const IDLE_CLOSE_MS = 10 * 60_000;
 const SWEEP_MS = 2 * 60_000;
+const BROWSER_RETRY_MS = 30_000;
 const NAV_TIMEOUT_MS = 30_000;
 const MAX_VISITS = 60;
 const USER_AGENT =
@@ -90,6 +91,7 @@ const READ_SCRIPT = String.raw`(() => {
 export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MindBrowserService.name);
   private browserPromise: Promise<Browser | null> | null = null;
+  private browserFailedAt = 0;
   private readonly sessions = new Map<string, Promise<BrowserSession>>();
   private readonly live = new Map<string, BrowserSession>();
   /** Kept after close so a learning session can still cite what it read. */
@@ -288,11 +290,19 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     }
     const created = this.createSession();
     this.sessions.set(personaId, created);
-    created.then((session) => {
-      session.lastUsed = Date.now();
-      this.live.set(personaId, session);
-      this.lastUsed.set(personaId, session.lastUsed);
-    });
+    created
+      .then((session) => {
+        session.lastUsed = Date.now();
+        this.live.set(personaId, session);
+        this.lastUsed.set(personaId, session.lastUsed);
+      })
+      .catch(() => {
+        // A failed launch must not pin a rejected promise forever; the next
+        // tool call should be allowed to retry.
+        if (this.sessions.get(personaId) === created) {
+          this.sessions.delete(personaId);
+        }
+      });
     return created;
   }
 
@@ -345,14 +355,20 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureBrowser(): Promise<Browser | null> {
     if (!this.browserPromise) {
+      // No Chrome/Edge is an environment fact, not a transient failure: retry
+      // later instead of recursing forever and hanging every browser tool.
+      if (Date.now() - this.browserFailedAt < BROWSER_RETRY_MS) {
+        return null;
+      }
       this.browserPromise = this.launch();
     }
     const browser = await this.browserPromise;
-    if (!browser || !browser.isConnected()) {
-      this.browserPromise = null;
-      return this.ensureBrowser();
+    if (browser && browser.isConnected()) {
+      return browser;
     }
-    return browser;
+    this.browserPromise = null;
+    this.browserFailedAt = Date.now();
+    return null;
   }
 
   private async launch(): Promise<Browser | null> {

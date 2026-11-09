@@ -57,6 +57,18 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'audio/webm': 'weba',
   'audio/weba': 'weba',
 };
+const AUDIO_EXTENSIONS = new Set([
+  'mp3',
+  'amr',
+  'silk',
+  'wav',
+  'ogg',
+  'm4a',
+  'aac',
+  'flac',
+  'opus',
+  'weba',
+]);
 const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -542,7 +554,13 @@ export class ChatMediaService implements OnModuleInit {
     sourceUrl: string | null,
     duration: number | null,
   ): Promise<StoredMedia> {
-    const extension = mediaExtension(mimeType, sourceUrl, target.defaultExtension);
+    const candidate = mediaExtension(mimeType, sourceUrl, target.defaultExtension);
+    // A record URL can end in .svg/.html; the static route would then serve it
+    // as an HTML document on this origin. Only audio extensions are accepted.
+    const extension =
+      target.kind === 'voices' && !AUDIO_EXTENSIONS.has(candidate)
+        ? target.defaultExtension
+        : candidate;
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const storagePath = `${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256.slice(4, 6)}/${sha256}.${extension}`;
     await this.writeBlob(targetPath(channelId, target, storagePath), buffer);

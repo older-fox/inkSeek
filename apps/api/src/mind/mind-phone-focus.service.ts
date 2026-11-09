@@ -351,8 +351,12 @@ export class MindPhoneFocusService {
       const snippet = completion.text.replace(/\s+/g, ' ').trim().slice(0, 120);
       return this.retryAfterFailure(focus, state, `手机决策没有返回可执行动作：${snippet}`);
     }
-    if (batch.length === 1 && batch[0]!.action === 'done') {
-      const summary = readString(parsed['summary']).slice(0, 300) || '玩了一会儿。';
+    const finishedIndex = batch.findIndex((item) => item.action === 'done');
+    const summary = readString(parsed['summary']).slice(0, 300) || '玩了一会儿。';
+    // "done" may arrive in the same batch as real actions; run the actions
+    // before it, then end the session instead of failing on an unsupported step.
+    const work = finishedIndex >= 0 ? batch.slice(0, finishedIndex) : batch;
+    if (work.length === 0) {
       const brief = await this.finish(focus, 'SUCCEEDED', summary, notable, '', {
         activity,
         problem,
@@ -366,7 +370,7 @@ export class MindPhoneFocusService {
     }
 
     const remaining = Math.max(0, PHONE_FOCUS_MAX_STEPS - focus.step);
-    const planned = batch.slice(0, Math.min(MAX_BATCH_ACTIONS, remaining));
+    const planned = work.slice(0, Math.min(MAX_BATCH_ACTIONS, remaining));
     const pictureSize = picture ? { width: picture.width, height: picture.height } : null;
     const plannedSteps: {
       action: string;
@@ -472,6 +476,11 @@ export class MindPhoneFocusService {
 
     if (failure) {
       return this.retryAfterFailure(focus, state, failure);
+    }
+
+    if (finishedIndex >= 0) {
+      const brief = await this.finish(focus, 'SUCCEEDED', summary, notable);
+      return { continue: false, delayMs: 0, ended: 'SUCCEEDED', brief };
     }
 
     const nextStep = focus.step + executed.length;

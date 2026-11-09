@@ -729,8 +729,11 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
     mutationFn: (input: { conversationId: string; text: string; images: string[] }) =>
       api.sendChatMessage(input.conversationId, { text: input.text, images: input.images }),
     onSuccess: (_message, input) => {
-      setDraft('');
-      setAttachments([]);
+      // Only clear when the sender is still looking at that conversation.
+      if (input.conversationId === activeConversation?.id) {
+        setDraft('');
+        setAttachments([]);
+      }
       void queryClient.invalidateQueries({
         queryKey: ['chat', 'messages', input.conversationId],
       });
@@ -827,6 +830,9 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
   }, [lastMessageId, scrollToBottom]);
 
   useEffect(() => {
+    // The composer belongs to one conversation; carrying text across would
+    // send it to the wrong contact.
+    setDraft('');
     setAttachments([]);
     setPersonaOpen(false);
     setContactBrief(null);

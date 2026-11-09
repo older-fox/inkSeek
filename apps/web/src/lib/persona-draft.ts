@@ -356,21 +356,34 @@ export function filledLines(lines: readonly string[]): string[] {
   return lines.map((line) => line.trim()).filter(Boolean);
 }
 
+/** Structural comparison so a fresh default `advanced` object is not "content". */
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length && left.every((item, index) => sameValue(item, right[index]))
+    );
+  }
+  if (left && right && typeof left === 'object' && typeof right === 'object') {
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const keys = Object.keys(leftRecord);
+    return (
+      keys.length === Object.keys(rightRecord).length &&
+      keys.every((key) => sameValue(leftRecord[key], rightRecord[key]))
+    );
+  }
+  return false;
+}
+
 export function hasDraftContent(draft: PersonaDraft): boolean {
   const defaults = createDefaultDraft();
 
-  return (Object.keys(defaults) as Array<keyof PersonaDraft>).some((key) => {
-    const value = draft[key];
-    const fallback = defaults[key];
-
-    if (Array.isArray(value) && Array.isArray(fallback)) {
-      return (
-        value.length !== fallback.length || value.some((item, index) => item !== fallback[index])
-      );
-    }
-
-    return value !== fallback;
-  });
+  return (Object.keys(defaults) as Array<keyof PersonaDraft>).some(
+    (key) => !sameValue(draft[key], defaults[key]),
+  );
 }
 
 export type StepErrors = Record<string, string>;

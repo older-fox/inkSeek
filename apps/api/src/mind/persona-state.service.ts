@@ -58,7 +58,9 @@ export class PersonaStateService {
   async get(personaId: string): Promise<PersonaStateRecord> {
     const persona = await this.persona(personaId);
     const state = await this.ensure(personaId);
-    const drifted = await this.drift(persona, state);
+    // Reads still lazily advance time-based drift, but the UI polls this
+    // endpoint, so it must not append a change-log row every few seconds.
+    const drifted = await this.drift(persona, state, { log: false });
     return toRecord(drifted);
   }
 
@@ -271,7 +273,11 @@ export class PersonaStateService {
     return persona;
   }
 
-  private async drift(persona: MindPersona, state: PersonaState): Promise<PersonaState> {
+  private async drift(
+    persona: MindPersona,
+    state: PersonaState,
+    options: { log?: boolean } = {},
+  ): Promise<PersonaState> {
     const now = Date.now();
     const hours = Math.min(48, Math.max(0, (now - state.updatedAt.getTime()) / 3_600_000));
     if (hours < 0.02) {
@@ -301,10 +307,12 @@ export class PersonaStateService {
     }
 
     const next = await this.prisma.personaState.update({ where: { personaId: persona.id }, data });
-    await this.logChanges(persona.id, state, next, {
-      reason: `自然漂移（${hours.toFixed(1)} 小时）`,
-      source: 'DRIFT',
-    });
+    if (options.log !== false) {
+      await this.logChanges(persona.id, state, next, {
+        reason: `自然漂移（${hours.toFixed(1)} 小时）`,
+        source: 'DRIFT',
+      });
+    }
     return next;
   }
 

@@ -39,6 +39,8 @@ interface PendingSave {
   kind: ChatConversationKind;
   contactId: string;
   values: Record<string, PersonaValue>;
+  /** Extras captured at edit time, before the user may switch conversation. */
+  extras: Record<string, unknown>;
 }
 
 /**
@@ -122,14 +124,14 @@ export function useConversationPersona(
     try {
       if (pending.kind === 'PRIVATE') {
         const patch = relationshipPatchFromValues(pending.values);
-        patch.extras = { ...asRecord(relationship?.extras), ...asRecord(patch.extras) };
+        patch.extras = { ...pending.extras, ...asRecord(patch.extras) };
         await api.updateMindRelationship(pending.personaId, {
           ...patch,
           contactId: pending.contactId,
         });
       } else {
         const patch = stancePatchFromValues(pending.values);
-        patch.extras = { ...asRecord(stance?.extras), ...asRecord(patch.extras) };
+        patch.extras = { ...pending.extras, ...asRecord(patch.extras) };
         await api.updateMindGroupStance(pending.personaId, {
           ...patch,
           conversationId: pending.conversationId,
@@ -182,6 +184,8 @@ export function useConversationPersona(
         kind,
         contactId,
         values: nextValues,
+        extras:
+          kind === 'PRIVATE' ? asRecord(relationship?.extras) : asRecord(stance?.extras),
       };
       setSyncState('saving');
       if (timerRef.current !== null) {

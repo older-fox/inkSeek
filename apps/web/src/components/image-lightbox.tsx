@@ -51,8 +51,9 @@ export function ImageLightbox({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        // Keep the Escape from also closing any dialog underneath the lightbox.
-        event.stopPropagation();
+        // Keep the Escape from also closing any dialog underneath the lightbox,
+        // including other listeners registered on document itself.
+        event.stopImmediatePropagation();
         onClose();
         return;
       }
@@ -141,6 +142,7 @@ export function ImageLightbox({
       role="dialog"
       aria-modal="true"
       aria-label={`图片预览：${alt}`}
+      data-image-lightbox="true"
       onClick={onClose}
       className="fixed inset-0 z-[140] flex flex-col bg-[#05090e]/85 backdrop-blur-sm"
     >

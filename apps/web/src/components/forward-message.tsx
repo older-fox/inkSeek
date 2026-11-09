@@ -135,6 +135,10 @@ function ForwardDrawer({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // An image preview opened from inside the forward list owns Escape.
+        if (document.querySelector('[data-image-lightbox="true"]')) {
+          return;
+        }
         onClose();
       }
     };

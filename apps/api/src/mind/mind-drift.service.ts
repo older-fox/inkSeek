@@ -319,6 +319,7 @@ export class MindDriftService {
     }
     const stance = await this.stances.get(scene.persona.id, scene.conversation.id);
     const changes: Record<string, number> = {};
+    const nextValues: Partial<Record<GroupField, number>> = {};
     const reason = readString(signal.reason) || plan.reason;
 
     const candidates = GROUP_FIELDS.map((field) => ({ field, raw: signal[field] }))
@@ -348,13 +349,16 @@ export class MindDriftService {
         continue;
       }
       changes[field] = actual;
+      nextValues[field] = next;
       this.remember(ledger, 'GROUP', scene.conversation.id, field, actual);
     }
 
     const topic = readString(signal.topic).trim().slice(0, 80);
     const patch: PersonaGroupStanceUpdateInput = { conversationId: scene.conversation.id };
-    for (const [field, actual] of Object.entries(changes)) {
-      patch[field as GroupField] = actual;
+    // Stance.update treats numbers as absolute values; sending the raw delta
+    // would collapse every field to 1–2 instead of nudging it.
+    for (const [field, next] of Object.entries(nextValues)) {
+      patch[field as GroupField] = next;
     }
     if (topic && topic !== stance.topic) {
       patch.topic = topic;
