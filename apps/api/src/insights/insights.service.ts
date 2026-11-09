@@ -11,6 +11,7 @@ import {
   type MindInsightSeverity,
 } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { truncateText } from '../common/text.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatChannel, ChatChannelPersona } from '../generated/prisma/client.js';
 
@@ -732,8 +733,7 @@ function signed(value: number): string {
 }
 
 function truncate(value: string, max: number): string {
-  const text = value.trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  return truncateText(value.trim(), max);
 }
 
 function clamp(value: number, min: number, max: number): number {

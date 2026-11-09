@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { LlmService } from '../ai/llm.service.js';
+import { truncateText } from '../common/text.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaState, Prisma } from '../generated/prisma/client.js';
 import { PhoneService, type PhonePhotoBytes } from '../phone/phone.service.js';
@@ -2233,7 +2234,7 @@ function normalizeCardAttribute(key: string, raw: unknown): CardNormalizeResult 
 /** Change-log rows are summaries; exact values stay in the card revision history. */
 function auditValue(value: unknown): ReturnType<typeof jsonValue> {
   if (typeof value === 'string' && value.length > 200) {
-    return `${value.slice(0, 200)}…`;
+    return truncateText(value, 200);
   }
   return jsonValue(value);
 }

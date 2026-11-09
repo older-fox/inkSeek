@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { MindSettingsRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { truncateText } from '../common/text.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import type { PersonaState } from '../generated/prisma/client.js';
@@ -211,6 +212,5 @@ function cleanSceneText(value: string): string {
 }
 
 function trim(value: string, max: number): string {
-  const text = value.trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  return truncateText(value.trim(), max);
 }

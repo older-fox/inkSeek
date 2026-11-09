@@ -1,3 +1,4 @@
+import { truncateText } from '../common/text.js';
 import type { PersonaState } from '../generated/prisma/client.js';
 import type { MindPersona } from './mind.types.js';
 import { describeTrait, isSelfTraitKey } from './mind-behavior.js';
@@ -404,16 +405,12 @@ function hasValue(value: unknown): boolean {
 
 function compactValue(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}…` : value;
+    return truncateText(value, MAX_STRING);
   }
   if (Array.isArray(value)) {
     return value
       .slice(0, MAX_LIST_ITEMS)
-      .map((item) =>
-        typeof item === 'string' && item.length > MAX_STRING
-          ? `${item.slice(0, MAX_STRING)}…`
-          : item,
-      );
+      .map((item) => (typeof item === 'string' ? truncateText(item, MAX_STRING) : item));
   }
   return value;
 }

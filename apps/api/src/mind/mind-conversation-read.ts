@@ -81,6 +81,8 @@ export interface RepetitionRead {
   assistant: { text: string; count: number }[];
   /** Playful accounting frames that turn affection or favors into a ledger. */
   ledger: { text: string; count: number }[];
+  /** Future-tense broadcasts and empty promises ("回头讲给你听"). */
+  promises: { text: string; count: number }[];
 }
 
 export interface BoundaryEscalation {
@@ -230,6 +232,21 @@ const LEDGER_PATTERNS: readonly { label: string; re: RegExp }[] = [
   { label: '欠账/还账', re: /欠(?![得揍妥])|还账|赊账|抵账/gu },
 ];
 
+/**
+ * Future-tense broadcasts and empty promises. "那我刷刷看，看到好玩的讲给
+ * 你听" narrates a plan instead of acting and turns the other side into an
+ * audience; it is safe filler, which is exactly why the model reaches for it.
+ * Counted as a habit (two tells in the recent window), not banned outright.
+ */
+const FUTURE_PROMISE_PATTERNS: readonly { label: string; re: RegExp }[] = [
+  { label: '讲/分享给你听', re: /(?:讲|说|分享|发)给(?:你|你们)(?:听)?/gu },
+  { label: '看到好玩的', re: /(?:看到|遇到|发现)(?:好玩|有意思|有趣)的/gu },
+  { label: '等我看完', re: /等(?:我)?(?:看|刷|玩|忙)(?:完|会儿|一下)(?:再|就|跟|和|给)/gu },
+  { label: '回头再说', re: /回头(?:再)?(?:跟|和|给|同)(?:你|你们)(?:说|讲|聊)/gu },
+  { label: '那我刷刷看', re: /那我(?:去)?(?:刷刷|看看|逛逛|玩会儿|刷会儿)/gu },
+  { label: '闲着也是闲着', re: /闲着也是闲着/gu },
+];
+
 export function readRepetition(scene: MindScene): RepetitionRead | null {
   const selfMessages = scene.messages.filter((message) => message.isSelf).slice(-20);
   if (selfMessages.length < 3) {
@@ -248,11 +265,20 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
   const openingCounts = new Map<string, number>();
   const replayCounts = new Map<string, { text: string; count: number }>();
   const serviceCounts = new Map<string, number>();
+  const promiseCounts = new Map<string, number>();
+  let promiseTotal = 0;
   for (const message of selfMessages) {
     for (const pattern of SERVICE_TONE_PATTERNS) {
       const matches = message.text.match(pattern.re);
       if (matches) {
         serviceCounts.set(pattern.label, (serviceCounts.get(pattern.label) ?? 0) + matches.length);
+      }
+    }
+    for (const pattern of FUTURE_PROMISE_PATTERNS) {
+      const matches = message.text.match(pattern.re);
+      if (matches) {
+        promiseCounts.set(pattern.label, (promiseCounts.get(pattern.label) ?? 0) + matches.length);
+        promiseTotal += matches.length;
       }
     }
     // A long identical opening across separate replies is the strongest
@@ -334,6 +360,15 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4)
     .map(([text, count]) => ({ text, count }));
+  // One stray phrase is normal speech; two hits in the recent window is the
+  // habit worth naming, matching the threshold used for service-tone tells.
+  const promises =
+    promiseTotal >= 2
+      ? [...promiseCounts.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 3)
+          .map(([text, count]) => ({ text, count }))
+      : [];
   const ledgerCounts = new Map<string, number>();
   for (const message of ledgerMessages) {
     for (const pattern of LEDGER_PATTERNS) {
@@ -356,8 +391,9 @@ export function readRepetition(scene: MindScene): RepetitionRead | null {
     openings.length > 0 ||
     repeated.length > 0 ||
     assistant.length > 0 ||
+    promises.length > 0 ||
     ledger.length > 0
-    ? { topics, identity, openings, repeated, assistant, ledger }
+    ? { topics, identity, openings, repeated, assistant, ledger, promises }
     : null;
 }
 

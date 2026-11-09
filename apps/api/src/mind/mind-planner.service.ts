@@ -19,6 +19,7 @@ import type {
   TodoDraft,
 } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { truncateText } from '../common/text.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import type { PersonaState } from '../generated/prisma/client.js';
@@ -444,13 +445,13 @@ export class MindPlannerService {
     if (!parsed) {
       return null;
     }
-    const activity = readString(parsed['activity']).trim().slice(0, 80);
+    const activity = truncateText(readString(parsed['activity']).trim(), 80, '');
     if (!activity) {
       return null;
     }
     return {
       activity,
-      location: readString(parsed['location']).trim().slice(0, 60) || null,
+      location: truncateText(readString(parsed['location']).trim(), 60, '') || null,
       reason: trim(readString(parsed['reason'], '活动时效复核'), 120),
     };
   }
@@ -483,6 +484,10 @@ export class MindPlannerService {
         : '- 亲密场景只在对方明确邀请或回应、且卡面尺度允许时进入；对方喊停、转开话题或进入事后照护时自然退出。场景描写按【场景写法】来，不要主动把日常闲聊变成场景。',
       '- 不要当客服：不要复述对方的话、换个语气再抛回去（对方问「你怎么还醒着」，你答「你怎么还醒着呀」就是复读）；对方只是报告状态（刚醒、好累、在吃饭）时，不必用关心式追问续接，可以说你自己的判断、反应或正在想的事。',
       '- 状态只影响你说话的语气和长度，不要当话术播报（如「我这边还迷迷糊糊的」「脑子没开机」）；除非对方问起，或它直接影响你接下来要做的事。顺从、怕冷落不等于照顾对话：不用每句都接住、每个状态都关心。',
+      // Future-tense filler ("回头讲给你听") sounds warm but defers the action
+      // and turns the other side into an audience; do it this turn or not at all.
+      '- 不预告未来、不承诺以后分享：不要说「待会/回头/等我看完，讲给你听」「看到好玩的分享给你」。要做就这一轮真的做（phone.play / video.watch / browser.*），不做就只回应现在，别拿未来计划垫话；也不要用「反正闲着也是闲着」这类自贬句证明自己随时有空。',
+      '- 不要把对方当听众：聊天不是节目单，有具体的东西就直接说，没有就别说，不用承诺「讲给你听/分享给你」。',
       '- 说人话，不要隔着桌子说话：直接说「你」「我」，不用「你这边」「我这边」；听懂就接内容，不用先回「收到」「了解」「明白」「我记下了」「我记住了」「已记录」；认错就说错在哪，不要只丢一句「我认」。',
       '- 不要客服/助理句式，也不要把内部动作说出来：不用「为你」「帮你」「需要我…吗」「有什么可以帮你」「首先/其次/最后」「总的来说」「总结一下」「根据你的描述」「我理解你的感受」；写记忆、用工具、改状态都不用在回复里报备。',
       '- 对照改口：「你这边/我这边」→「你/我」；「收到/了解/我记下了/已记录」→ 直接接内容，不报回执；「我认」→ 具体说「刚才那句我没想清楚」；「我帮你…」→ 直接做，或说「我看看」。',
@@ -823,6 +828,11 @@ export class MindPlannerService {
             ? `你最近有助理腔：${repetition.assistant
                 .map((item) => `${item.text}（${item.count} 次）`)
                 .join('、')}。直接说「你/我」，听懂就接内容；不用回「收到/了解/我记下了」，认错就具体说错在哪。`
+            : '',
+          repetition.promises.length > 0
+            ? `你最近爱预告以后要做什么：${repetition.promises
+                .map((item) => `${item.text}（${item.count} 次）`)
+                .join('、')}。要做就这一轮真的做（phone.play / video.watch / browser.*），不做就只回应现在；不要说「看到好玩的讲给你听」「等我看完跟你说」，也不要用「反正闲着也是闲着」垫话。`
             : '',
           repetition.ledger.length > 0
             ? `你最近老把亲近或帮忙说成账：${repetition.ledger
@@ -1624,7 +1634,7 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
 }
 
 function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max)}…`;
+  return truncateText(value, max);
 }
 
 function trim(value: string, max = 300): string {

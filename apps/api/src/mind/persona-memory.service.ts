@@ -11,6 +11,7 @@ import type {
   PersonaMemoryVisibility,
 } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { truncateText } from '../common/text.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { PersonaMemory, Prisma } from '../generated/prisma/client.js';
 import { embedText, cosineSimilarity, keywordOverlap } from './mind-vector.js';
@@ -713,9 +714,11 @@ export class PersonaMemoryService {
       '已有长期记忆不要重复。如果新经历补充或修正了旧事实，输出合并后的完整内容，而不是另起一条。',
       '输出 JSON 数组，每项字段：kind(FACT/PREFERENCE/PROMISE/BOUNDARY/REFLECTION)、scope(SELF/RELATION/GROUP/SCENE/WORLD/PROCEDURE)、subjectType(PERSON/GROUP/SELF/WORLD/TOPIC)、subjectName、content、importance(0-100)、confidence(0-100)、visibility(PRIVATE/SCENE/CHANNEL/PUBLIC)。',
       '直接输出 JSON，不要解释。',
+      // Prompt-facing list: cut by code points so a name is never split into a
+      // dangling surrogate (which strict providers reject as invalid JSON).
       existing.length > 0
         ? `已有长期记忆：\n${existing
-            .map((memory) => `- [${memory.kind}] ${memory.content.slice(0, 160)}`)
+            .map((memory) => `- [${memory.kind}] ${truncateText(memory.content, 160)}`)
             .join('\n')}`
         : '',
       '---',
@@ -940,7 +943,7 @@ function round(value: number): number {
 }
 
 function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max)}…`;
+  return truncateText(value, max);
 }
 
 function parseStructured(value: unknown): Record<string, unknown> | null {

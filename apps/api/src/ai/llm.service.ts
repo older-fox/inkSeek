@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { ModelProviderProtocol } from '@inkseek/shared';
+import { sanitizeText } from '../common/text.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
 import { LlmCallLogService } from './llm-call-log.service.js';
@@ -207,6 +208,10 @@ export class LlmService {
     const temperature = input.temperature ?? 0.3;
     const maxTokens = input.maxTokens ?? 1024;
     const timeoutMs = input.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    // A lone surrogate anywhere in the payload makes strict providers reject
+    // the entire request; scrub both segments before building any protocol body.
+    const prompt = sanitizeText(input.prompt);
+    const system = input.system ? sanitizeText(input.system) : null;
 
     if (provider.protocol === 'anthropic') {
       const content = [
@@ -218,7 +223,7 @@ export class LlmService {
             data: image.base64,
           },
         })),
-        { type: 'text', text: input.prompt },
+        { type: 'text', text: prompt },
       ];
       const payload = await this.postJson(
         provider,
@@ -232,7 +237,7 @@ export class LlmService {
           model,
           max_tokens: maxTokens,
           temperature,
-          ...(input.system ? { system: input.system } : {}),
+          ...(system ? { system } : {}),
           messages: [{ role: 'user', content }],
         },
         timeoutMs,
@@ -258,7 +263,7 @@ export class LlmService {
         url.toString(),
         { 'content-type': 'application/json' },
         {
-          ...(input.system ? { systemInstruction: { parts: [{ text: input.system }] } } : {}),
+          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
           contents: [
             {
               role: 'user',
@@ -266,7 +271,7 @@ export class LlmService {
                 ...images.map((image) => ({
                   inline_data: { mime_type: image.mimeType, data: image.base64 },
                 })),
-                { text: input.prompt },
+                { text: prompt },
               ],
             },
           ],
@@ -288,7 +293,7 @@ export class LlmService {
     const content =
       images.length > 0
         ? [
-            { type: 'text', text: input.prompt },
+            { type: 'text', text: prompt },
             ...images.map((image) => ({
               type: 'image_url',
               image_url: {
@@ -296,7 +301,7 @@ export class LlmService {
               },
             })),
           ]
-        : input.prompt;
+        : prompt;
 
     const payload = await this.postJson(
       provider,
@@ -310,7 +315,7 @@ export class LlmService {
         temperature,
         max_tokens: maxTokens,
         messages: [
-          ...(input.system ? [{ role: 'system', content: input.system }] : []),
+          ...(system ? [{ role: 'system', content: system }] : []),
           { role: 'user', content },
         ],
       },
