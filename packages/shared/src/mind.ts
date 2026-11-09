@@ -37,13 +37,7 @@ export const agentIntentionStatuses = [
   'EXPIRED',
   'CANCELLED',
 ] as const;
-export const agentRunTriggers = [
-  'MESSAGE',
-  'HEARTBEAT',
-  'PROACTIVE',
-  'MANUAL',
-  'PHONE',
-] as const;
+export const agentRunTriggers = ['MESSAGE', 'HEARTBEAT', 'PROACTIVE', 'MANUAL', 'PHONE'] as const;
 export const personaFocusKinds = ['CHAT', 'PHONE'] as const;
 export const personaFocusStatuses = ['ACTIVE', 'PAUSED', 'DONE'] as const;
 export const agentRunStatuses = ['RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'] as const;
@@ -439,7 +433,6 @@ export interface AgentRunSummary {
   model: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
-  cost: number | null;
   latencyMs: number | null;
   engage: boolean | null;
   reason: string | null;

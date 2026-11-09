@@ -3,12 +3,13 @@ import {
   BadRequestException,
   GatewayTimeoutException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { ModelProviderProtocol } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
-import { LlmPromptLogService } from './llm-prompt-log.service.js';
+import { LlmCallLogService } from './llm-call-log.service.js';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -34,6 +35,9 @@ export interface LlmCompletionInput {
   source?: string;
   /** Mind run that owns this call; lets the run detail show its prompts. */
   runId?: string | null;
+  /** Attribution for usage outside a run (vision descriptions, screenshots). */
+  channelId?: string | null;
+  personaId?: string | null;
   /** Simulation calls run for real but must not leave prompt logs behind. */
   log?: boolean;
   /** Aborts the HTTP request when the owning turn is superseded. */
@@ -71,9 +75,11 @@ interface ResolvedProvider {
  */
 @Injectable()
 export class LlmService {
+  private readonly logger = new Logger(LlmService.name);
+
   constructor(
     private readonly prisma: PrismaService,
-    private readonly promptLogs: LlmPromptLogService,
+    private readonly promptLogs: LlmCallLogService,
   ) {}
 
   async complete(input: LlmCompletionInput): Promise<LlmCompletion> {
@@ -102,6 +108,8 @@ export class LlmService {
       if (input.log !== false) {
         await this.promptLogs.record({
           runId: input.runId ?? null,
+          channelId: input.channelId ?? null,
+          personaId: input.personaId ?? null,
           source: input.source?.trim() || 'llm',
           providerId: provider.id,
           providerName: provider.name,
@@ -121,6 +129,8 @@ export class LlmService {
       if (input.log !== false) {
         await this.promptLogs.record({
           runId: input.runId ?? null,
+          channelId: input.channelId ?? null,
+          personaId: input.personaId ?? null,
           source: input.source?.trim() || 'llm',
           providerId: provider?.id ?? null,
           providerName: provider?.name ?? null,

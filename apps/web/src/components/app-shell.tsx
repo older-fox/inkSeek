@@ -29,7 +29,7 @@ interface AppShellProps {
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  to?: '/' | '/personas' | '/connections' | '/mind' | '/direct';
+  to?: '/' | '/personas' | '/connections' | '/mind' | '/direct' | '/insights';
   soon?: boolean;
 }
 
@@ -39,7 +39,7 @@ const navItems: NavItem[] = [
   { label: '互联中心', icon: Waypoints, to: '/connections' },
   { label: '人格心智', icon: Brain, to: '/mind' },
   { label: '直接对话', icon: MessagesSquare, to: '/direct' },
-  { label: '数据洞察', icon: BarChart3, soon: true },
+  { label: '数据洞察', icon: BarChart3, to: '/insights' },
 ];
 
 export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps) {
@@ -52,17 +52,19 @@ export function AppShell({ user, onLogout, loggingOut, children }: AppShellProps
       ? '人格心智'
       : pathname === '/direct'
         ? '直接对话'
-        : pathname.startsWith('/connections')
-        ? pathname === '/connections/private'
-          ? '互联中心 · 私聊'
-          : pathname === '/connections/groups'
-            ? '互联中心 · 群聊'
-            : '互联中心'
-        : pathname === '/personas'
-          ? '人格中心'
-          : pathname === '/settings'
-            ? '系统设置'
-            : '概览';
+        : pathname === '/insights'
+          ? '数据洞察'
+          : pathname.startsWith('/connections')
+            ? pathname === '/connections/private'
+              ? '互联中心 · 私聊'
+              : pathname === '/connections/groups'
+                ? '互联中心 · 群聊'
+                : '互联中心'
+            : pathname === '/personas'
+              ? '人格中心'
+              : pathname === '/settings'
+                ? '系统设置'
+                : '概览';
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });

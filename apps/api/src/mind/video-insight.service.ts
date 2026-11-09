@@ -31,9 +31,9 @@ const MAX_TRANSCRIPT = 8000;
 const MAX_COMMENTS = 1600;
 const WBI_TTL_MS = 6 * 3600_000;
 const WBI_MIXIN_TAB = [
-  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
-  28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22,
-  25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28,
+  14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54,
+  21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
 ];
 
 interface BiliView {
@@ -102,6 +102,9 @@ interface FrameBundle {
 export interface VideoWatchOptions {
   focus?: string;
   force?: boolean;
+  /** Attribution for vision usage rows. */
+  channelId?: string;
+  personaId?: string;
 }
 
 export interface VideoWatchResult {
@@ -205,13 +208,13 @@ export class VideoInsightService {
       if (!existing.transcript.trim()) {
         const cookie = await this.bilibili.getCookie().catch(() => null);
         if (cookie) {
-          const backfilled = await this.backfillTranscript(existing).catch((error) => {
+          const backfilled = await this.backfillTranscript(existing, options).catch((error) => {
             this.logger.debug(`补拉字幕失败 ${existing.videoId}：${messageOf(error)}`);
             return null;
           });
           if (backfilled) {
             if (focus && backfilled.row.framesPath) {
-              const focused = await this.reanalyzeStored(backfilled.row, focus);
+              const focused = await this.reanalyzeStored(backfilled.row, focus, options);
               if (focused) {
                 return focused;
               }
@@ -221,7 +224,7 @@ export class VideoInsightService {
         }
       }
       if (focus && existing.framesPath) {
-        const refreshed = await this.reanalyzeStored(existing, focus);
+        const refreshed = await this.reanalyzeStored(existing, focus, options);
         if (refreshed) {
           return refreshed;
         }
@@ -251,9 +254,10 @@ export class VideoInsightService {
 
     let frames: FrameBundle | null;
     try {
-      frames = durationSec <= MAX_DOWNLOAD_DURATION_SEC
-        ? await this.framesFromVideo(bvid, cid, durationSec, videoKey)
-        : await this.framesFromStoryboard(bvid, cid, videoKey);
+      frames =
+        durationSec <= MAX_DOWNLOAD_DURATION_SEC
+          ? await this.framesFromVideo(bvid, cid, durationSec, videoKey)
+          : await this.framesFromStoryboard(bvid, cid, videoKey);
     } catch (error) {
       this.logger.warn(`抽帧失败 ${bvid}：${messageOf(error)}`);
       frames = null;
@@ -269,6 +273,8 @@ export class VideoInsightService {
       comments,
       framePaths,
       focus,
+      channelId: options.channelId,
+      personaId: options.personaId,
     });
 
     const row = await this.prisma.videoInsight.upsert({
@@ -319,8 +325,18 @@ export class VideoInsightService {
 
   /** Re-runs vision on stored frames so a focus question does not re-download. */
   private async reanalyzeStored(
-    row: { id: string; framesPath: string | null; title: string; author: string; durationSec: number; description: string; transcript: string; comments: string },
+    row: {
+      id: string;
+      framesPath: string | null;
+      title: string;
+      author: string;
+      durationSec: number;
+      description: string;
+      transcript: string;
+      comments: string;
+    },
     focus: string,
+    options: VideoWatchOptions,
   ): Promise<VideoWatchResult | null> {
     if (!row.framesPath) {
       return null;
@@ -338,6 +354,8 @@ export class VideoInsightService {
       comments: row.comments,
       framePaths,
       focus,
+      channelId: options.channelId,
+      personaId: options.personaId,
     });
     const updated = await this.prisma.videoInsight.update({
       where: { id: row.id },
@@ -355,16 +373,31 @@ export class VideoInsightService {
    * cookie exists, pull the subtitles on the next cache hit and re-summarize
    * instead of waiting out the 14-day cache.
    */
-  private async backfillTranscript(row: {
-    id: string;
-    videoId: string;
-    framesPath: string | null;
-    title: string;
-    author: string;
-    durationSec: number;
-    description: string;
-    comments: string;
-  }): Promise<{ row: { id: string; framesPath: string | null; title: string; author: string; durationSec: number; description: string; transcript: string; comments: string }; result: VideoWatchResult } | null> {
+  private async backfillTranscript(
+    row: {
+      id: string;
+      videoId: string;
+      framesPath: string | null;
+      title: string;
+      author: string;
+      durationSec: number;
+      description: string;
+      comments: string;
+    },
+    options: VideoWatchOptions,
+  ): Promise<{
+    row: {
+      id: string;
+      framesPath: string | null;
+      title: string;
+      author: string;
+      durationSec: number;
+      description: string;
+      transcript: string;
+      comments: string;
+    };
+    result: VideoWatchResult;
+  } | null> {
     const match = row.videoId.match(/^(BV[0-9A-Za-z]{10})(?:_p(\d+))?$/);
     if (!match) {
       return null;
@@ -391,6 +424,8 @@ export class VideoInsightService {
       comments: row.comments,
       framePaths,
       focus: '',
+      channelId: options.channelId,
+      personaId: options.personaId,
     });
     const updated = await this.prisma.videoInsight.update({
       where: { id: row.id },
@@ -433,6 +468,8 @@ export class VideoInsightService {
     comments: string;
     framePaths: string[];
     focus: string;
+    channelId?: string;
+    personaId?: string;
   }): Promise<{ summary: string; keyPoints: string[] }> {
     const prompt = buildPrompt(input);
     const images = await Promise.all(
@@ -451,6 +488,8 @@ export class VideoInsightService {
         maxTokens: 2000,
         timeoutMs: 90_000,
         source: 'mind.video',
+        channelId: input.channelId,
+        personaId: input.personaId,
       });
       const text = completion.text.trim();
       if (!text) {
@@ -469,6 +508,8 @@ export class VideoInsightService {
             maxTokens: 2000,
             timeoutMs: 60_000,
             source: 'mind.video',
+            channelId: input.channelId,
+            personaId: input.personaId,
           });
           if (textOnly.text.trim()) {
             return parseInsight(textOnly.text, input.title, input.description);
@@ -519,16 +560,17 @@ export class VideoInsightService {
     const aid = text.match(/av(\d+)/i)?.[1];
     if (aid) {
       const view = await this.api<BiliView>(`/x/web-interface/view?aid=${aid}`);
-      return { bvid: view.bvid, aid: Number(aid), page, url: `https://www.bilibili.com/video/av${aid}` };
+      return {
+        bvid: view.bvid,
+        aid: Number(aid),
+        page,
+        url: `https://www.bilibili.com/video/av${aid}`,
+      };
     }
     throw new Error('无法识别视频：请传 bilibili.com/video/BV…、b23.tv/… 或 BV/av 号');
   }
 
-  private async fetchView(target: {
-    bvid: string;
-    aid?: number;
-    page: number;
-  }): Promise<BiliView> {
+  private async fetchView(target: { bvid: string; aid?: number; page: number }): Promise<BiliView> {
     const query = target.aid ? `aid=${target.aid}` : `bvid=${target.bvid}`;
     return this.api<BiliView>(`/x/web-interface/view?${query}`);
   }
@@ -597,7 +639,9 @@ export class VideoInsightService {
     if (raw.length < 64) {
       throw new Error('B 站没有返回 WBI 签名材料');
     }
-    const key = WBI_MIXIN_TAB.map((index) => raw[index]).join('').slice(0, 32);
+    const key = WBI_MIXIN_TAB.map((index) => raw[index])
+      .join('')
+      .slice(0, 32);
     this.wbi = { key, at: Date.now() };
     return key;
   }
@@ -625,10 +669,9 @@ export class VideoInsightService {
       dash?: { video?: { baseUrl?: string; height?: number; bandwidth?: number }[] };
     }>(`/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=1`);
     const direct = play.durl?.length === 1 ? play.durl[0]?.url : undefined;
-    const dash =
-      play.dash?.video
-        ?.filter((item) => item.baseUrl && (item.height ?? 0) <= 720)
-        .sort((left, right) => (right.height ?? 0) - (left.height ?? 0))[0]?.baseUrl;
+    const dash = play.dash?.video
+      ?.filter((item) => item.baseUrl && (item.height ?? 0) <= 720)
+      .sort((left, right) => (right.height ?? 0) - (left.height ?? 0))[0]?.baseUrl;
     const mediaUrl = direct ?? dash;
     if (!mediaUrl) {
       throw new Error('没有可用的视频直链');
@@ -668,7 +711,18 @@ export class VideoInsightService {
       }
       await execFileAsync(
         'ffmpeg',
-        ['-y', '-i', join(work, 'frame%02d.jpg'), '-vf', 'tile=3x3', '-frames:v', '1', '-q:v', '3', gridPath],
+        [
+          '-y',
+          '-i',
+          join(work, 'frame%02d.jpg'),
+          '-vf',
+          'tile=3x3',
+          '-frames:v',
+          '1',
+          '-q:v',
+          '3',
+          gridPath,
+        ],
         { timeout: 30_000 },
       );
       return { dir: relativeToRoot(dir), frameCount: timestamps.length };
@@ -682,9 +736,7 @@ export class VideoInsightService {
     cid: number,
     videoKey: string,
   ): Promise<FrameBundle> {
-    const shot = await this.api<BiliShot>(
-      `/x/player/videoshot?bvid=${bvid}&cid=${cid}&index=1`,
-    );
+    const shot = await this.api<BiliShot>(`/x/player/videoshot?bvid=${bvid}&cid=${cid}&index=1`);
     const sheets = shot.image ?? [];
     if (sheets.length === 0) {
       throw new Error('没有可用分镜');
@@ -778,7 +830,9 @@ function signWbiQuery(params: Record<string, string | number>, mixinKey: string)
       return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
     })
     .join('&');
-  const wRid = createHash('md5').update(query + mixinKey).digest('hex');
+  const wRid = createHash('md5')
+    .update(query + mixinKey)
+    .digest('hex');
   return `${query}&w_rid=${wRid}`;
 }
 

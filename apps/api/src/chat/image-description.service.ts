@@ -86,6 +86,7 @@ export class ImageDescriptionService {
       temperature: DESCRIPTION_TEMPERATURE,
       maxTokens: DESCRIPTION_MAX_TOKENS,
       source: input.source?.trim() || 'chat.image-description',
+      channelId: input.channelId,
     });
     const description = truncate(completion.text.trim(), MAX_DESCRIPTION_LENGTH);
     if (description.length === 0) {

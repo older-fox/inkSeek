@@ -15,6 +15,7 @@ import { ConnectionsPage } from '@/pages/connections-page';
 import { DirectChatPage } from '@/pages/direct-chat-page';
 import { GroupChatsPage } from '@/pages/group-chats-page';
 import { HomePage } from '@/pages/home-page';
+import { InsightsPage } from '@/pages/insights-page';
 import { LoginPage } from '@/pages/login-page';
 import { MindPage } from '@/pages/mind-page';
 import { PersonasPage } from '@/pages/personas-page';
@@ -148,6 +149,22 @@ const directChatRoute = createRoute({
   component: DirectChatPage,
 });
 
+const insightsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/insights',
+  validateSearch: (search: Record<string, unknown>): { channelId?: string; days?: number } => {
+    const days = Number(search.days);
+    return {
+      channelId:
+        typeof search.channelId === 'string' && search.channelId.length > 0
+          ? search.channelId
+          : undefined,
+      days: Number.isFinite(days) && days >= 7 && days <= 90 ? Math.round(days) : undefined,
+    };
+  },
+  component: InsightsPage,
+});
+
 const connectionsLayoutRoute = createRoute({
   getParentRoute: () => appRoute,
   id: 'connections',
@@ -220,6 +237,7 @@ const routeTree = rootRoute.addChildren([
     personasRoute,
     mindRoute,
     directChatRoute,
+    insightsRoute,
     connectionsLayoutRoute.addChildren([connectionsRoute, privateChatsRoute, groupChatsRoute]),
     settingsRoute,
   ]),

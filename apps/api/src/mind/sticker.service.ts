@@ -4,11 +4,7 @@ import { access, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promis
 import { dirname, extname } from 'node:path';
 import type { StickerRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
-import {
-  channelMediaPath,
-  channelMediaUrl,
-  splitChannelMediaUrl,
-} from '../chat/chat-paths.js';
+import { channelMediaPath, channelMediaUrl, splitChannelMediaUrl } from '../chat/chat-paths.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatMediaObject, StickerAsset } from '../generated/prisma/client.js';
 import { embedText, cosineSimilarity } from './mind-vector.js';
@@ -41,10 +37,7 @@ export class StickerService {
     return rows.map(toRecord);
   }
 
-  async importFromReceived(
-    input: StickerCollectInput,
-    channelId: string,
-  ): Promise<StickerRecord> {
+  async importFromReceived(input: StickerCollectInput, channelId: string): Promise<StickerRecord> {
     const found = await this.findReceivedMedia(input.mediaId, input.imageUrl, channelId);
     if (!found) {
       throw new NotFoundException({ code: 'IMAGE_NOT_FOUND', message: '找不到这张图片' });
@@ -61,7 +54,7 @@ export class StickerService {
     const mimeType = media.mimeType ?? mimeForExtension(extension);
     let description = (media.description ?? '').trim().slice(0, 200);
     if (!description && input.describe) {
-      description = await this.describeImage(buffer, mimeType).catch(() => '');
+      description = await this.describeImage(buffer, mimeType, channelId).catch(() => '');
     }
     const tags = (input.tags ?? [])
       .map((tag) => tag.trim())
@@ -176,7 +169,7 @@ export class StickerService {
     }
     const buffer = await readFile(absolute);
     const mimeType = row.mimeType ?? mimeForExtension(extname(row.filePath));
-    const description = await this.describeImage(buffer, mimeType, focus);
+    const description = await this.describeImage(buffer, mimeType, row.channelId, focus);
     if (!description) {
       throw new Error('视觉模型没有返回描述，表情库未更新');
     }
@@ -234,7 +227,12 @@ export class StickerService {
     }
   }
 
-  private async describeImage(buffer: Buffer, mimeType: string, focus?: string): Promise<string> {
+  private async describeImage(
+    buffer: Buffer,
+    mimeType: string,
+    channelId: string,
+    focus?: string,
+  ): Promise<string> {
     const prompt = focus
       ? `重新观察这个表情包，重点确认：${focus}。用一句简短中文描述它的内容、情绪和使用场景。只输出描述，不要解释。`
       : '用一句简短中文描述这个表情包的内容、情绪和使用场景。只输出描述，不要解释。';
@@ -245,6 +243,7 @@ export class StickerService {
       temperature: 0.2,
       maxTokens: 100,
       source: 'mind.sticker',
+      channelId,
     });
     return completion.text.trim().slice(0, 200);
   }

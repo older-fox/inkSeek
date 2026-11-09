@@ -421,13 +421,12 @@ function RunTrace({
           {formatTime(detail.startedAt)} →{' '}
           {detail.finishedAt ? formatTime(detail.finishedAt) : '进行中'}
         </Chip>
-        {detail.latencyMs != null ? <Chip>{detail.latencyMs}ms</Chip> : null}
         {detail.promptTokens != null || detail.completionTokens != null ? (
           <Chip>
             {detail.promptTokens ?? 0} + {detail.completionTokens ?? 0} tokens
           </Chip>
         ) : null}
-        {detail.cost != null ? <Chip>¥{detail.cost.toFixed(4)}</Chip> : null}
+        {detail.latencyMs != null ? <Chip>{detail.latencyMs}ms</Chip> : null}
       </div>
 
       {isRunning ? (

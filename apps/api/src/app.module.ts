@@ -8,7 +8,9 @@ import { ChatModule } from './chat/chat.module.js';
 import { SystemConfigModule } from './config/system-config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { InsightsModule } from './insights/insights.module.js';
 import { MindModule } from './mind/mind.module.js';
+import { OverviewModule } from './overview/overview.module.js';
 import { PersonasModule } from './personas/personas.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 
@@ -24,6 +26,8 @@ import { SettingsModule } from './settings/settings.module.js';
     AiModule,
     BootstrapModule,
     MindModule,
+    OverviewModule,
+    InsightsModule,
     ChatModule,
     PersonasModule,
     SettingsModule,

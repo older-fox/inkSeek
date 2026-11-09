@@ -71,6 +71,10 @@
   一次性迁移脚本 `apps/api/scripts/migrate-media-to-channels.mjs` 会先备份相关表到
   `data/backup/media-channels-<时间>/`，复制旧文件并重写资产/转发节点/引用快照/归档消息段中的本地 URL；
   旧共享目录保留不删。仍待：旧文件与孤儿文件 GC、存量表情目录清理。
+- 进度（2026-11-09）：转发附件表合并——`ChatForwardNodeImage` / `ChatForwardNodeVoice` 并入
+  `ChatImageAsset` / `ChatVoiceAsset`（`messageId` 与 `forwardNodeId` 二选一，数据库检查约束兜底，
+  迁移 `20261109130000_db_consolidation`）；同时清除 2 个无引用媒体元数据行，文件已移到
+  `data/backup/db-consolidation-20261109/media/`。多媒体 GC 仍未实现。
 - 未定项：
   - 视觉描述使用哪个 provider/model，是否提供渠道级开关。
   - 历史图片是否回填到哈希路径（复制 → 校验哈希 → 建映射 → 清理旧文件），或旧数据继续使用扁平路径。

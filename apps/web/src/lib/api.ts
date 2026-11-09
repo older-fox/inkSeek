@@ -27,6 +27,9 @@ import type {
   MindBannedWordsResult,
   MindFocusOverview,
   MindHeartbeatLogRecord,
+  MindInsightAskInput,
+  MindInsightAskResult,
+  MindInsightFeed,
   MindLearningOverview,
   MindSettingsRecord,
   MindTurnResult,
@@ -53,6 +56,7 @@ import type {
   PhoneSettingsResult,
   StickerRecord,
   ModelProviderSaveResult,
+  OverviewSnapshot,
   PersonaAiGenerateInput,
   PersonaAiGeneration,
   PersonaAiProviderOption,
@@ -115,6 +119,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  overview: () => request<OverviewSnapshot>('/overview'),
   bootstrapStatus: () => request<BootstrapStatus>('/bootstrap/status'),
   testRedis: (input: RedisConnectionInput) =>
     request<RedisProbeResult>('/bootstrap/test-redis', {
@@ -371,6 +376,15 @@ export const api = {
     }),
   deleteMindStyleNote: (id: string) =>
     request<void>(`/mind/style-notes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  mindInsights: (channelId: string, days: number) => {
+    const params = new URLSearchParams({ channelId, days: String(days) });
+    return request<MindInsightFeed>(`/insights?${params.toString()}`);
+  },
+  askMindInsight: (input: MindInsightAskInput) =>
+    request<MindInsightAskResult>('/insights/ask', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   ensureDirectConversation: (input: ChatDirectConversationInput) =>
     request<ChatConversationSummary>('/chat/direct/conversations', {
       method: 'POST',
@@ -386,10 +400,9 @@ export const api = {
     ),
   mindStickers: (channelId: string) => request<StickerRecord[]>(`/mind/stickers/${channelId}`),
   mindDeleteSticker: (channelId: string, id: string) =>
-    request<void>(
-      `/mind/stickers/${encodeURIComponent(channelId)}/${encodeURIComponent(id)}`,
-      { method: 'DELETE' },
-    ),
+    request<void>(`/mind/stickers/${encodeURIComponent(channelId)}/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 };
 
 function memoryQueryParams(query: PersonaMemoryQueryInput): URLSearchParams {

@@ -14,7 +14,7 @@ import type {
 } from '@inkseek/shared';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
-import { LlmPromptLogService } from './llm-prompt-log.service.js';
+import { LlmCallLogService } from './llm-call-log.service.js';
 import { extractJsonObject, normalizePersonaDraft } from './persona-ai.normalize.js';
 import { buildPersonaAiMessages } from './persona-ai.prompt.js';
 
@@ -35,7 +35,7 @@ interface ResolvedProvider {
 export class AiService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly promptLogs: LlmPromptLogService,
+    private readonly promptLogs: LlmCallLogService,
   ) {}
 
   async listProviders(): Promise<PersonaAiProviderOption[]> {

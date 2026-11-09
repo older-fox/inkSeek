@@ -18,11 +18,7 @@ import type { ChatMessageSnapshot } from '../chat/chat-message.types.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
 import { MindBrowserService } from './mind-browser.service.js';
 import { MindClosureService } from './mind-closure.service.js';
-import {
-  classifyText,
-  readConversation,
-  type ConversationRead,
-} from './mind-conversation-read.js';
+import { classifyText, readConversation, type ConversationRead } from './mind-conversation-read.js';
 import { MindDriftService, type DriftSummary } from './mind-drift.service.js';
 import {
   MindHeartbeatLogService,
@@ -397,7 +393,9 @@ export class MindRuntimeService implements OnModuleInit {
       return skipped(INTERRUPTED_REASON);
     }
 
-    await this.closure.markReopened(scene.conversation.id, input.message.sentAt).catch(() => undefined);
+    await this.closure
+      .markReopened(scene.conversation.id, input.message.sentAt)
+      .catch(() => undefined);
 
     await this.applyInboundFeedback(
       scene.persona.id,
@@ -552,12 +550,7 @@ export class MindRuntimeService implements OnModuleInit {
     const contactId =
       decision.target?.contactId ?? scene.anchor.senderId ?? scene.cast[0]?.contactId ?? '';
     const styleNotes = settings.styleLearningEnabled
-      ? await this.styleNotes.activeFor(
-          scene.persona.id,
-          scene.persona.channelId,
-          contactId,
-          4,
-        )
+      ? await this.styleNotes.activeFor(scene.persona.id, scene.persona.channelId, contactId, 4)
       : [];
 
     const closure = await this.closure.load(scene.conversation.id).catch(() => null);
@@ -667,11 +660,7 @@ export class MindRuntimeService implements OnModuleInit {
         completionTokens: plannerResult.completionTokens,
       });
     if (settings.styleLearningEnabled && plan.styleNotes?.length) {
-      await this.styleNotes.addDrafts(
-        scene.persona.id,
-        scene.persona.channelId,
-        plan.styleNotes,
-      );
+      await this.styleNotes.addDrafts(scene.persona.id, scene.persona.channelId, plan.styleNotes);
     }
     if (plan.engage && styleNotes.length > 0) {
       await this.styleNotes.markApplied(styleNotes.map((note) => note.id));
@@ -872,10 +861,12 @@ export class MindRuntimeService implements OnModuleInit {
     // Phone reflection belongs where the phone time was requested, not in
     // whatever chat happens to be most recent.
     const phoneConversationId = phoneOutcome?.conversationId
-      ? ((await this.prisma.chatConversation.findFirst({
-          where: { id: phoneOutcome.conversationId, channelId: persona.channelId },
-          select: { id: true },
-        }))?.id ?? null)
+      ? ((
+          await this.prisma.chatConversation.findFirst({
+            where: { id: phoneOutcome.conversationId, channelId: persona.channelId },
+            select: { id: true },
+          })
+        )?.id ?? null)
       : null;
     const conversationId =
       phoneConversationId ??
@@ -1206,7 +1197,9 @@ export class MindRuntimeService implements OnModuleInit {
             runId: run.id,
           })
           .catch((error: unknown) => {
-            this.logger.warn(`学习会话创建失败：${error instanceof Error ? error.message : String(error)}`);
+            this.logger.warn(
+              `学习会话创建失败：${error instanceof Error ? error.message : String(error)}`,
+            );
             return null;
           })
       : null;
@@ -1332,18 +1325,10 @@ export class MindRuntimeService implements OnModuleInit {
             kind: note.dimension,
             content: note.content,
           })),
-          summary:
-            learningSources.length === 0
-              ? `${plan.reason}（没有收集到来源）`
-              : plan.reason,
+          summary: learningSources.length === 0 ? `${plan.reason}（没有收集到来源）` : plan.reason,
         });
       }
-      if (
-        plan.engage &&
-        (plan.beats.length > 0 || plan.sceneCue) &&
-        mode !== 'SHADOW' &&
-        isGroup
-      ) {
+      if (plan.engage && (plan.beats.length > 0 || plan.sceneCue) && mode !== 'SHADOW' && isGroup) {
         const acquired = await this.replyLock.acquire({
           conversationId,
           runId: run.id,
@@ -2207,7 +2192,13 @@ export class MindRuntimeService implements OnModuleInit {
         at: visit.at,
       });
     }
-    const allowed = new Set(['video.watch', 'video.comments', 'web.read', 'web.search', 'browser.open']);
+    const allowed = new Set([
+      'video.watch',
+      'video.comments',
+      'web.read',
+      'web.search',
+      'browser.open',
+    ]);
     for (const call of toolCalls) {
       if (!allowed.has(call.name) || call.output === undefined || call.output === null) {
         continue;
@@ -2555,9 +2546,7 @@ export class MindRuntimeService implements OnModuleInit {
     ];
     const groupIds = [
       ...new Set(
-        rows
-          .filter((row) => row.targetType === 'GROUP' && row.targetId)
-          .map((row) => row.targetId),
+        rows.filter((row) => row.targetType === 'GROUP' && row.targetId).map((row) => row.targetId),
       ),
     ];
     const [contacts, groups] = await Promise.all([
@@ -2599,9 +2588,7 @@ export class MindRuntimeService implements OnModuleInit {
           row.targetType === 'SELF'
             ? '自己'
             : (nameById.get(row.targetId) ??
-              (row.targetType === 'GROUP'
-                ? `群 ${row.targetId}`
-                : `联系人 ${row.targetId}`)),
+              (row.targetType === 'GROUP' ? `群 ${row.targetId}` : `联系人 ${row.targetId}`)),
         count: 0,
         maxUrgency: 0,
         samples: [],
@@ -3193,7 +3180,6 @@ export function toRunSummary(
     model: string | null;
     promptTokens: number | null;
     completionTokens: number | null;
-    cost: number | null;
     latencyMs: number | null;
     decision: unknown;
     scene: unknown;
@@ -3223,7 +3209,6 @@ export function toRunSummary(
     model: row.model,
     promptTokens: row.promptTokens,
     completionTokens: row.completionTokens,
-    cost: row.cost,
     latencyMs: row.latencyMs,
     engage: typeof decision?.['engage'] === 'boolean' ? decision['engage'] : null,
     reason: typeof decision?.['reason'] === 'string' ? decision['reason'] : null,

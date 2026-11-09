@@ -373,7 +373,8 @@ export const MIND_TOOL_CATALOG = [
   },
   {
     name: 'browser.snapshot',
-    description: '重新读取当前网页：标题、正文和可点击元素 ref。页面加载慢、刚点过或刚滚动过时用它刷新。',
+    description:
+      '重新读取当前网页：标题、正文和可点击元素 ref。页面加载慢、刚点过或刚滚动过时用它刷新。',
     input: {},
   },
   {
@@ -383,17 +384,20 @@ export const MIND_TOOL_CATALOG = [
   },
   {
     name: 'browser.click',
-    description: '点击当前网页上的元素：优先用 snapshot 返回的 ref，也可以传可见文字。点击后返回新页面状态。',
+    description:
+      '点击当前网页上的元素：优先用 snapshot 返回的 ref，也可以传可见文字。点击后返回新页面状态。',
     input: { ref: 'string?', text: 'string?' },
   },
   {
     name: 'browser.type',
-    description: '在当前网页的输入框里填字（用 ref）；submit=true 时按回车。只用于搜索或站内输入，不提交表单、不登录。',
+    description:
+      '在当前网页的输入框里填字（用 ref）；submit=true 时按回车。只用于搜索或站内输入，不提交表单、不登录。',
     input: { ref: 'string', text: 'string', submit: 'boolean?' },
   },
   {
     name: 'browser.scroll',
-    description: '在当前网页上下滚动。评论、信息流通常要往下滚几页才会加载更多。每次滚动后返回新的正文和可点元素。',
+    description:
+      '在当前网页上下滚动。评论、信息流通常要往下滚几页才会加载更多。每次滚动后返回新的正文和可点元素。',
     input: { direction: 'down|up', pages: 'number? 1-8' },
   },
   {
@@ -403,7 +407,8 @@ export const MIND_TOOL_CATALOG = [
   },
   {
     name: 'browser.screenshot',
-    description: '截当前网页并让视觉模型描述画面，适合文字读不出来或想确认布局的页面。focus 可以指定重点。',
+    description:
+      '截当前网页并让视觉模型描述画面，适合文字读不出来或想确认布局的页面。focus 可以指定重点。',
     input: { focus: 'string?' },
   },
   {
@@ -428,8 +433,7 @@ export const MIND_TOOL_CATALOG = [
     description:
       '操作当前手机。tap 点按(x,y)；long_press 长按(x,y,duration)；swipe 滑动(x1,y1,x2,y2,duration)；drag 拖拽(x1,y1,x2,y2,duration)；key 按键(back|home|recents|menu|enter|delete|volume_up|volume_down|power|media_*|dpad_* 或数字 keycode)；combo 组合键(keys，如 ["ctrl","a"])；type 输入(text，仅英文数字符号)；open 打开(target=应用名、包名或 http 链接)；stop 强制停止应用(target)；media 媒体控制(key=play|pause|play-pause|next|previous|stop|mute)；volume 音量(level 绝对值或 direction=raise|lower)；screen 屏幕开关(mode=on|off|toggle)。每次操作后用 phone.screen 或 phone.screenshot 确认。',
     input: {
-      action:
-        'string（tap|long_press|swipe|drag|key|combo|type|open|stop|media|volume|screen）',
+      action: 'string（tap|long_press|swipe|drag|key|combo|type|open|stop|media|volume|screen）',
       x: 'number? tap/long_press 横坐标',
       y: 'number? tap/long_press 纵坐标',
       x1: 'number? swipe/drag 起点横坐标',
@@ -451,7 +455,10 @@ export const MIND_TOOL_CATALOG = [
     name: 'phone.play',
     description:
       '开始一段自己的手机时间：会在后台建立一个手机焦点，由它自己一步一步看界面、点按和滑动，不会让你在对话里等它。你可以在对话里继续做别的事，它会按自己的节奏玩；回来时现场会带上它做了什么。手机不在线或渠道没选设备时会报错。goal 要写成一段时间想做的事（例如「玩开心消消乐，随便玩几关，玩到不想玩就停」），不要写成「打开第 1 关确认能不能进」这种一步就结束的小任务，否则它做完一步就会停。',
-    input: { goal: 'string? 这段手机时间想做什么；不填就随便玩会儿', replace: 'boolean? 正在玩时是否结束当前这段、换成新目标' },
+    input: {
+      goal: 'string? 这段手机时间想做什么；不填就随便玩会儿',
+      replace: 'boolean? 正在玩时是否结束当前这段、换成新目标',
+    },
   },
   {
     name: 'phone.end',
@@ -576,8 +583,7 @@ export const MIND_TOOL_CATALOG = [
   },
   {
     name: 'intention.cancel',
-    description:
-      '取消一条过时、重复或已经不想说的待发意图；会记下取消原因，不再排期叫醒。',
+    description: '取消一条过时、重复或已经不想说的待发意图；会记下取消原因，不再排期叫醒。',
     input: {
       id: 'string（意图 ID）',
       reason: 'string? 为什么取消',
@@ -736,7 +742,7 @@ export class MindToolsService {
       case 'web.read':
         return this.webRead(args);
       case 'video.watch':
-        return this.videoWatch(args);
+        return this.videoWatch(args, context);
       case 'video.comments':
         return this.videoComments(args);
       case 'browser.open':
@@ -744,10 +750,7 @@ export class MindToolsService {
       case 'browser.snapshot':
         return this.browsers.snapshot(context.scene.persona.id);
       case 'browser.read':
-        return this.browsers.read(
-          context.scene.persona.id,
-          readNumber(args['maxChars'], 6000),
-        );
+        return this.browsers.read(context.scene.persona.id, readNumber(args['maxChars'], 6000));
       case 'browser.click':
         return this.browserClick(args, context);
       case 'browser.type':
@@ -1384,13 +1387,17 @@ export class MindToolsService {
     return this.web.read(url);
   }
 
-  private async videoWatch(args: Record<string, unknown>) {
+  private async videoWatch(args: Record<string, unknown>, context: MindToolContext) {
     const video = readString(args['video'] ?? args['url'] ?? args['query']).trim();
     if (!video) {
       throw new Error('video 不能为空；传 B 站链接、BV 号或 av 号');
     }
     const focus = readString(args['focus']).trim().slice(0, 200) || undefined;
-    return this.videos.watch(video, { focus });
+    return this.videos.watch(video, {
+      focus,
+      channelId: context.scene.persona.channelId,
+      personaId: context.scene.persona.id,
+    });
   }
 
   private async videoComments(args: Record<string, unknown>) {
@@ -1462,15 +1469,18 @@ export class MindToolsService {
       // Vision models can burn the budget on reasoning; 800-1200 came back empty.
       maxTokens: 2000,
       source: 'mind.phone.screenshot',
+      channelId: context.scene.persona.channelId,
+      personaId: context.scene.persona.id,
     });
     const parsed = parseJsonObject(completion.text);
     const description = readString(parsed?.['description'], completion.text).trim().slice(0, 1200);
     const rawItems = Array.isArray(parsed?.['items']) ? parsed['items'] : [];
     const items = rawItems
       .flatMap((item) => {
-        const row = item && typeof item === 'object' && !Array.isArray(item)
-          ? (item as Record<string, unknown>)
-          : {};
+        const row =
+          item && typeof item === 'object' && !Array.isArray(item)
+            ? (item as Record<string, unknown>)
+            : {};
         const label = readString(row['label']).trim().slice(0, 40);
         if (!label) {
           return [];
@@ -1616,7 +1626,9 @@ export class MindToolsService {
       (run?.status === 'FAILED' ? readString(run.error) || '异常结束' : '');
     return {
       active: false,
-      note: error ? '现在没有在玩手机；上一次手机焦点异常结束。' : '现在没有在玩手机，上一次已正常结束。',
+      note: error
+        ? '现在没有在玩手机；上一次手机焦点异常结束。'
+        : '现在没有在玩手机，上一次已正常结束。',
       last: {
         focusId: last.id,
         goal: last.goal,
@@ -1705,6 +1717,8 @@ export class MindToolsService {
       // Vision models can burn budget on reasoning; keep room for the answer.
       maxTokens: 1800,
       source: 'mind.phone.photo',
+      channelId,
+      personaId: context.scene.persona.id,
     });
     const description = completion.text.trim().slice(0, 1200) || '没有看清这张照片的内容。';
     if (!focus) {
@@ -2002,9 +2016,7 @@ export class MindToolsService {
     ];
     const groupIds = [
       ...new Set(
-        rows
-          .filter((row) => row.targetType === 'GROUP' && row.targetId)
-          .map((row) => row.targetId),
+        rows.filter((row) => row.targetType === 'GROUP' && row.targetId).map((row) => row.targetId),
       ),
     ];
     const [contacts, groups] = await Promise.all([
@@ -2068,8 +2080,7 @@ function compactIntention(row: {
 async function prepareVisionImage(
   picture: PhonePhotoBytes,
 ): Promise<{ mimeType: string; base64: string }> {
-  const direct =
-    picture.bytes <= 1_500_000 && /^image\/(jpeg|png|webp)$/iu.test(picture.mimeType);
+  const direct = picture.bytes <= 1_500_000 && /^image\/(jpeg|png|webp)$/iu.test(picture.mimeType);
   if (direct) {
     return { mimeType: picture.mimeType, base64: picture.base64 };
   }

@@ -37,7 +37,7 @@ import { PhoneService } from '../phone/phone.service.js';
 import type {
   AgentIntention,
   AgentTodo,
-  LlmPromptLog,
+  LlmCallLog,
   PersonaJournal,
 } from '../generated/prisma/client.js';
 import { MindActionExecutor } from './mind-action-executor.service.js';
@@ -272,9 +272,10 @@ export class MindService {
   }
 
   listPromptLogs(input: MindPromptLogQueryInput): Promise<LlmPromptLogRecord[]> {
-    return this.prisma.llmPromptLog
+    return this.prisma.llmCallLog
       .findMany({
         where: {
+          prompt: { not: null },
           ...(input.source ? { source: input.source } : {}),
           ...(input.runId ? { runId: input.runId } : {}),
         },
@@ -313,7 +314,6 @@ export class MindService {
           model: true,
           promptTokens: true,
           completionTokens: true,
-          cost: true,
           latencyMs: true,
           decision: true,
           scene: true,
@@ -371,8 +371,7 @@ export class MindService {
     channelId?: string,
     limit = 12,
   ): Promise<MindLearningOverview> {
-    const resolved =
-      channelId?.trim() || (await this.states.persona(personaId)).channelId;
+    const resolved = channelId?.trim() || (await this.states.persona(personaId)).channelId;
     return this.learning.overview(personaId, resolved, limit);
   }
 
@@ -478,7 +477,7 @@ function toIntentionRecord(row: AgentIntention): AgentIntentionRecord {
   };
 }
 
-function toPromptLogRecord(row: LlmPromptLog): LlmPromptLogRecord {
+function toPromptLogRecord(row: LlmCallLog): LlmPromptLogRecord {
   return {
     id: row.id,
     runId: row.runId,
@@ -487,8 +486,8 @@ function toPromptLogRecord(row: LlmPromptLog): LlmPromptLogRecord {
     providerName: row.providerName,
     model: row.model,
     system: row.system,
-    prompt: row.prompt,
-    response: row.response,
+    prompt: row.prompt ?? '',
+    response: row.response ?? '',
     imageCount: row.imageCount,
     promptTokens: row.promptTokens,
     completionTokens: row.completionTokens,

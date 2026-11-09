@@ -81,24 +81,24 @@ Scene {
 
 运行时人格实例复用 `ChatChannelPersona`，不另造身份表。所有状态按渠道隔离。
 
-| 模型                  | 作用          | 关键字段                                                                                                                                                                                                                                                               |
-| --------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PersonaState`        | 当下自我      | moodValence/Arousal/Dominance、energy、stress、socialBattery、attention、currentActivity、location、sleepDebt、grooming、lastWakeAt、nextWakeAt、leaseUntil、leaseOwner、wakeReason；心跳调度已并入本表                                                                |
-| `PersonaRelationship` | 对个人的关系  | affinity、trust、intimacy、attraction、hostility、fear、respect、obligation、dependency、possessiveness、friction、unresolvedConflict、familiarity、relationTags、addressHere、openPromises、sharedEvents、boundaries、extras（仅存此刻值，增量在 `PersonaChangeLog`） |
-| `PersonaGroupStance`  | 对群的态度    | comfort、belonging、attention、formality、speakRate、audienceRisk、role、tabooTopics、boundaries、extras                                                                                                                                                               |
-| `PersonaChangeLog`    | 统一变动账本  | personaId、scope（STATE/SELF/RELATION/GROUP）、targetId、field、beforeValue、afterValue、delta、reason、source、runId；状态/自身/关系/群四类历史与漂移配额共用这一张表                                                                                                 |
-| `PersonaMemory`       | 统一记忆      | scope、kind、subject、content、structured、importance、confidence、emotion、visibility、status、occurredAt、sourceIds、embedding                                                                                                                                       |
-| `AgentTodo`           | 待办/唤醒     | title、detail、priority、dueAt、wakeCondition、recurrence、status、source                                                                                                                                                                                              |
-| `AgentIntention`      | 主动意图      | targetType、targetId、need、reason、seed、urgency、confidence、risk、feedback/feedbackAt、earliestAt、expiresAt、status、attempts                                                                                                                                      |
-| `AgentRun`            | 一次心智运行  | trigger、persona、scene、model、tokens、cost、decision、plan、status、latency                                                                                                                                                                                          |
-| `AgentStep`           | 思维/工具步骤 | runId、type、input、output、durationMs、error                                                                                                                                                                                                                          |
-| `AgentAction`         | 动作日志      | runId、kind、payload、status、idempotencyKey、sentMessageId、error                                                                                                                                                                                                     |
-| `StickerAsset`        | 本地表情      | channelId、sha256、filePath、tags、description、embedding、usageCount；渠道内按 `(channelId, sha256)` 唯一                                                                                                                                                             |
-| `VideoInsight`        | 视频理解缓存  | platform、videoId、url、标题/作者/时长/简介、stats、transcript、comments、summary、keyPoints、framesPath、frameCount、watchedAt、usageCount；按 `(platform, videoId)` 唯一，与渠道无关 |
-| `MindLearningLog`     | 学习会话账本  | personaId、channelId、trigger（HEARTBEAT/MANUAL）、status、reason、sources、learned、styleNotes、summary、error、runId、startedAt/finishedAt；记录「看了什么、留下什么、学了哪些表达」，不复制记忆行 |
+| 模型                  | 作用           | 关键字段                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PersonaState`        | 当下自我       | moodValence/Arousal/Dominance、energy、stress、socialBattery、attention、currentActivity、location、sleepDebt、grooming、lastWakeAt、nextWakeAt、leaseUntil、leaseOwner、wakeReason；心跳调度已并入本表                                                                                                                   |
+| `PersonaRelationship` | 对个人的关系   | affinity、trust、intimacy、attraction、hostility、fear、respect、obligation、dependency、possessiveness、friction、unresolvedConflict、familiarity、relationTags、addressHere、openPromises、sharedEvents、boundaries、extras（仅存此刻值，增量在 `PersonaChangeLog`）                                                    |
+| `PersonaGroupStance`  | 对群的态度     | comfort、belonging、attention、formality、speakRate、audienceRisk、role、tabooTopics、boundaries、extras                                                                                                                                                                                                                  |
+| `PersonaChangeLog`    | 统一变动账本   | personaId、scope（STATE/SELF/RELATION/GROUP）、targetId、field、beforeValue、afterValue、delta、reason、source、runId；状态/自身/关系/群四类历史与漂移配额共用这一张表                                                                                                                                                    |
+| `PersonaMemory`       | 统一记忆       | scope、kind、subject、content、structured、importance、confidence、emotion、visibility、status、occurredAt、sourceIds、embedding                                                                                                                                                                                          |
+| `AgentTodo`           | 待办/唤醒      | title、detail、priority、dueAt、wakeCondition、recurrence、status、source                                                                                                                                                                                                                                                 |
+| `AgentIntention`      | 主动意图       | targetType、targetId、need、reason、seed、urgency、confidence、risk、feedback/feedbackAt、earliestAt、expiresAt、status、attempts                                                                                                                                                                                         |
+| `AgentRun`            | 一次心智运行   | trigger、persona、scene、model、tokens、decision、plan、status、latency                                                                                                                                                                                                                                                   |
+| `AgentStep`           | 思维/工具步骤  | runId、type、input、output、durationMs、error                                                                                                                                                                                                                                                                             |
+| `AgentAction`         | 动作日志       | runId、kind、payload、status、idempotencyKey、sentMessageId、error                                                                                                                                                                                                                                                        |
+| `StickerAsset`        | 本地表情       | channelId、sha256、filePath、tags、description、embedding、usageCount；渠道内按 `(channelId, sha256)` 唯一                                                                                                                                                                                                                |
+| `VideoInsight`        | 视频理解缓存   | platform、videoId、url、标题/作者/时长/简介、stats、transcript、comments、summary、keyPoints、framesPath、frameCount、watchedAt、usageCount；按 `(platform, videoId)` 唯一，与渠道无关                                                                                                                                    |
+| `MindLearningLog`     | 学习会话账本   | personaId、channelId、trigger（HEARTBEAT/MANUAL）、status、reason、sources、learned、styleNotes、summary、error、runId、startedAt/finishedAt；记录「看了什么、留下什么、学了哪些表达」，不复制记忆行                                                                                                                      |
 | `PersonaStyleNote`    | 学到的说话方式 | personaId、channelId、scope（SELF/RELATION）、contactId、dimension（length/punctuation/particles/openings/humor/rhythm/vocabulary/tone）、content、samples、sources、confidence、evidenceCount、status（ACTIVE/PAUSED/PROMOTED）、appliedCount/lastAppliedAt、lastSeenAt/promotedAt；是人格卡之上的适配层，不是第二份人设 |
-| `PersonaJournal`      | 日记/反思     | personaInstanceId、date、content、mood、consolidatedMemoryIds                                                                                                                                                                                                          |
-| `LlmPromptLog`        | 原始提示词    | source、provider、model、system、prompt、response、tokens、latency、error；仅保留最近 200 条                                                                                                                                                                           |
+| `PersonaJournal`      | 日记/反思      | personaInstanceId、date、content、mood、consolidatedMemoryIds                                                                                                                                                                                                                                                             |
+| `LlmCallLog`          | LLM 调用账本   | source、provider、model、system、prompt/response、tokens、latency、error、runId、channelId/personaId；正文只保留最近 200 条，更早的归属调用只留用量                                                                                                                                                                       |
 
 单一真源（2026-11-04 收敛完成）：
 
@@ -338,13 +338,13 @@ type OutgoingBeat =
 
 每轮写回与漂移（`MindDriftService`）：规划器可以提出`self.activity`、`self.traits`、`groupStance` 与 `relationshipSignals`；自身与群数值落库前由服务端限幅，对个人关系数值不再按轮/日/冷却设限，只夹存储范围。
 
-| 作用域     | 写入位置                       | 单轮跨度   | 24 小时上限 | 冷却       | 每轮最多    |
-| ---------- | ------------------------------ | ---------- | ----------- | ---------- | ----------- |
-| 自身活动   | `PersonaState.currentActivity` | 只更换文案 | 无          | 无         | 1           |
-| 整洁程度   | `PersonaState.grooming`        | ±8         | 净 ±30      | 5 分钟     | 1           |
-| 自身数值   | `ChatChannelPersona.values`    | 每项 ±1    | 每项净 ±4   | 45 分钟/项 | 2 项        |
-| 群态度     | `PersonaGroupStance`           | 每项 ±2    | 每项净 ±8   | 30 分钟/项 | 3 项        |
-| 对个人关系 | `PersonaRelationship`          | 不限制     | 不限制      | 无         | 不限制      |
+| 作用域     | 写入位置                       | 单轮跨度   | 24 小时上限 | 冷却       | 每轮最多 |
+| ---------- | ------------------------------ | ---------- | ----------- | ---------- | -------- |
+| 自身活动   | `PersonaState.currentActivity` | 只更换文案 | 无          | 无         | 1        |
+| 整洁程度   | `PersonaState.grooming`        | ±8         | 净 ±30      | 5 分钟     | 1        |
+| 自身数值   | `ChatChannelPersona.values`    | 每项 ±1    | 每项净 ±4   | 45 分钟/项 | 2 项     |
+| 群态度     | `PersonaGroupStance`           | 每项 ±2    | 每项净 ±8   | 30 分钟/项 | 3 项     |
+| 对个人关系 | `PersonaRelationship`          | 不限制     | 不限制      | 无         | 不限制   |
 
 自身数值只在 9 个心理维度上漂移：自信、自控力、羞耻感、信任倾向、依恋程度、占有欲、顺从度、好奇心、主动性；体力上限、身高体重等稳定设定不会随聊天移动。每日上限按净变化计算，反向回调不会被上限锁死。所有漂移都会写一条 `WRITEBACK` run step，账本落在 `PersonaChangeLog`。
 
@@ -658,6 +658,8 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 收尾记录（2026-11-08）：`dialogue.close` 以前只生成 followup 意图，下一次唤醒时模型并不知道「上次是怎么收的」。`ChatConversation` 新增 `closureClosedAt` / `closureReason` / `closureSummary` / `closureNextOpening` / `closureReopenedAt` 五个可空列（迁移 `20261108100000_mind_closure_record`），由 `MindClosureService` 负责读写。消息回合在规划前先按入站消息时间标记 `closureReopenedAt`（只记收尾后的第一条）；写回时若 `dialogue.close` 为真，按长时事件启动/明确道别/话题闭环/疲劳归类原因并保存摘要与下次接法。规划器只对 7 天内的记录注入【上次收尾】：10 分钟内重新开口提示「新的开始，别复读上次结尾」，否则提示「已经收过尾，除非有新由头不要硬续旧话题」。记录只作参考，不阻止发送；实测私聊记录写入、重开标记、8 天过期跳过和提示词文本都正确，验证后已把测试列恢复为 `null`。
 
 - 直连对话（2026-11-08）：新增产品页「直接对话」`/direct`，可以不经过 QQ 直接和人格进行生产对话。`ChatConversation` 增加 `isDirect` / `directContactId`（迁移 `20261108120000_chat_direct_conversation`）；`POST /chat/direct/conversations` 复用所选私聊的对方身份（无身份时退回「主人」）并 upsert 一条 `PRIVATE` 直连会话，普通私聊列表按 `isDirect: false` 过滤。入站消息用 `appendLocal` 落库后照常交给 `ChatMessageProcessor`，所以渠道模式、连发合并、运行轨迹、记忆、关系、待办和工具副作用全部走真实生产链路；出站时 `ChatService.sendMessage` 检测到 `isDirect` 就改为本地落库并发出事件，不再要求 NapCat 在线。页面用消息接口 + SSE 展示，模式不是 `LIVE` 时明确提示不会直接回复。实测用临时克隆人格走通「发消息 → 真实规划 → 回复落库 → 页面显示」，产生 2 条消息、1 次运行、1 个动作和 1 条状态；验证后已删除临时渠道及其运行、提示词日志和消息，未触碰真实人格。
+
+- 数据库收口（2026-11-09，迁移 `20261109130000_db_consolidation`）：`LlmPromptLog` 与 `LlmUsageLog` 合并为 `LlmCallLog`——每次调用一行，最近 200 条保留正文，更早且带渠道/人格归属的调用只留 token 用量，run 内用量仍以 `AgentRun` 为准；`ChatForwardNodeImage` / `ChatForwardNodeVoice` 合并进 `ChatImageAsset` / `ChatVoiceAsset`，用 `messageId` 或 `forwardNodeId` 二选一并由检查约束保证；删除 `AgentRun.cost`、`ChatMessageRecord.receivedAt` 与四个冗余索引。验证后删除了 1 条孤儿表达笔记和 2 个无引用媒体元数据（文件移入 `data/backup/db-consolidation-20261109/`）。
 
 验收：
 

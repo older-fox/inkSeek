@@ -134,9 +134,12 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
       const text = input.text?.trim();
       const page = session.page;
       if (ref) {
-        await page.locator(`[data-mind-ref="${ref.replace(/[^0-9]/gu, '')}"]`).first().click({
-          timeout: 8_000,
-        });
+        await page
+          .locator(`[data-mind-ref="${ref.replace(/[^0-9]/gu, '')}"]`)
+          .first()
+          .click({
+            timeout: 8_000,
+          });
       } else if (text) {
         await page.getByText(text, { exact: false }).first().click({ timeout: 8_000 });
       } else {
@@ -166,11 +169,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async scroll(
-    personaId: string,
-    direction: 'down' | 'up',
-    pages = 1,
-  ): Promise<BrowserSnapshot> {
+  async scroll(personaId: string, direction: 'down' | 'up', pages = 1): Promise<BrowserSnapshot> {
     return this.run(personaId, async (session) => {
       const page = session.page;
       const viewport = page.viewportSize()?.height ?? 800;
@@ -183,13 +182,18 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
 
   async back(personaId: string): Promise<BrowserSnapshot> {
     return this.run(personaId, async (session) => {
-      await session.page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => null);
+      await session.page
+        .goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 })
+        .catch(() => null);
       await this.settle(session);
       return this.snapshotOf(session);
     });
   }
 
-  async read(personaId: string, maxChars = 6000): Promise<{ title: string; url: string; text: string }> {
+  async read(
+    personaId: string,
+    maxChars = 6000,
+  ): Promise<{ title: string; url: string; text: string }> {
     return this.run(personaId, async (session) => {
       const raw = (await session.page.evaluate(READ_SCRIPT)) as {
         title?: string;
@@ -204,7 +208,10 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async screenshot(personaId: string, focus?: string): Promise<{ url: string; title: string; description: string }> {
+  async screenshot(
+    personaId: string,
+    focus?: string,
+  ): Promise<{ url: string; title: string; description: string }> {
     return this.run(personaId, async (session) => {
       const buffer = await session.page.screenshot({ type: 'png', fullPage: false });
       const prompt = focus
@@ -218,12 +225,14 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
           temperature: 0.2,
           maxTokens: 900,
           source: 'mind.browser',
+          personaId,
         })
         .catch(() => ({ text: '' }));
       return {
         url: session.page.url(),
         title: await session.page.title().catch(() => ''),
-        description: completion.text.trim().slice(0, 1500) || '截图已保存，但视觉模型没有返回描述。',
+        description:
+          completion.text.trim().slice(0, 1500) || '截图已保存，但视觉模型没有返回描述。',
       };
     });
   }

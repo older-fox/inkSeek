@@ -15,6 +15,13 @@ export const meQuery = queryOptions({
   staleTime: 60_000,
 });
 
+export const overviewQuery = queryOptions({
+  queryKey: ['overview'],
+  queryFn: api.overview,
+  staleTime: 15_000,
+  refetchInterval: 30_000,
+});
+
 export const settingsQuery = queryOptions({
   queryKey: ['settings'],
   queryFn: api.settings,
@@ -69,4 +76,12 @@ export const mindGroupStancesQuery = (personaId: string) =>
     queryFn: () => api.mindGroupStances(personaId),
     enabled: Boolean(personaId),
     staleTime: 5_000,
+  });
+
+export const mindInsightsQuery = (channelId: string, days: number) =>
+  queryOptions({
+    queryKey: ['insights', channelId, days],
+    queryFn: () => api.mindInsights(channelId, days),
+    enabled: Boolean(channelId),
+    staleTime: 30_000,
   });

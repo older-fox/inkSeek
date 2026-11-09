@@ -99,7 +99,6 @@ model PersonaVersion {
   createdAt     DateTime    @default(now())
 
   @@unique([personaId, version])
-  @@index([personaId, version])
 }
 
 enum ChatChannelStatus {
@@ -210,7 +209,6 @@ model ChatContact {
   relationships PersonaRelationship[]
 
   @@unique([channelId, externalId])
-  @@index([channelId])
 }
 
 model ChatConversation {
@@ -265,7 +263,6 @@ model ChatGroupMember {
   updatedAt      DateTime         @updatedAt
 
   @@unique([conversationId, contactId])
-  @@index([conversationId])
 }
 
 model ChatMessageRecord {
@@ -284,7 +281,6 @@ model ChatMessageRecord {
   text              String              @default("")
   segments          Json
   sentAt            DateTime
-  receivedAt        DateTime            @default(now())
   /// OneBot message_id from the reply segment, kept even when the target is not stored.
   replyToExternalId String?
   /// Local target row when the quoted message was already ingested; cleared on delete.
@@ -302,7 +298,6 @@ model ChatMessageRecord {
   @@index([conversationId, sentAt])
   @@index([channelId, sentAt])
   @@index([replyToMessageId])
-  @@index([replyToExternalId])
 }
 
 /// Content metadata keyed by the SHA-256 of the decoded bytes. Many message and
@@ -322,49 +317,58 @@ model ChatMediaObject {
   description String?
   createdAt   DateTime @default(now())
 
-  images            ChatImageAsset[]
-  forwardNodeImages ChatForwardNodeImage[]
+  images ChatImageAsset[]
 }
 
+/// Image attachment of a message or one forward node. Exactly one owner is set;
+/// the database enforces it with a check constraint.
 model ChatImageAsset {
-  id        String            @id @default(cuid())
-  messageId String
-  message   ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  mediaId   String?
-  media     ChatMediaObject?  @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  url       String
-  fileName  String?
-  mimeType  String?
-  byteSize  Int?
-  width     Int?
-  height    Int?
-  remoteUrl String?
-  /// Zero-based index of the source message segment, preserves render order.
-  position  Int               @default(0)
-  createdAt DateTime          @default(now())
+  id            String             @id @default(cuid())
+  messageId     String?
+  message       ChatMessageRecord? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  forwardNodeId String?
+  forwardNode   ChatForwardNode?   @relation(fields: [forwardNodeId], references: [id], onDelete: Cascade)
+  mediaId       String?
+  media         ChatMediaObject?   @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  url           String
+  fileName      String?
+  mimeType      String?
+  byteSize      Int?
+  width         Int?
+  height        Int?
+  remoteUrl     String?
+  /// Zero-based index of the source segment, preserves render order.
+  position      Int                @default(0)
+  createdAt     DateTime           @default(now())
 
   @@index([messageId, position])
+  @@index([forwardNodeId, position])
   @@index([mediaId])
 }
 
+/// Voice attachment of a message or one forward node. Exactly one owner is set;
+/// the database enforces it with a check constraint.
 model ChatVoiceAsset {
-  id          String            @id @default(cuid())
-  messageId   String
-  message     ChatMessageRecord @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  url         String
-  fileName    String?
-  mimeType    String?
-  byteSize    Int?
+  id            String             @id @default(cuid())
+  messageId     String?
+  message       ChatMessageRecord? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  forwardNodeId String?
+  forwardNode   ChatForwardNode?   @relation(fields: [forwardNodeId], references: [id], onDelete: Cascade)
+  url           String
+  fileName      String?
+  mimeType      String?
+  byteSize      Int?
   /// Duration in seconds when provided by the connector.
-  duration    Int?
+  duration      Int?
   /// Speech-to-text transcript from NapCat; null for silence or failed requests.
-  description String?
-  remoteUrl   String?
-  /// Zero-based index of the source message segment, preserves render order.
-  position    Int               @default(0)
-  createdAt   DateTime          @default(now())
+  description   String?
+  remoteUrl     String?
+  /// Zero-based index of the source segment, preserves render order.
+  position      Int                @default(0)
+  createdAt     DateTime           @default(now())
 
   @@index([messageId, position])
+  @@index([forwardNodeId, position])
 }
 
 enum ChatForwardSource {
@@ -422,46 +426,10 @@ model ChatForwardNode {
   segments         Json
   createdAt        DateTime          @default(now())
 
-  images ChatForwardNodeImage[]
-  voices ChatForwardNodeVoice[]
+  images ChatImageAsset[]
+  voices ChatVoiceAsset[]
 
   @@index([forwardId, parentId, position])
-}
-
-model ChatForwardNodeImage {
-  id        String           @id @default(cuid())
-  nodeId    String
-  node      ChatForwardNode  @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  mediaId   String?
-  media     ChatMediaObject? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  url       String
-  fileName  String?
-  mimeType  String?
-  byteSize  Int?
-  width     Int?
-  height    Int?
-  remoteUrl String?
-  position  Int              @default(0)
-  createdAt DateTime         @default(now())
-
-  @@index([nodeId, position])
-  @@index([mediaId])
-}
-
-model ChatForwardNodeVoice {
-  id        String          @id @default(cuid())
-  nodeId    String
-  node      ChatForwardNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  url       String
-  fileName  String?
-  mimeType  String?
-  byteSize  Int?
-  duration  Int?
-  remoteUrl String?
-  position  Int             @default(0)
-  createdAt DateTime        @default(now())
-
-  @@index([nodeId, position])
 }
 
 // ---------------------------------------------------------------------------
@@ -793,8 +761,8 @@ model PersonaChangeLog {
   @@index([personaId, scope, targetId, field, createdAt])
 }
 
-/// Relationship toward one channel contact. `base*` is the operator-authored
-/// baseline; `*` is the live value after events. All dimensions are -100..100.
+/// Relationship toward one channel contact. All dimensions are -100..100 and
+/// are the live values after events.
 model PersonaRelationship {
   id                 String             @id @default(cuid())
   personaId          String
@@ -990,7 +958,6 @@ model AgentRun {
   model            String?
   promptTokens     Int?
   completionTokens Int?
-  cost             Float?
   latencyMs        Int?
   decision         Json?
   socialRead       Json?
@@ -1134,23 +1101,23 @@ model AgentAction {
 /// `data/chat/channels/<channelId>/stickers/<filePath>`; the row carries the
 /// description and embedding used for mood/scene retrieval.
 model StickerAsset {
-  id          String    @id @default(cuid())
+  id          String      @id @default(cuid())
   channelId   String
   channel     ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   sha256      String
   filePath    String
   mimeType    String?
-  byteSize    Int       @default(0)
+  byteSize    Int         @default(0)
   width       Int?
   height      Int?
-  tags        String[]  @default([])
-  description String    @default("")
-  embedding   Float[]   @default([])
-  enabled     Boolean   @default(true)
-  usageCount  Int       @default(0)
+  tags        String[]    @default([])
+  description String      @default("")
+  embedding   Float[]     @default([])
+  enabled     Boolean     @default(true)
+  usageCount  Int         @default(0)
   lastUsedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   @@unique([channelId, sha256])
   @@index([channelId, enabled, lastUsedAt])
@@ -1159,46 +1126,50 @@ model StickerAsset {
 /// Cached understanding of a public video, keyed by platform video id so the
 /// persona can recall it without downloading the same video twice.
 model VideoInsight {
-  id           String    @id @default(cuid())
-  platform     String    @default("bilibili")
-  videoId      String
-  url          String    @default("")
-  title        String    @default("")
-  author       String    @default("")
-  durationSec  Int       @default(0)
-  description  String    @default("")
-  tags         String[]  @default([])
-  coverUrl     String?
-  stats        Json?
-  transcript   String    @default("")
-  comments     String    @default("")
-  summary      String    @default("")
-  keyPoints    String[]  @default([])
-  framesPath   String?
-  frameCount   Int       @default(0)
-  watchedAt    DateTime  @default(now())
-  lastUsedAt   DateTime  @default(now())
-  usageCount   Int       @default(0)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          String   @id @default(cuid())
+  platform    String   @default("bilibili")
+  videoId     String
+  url         String   @default("")
+  title       String   @default("")
+  author      String   @default("")
+  durationSec Int      @default(0)
+  description String   @default("")
+  tags        String[] @default([])
+  coverUrl    String?
+  stats       Json?
+  transcript  String   @default("")
+  comments    String   @default("")
+  summary     String   @default("")
+  keyPoints   String[] @default([])
+  framesPath  String?
+  frameCount  Int      @default(0)
+  watchedAt   DateTime @default(now())
+  lastUsedAt  DateTime @default(now())
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([platform, videoId])
   @@index([lastUsedAt])
 }
 
-/// Raw request/response snapshots for every LLM call. Only the newest 200 rows
-/// are retained; older rows are pruned after each insert.
-model LlmPromptLog {
+/// One row per LLM call. Raw request/response text is kept for the newest 200
+/// calls; older attributed calls keep only usage so reports can aggregate them.
+/// Run-scoped token totals stay authoritative on AgentRun.
+model LlmCallLog {
   id               String   @id @default(cuid())
   /// The mind run that produced this call, so the trace can show its prompts.
   runId            String?
+  /// Attribution for calls outside a run (vision descriptions, screenshots).
+  channelId        String?
+  personaId        String?
   source           String   @default("llm")
   providerId       String?
   providerName     String?
   model            String?
   system           String   @default("")
-  prompt           String
-  response         String   @default("")
+  prompt           String?
+  response         String?
   imageCount       Int      @default(0)
   promptTokens     Int?
   completionTokens Int?
@@ -1209,6 +1180,8 @@ model LlmPromptLog {
   @@index([createdAt])
   @@index([source, createdAt])
   @@index([runId, createdAt])
+  @@index([channelId, createdAt])
+  @@index([personaId, createdAt])
 }
 
 /// First-person journal entry produced by deep consolidation.
