@@ -17,7 +17,7 @@ stages:
   - image
 
 variables:
-  NODE_IMAGE: docker.1ms.run/library/node:24-bookworm-slim
+  NODE_IMAGE: docker.m.daocloud.io/library/node:24-bookworm-slim
   NPM_REGISTRY: https://registry.npmmirror.com
   APT_MIRROR: http://mirrors.aliyun.com
   PRISMA_ENGINES_MIRROR: https://registry.npmmirror.com/-/binary/prisma
