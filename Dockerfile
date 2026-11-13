@@ -68,7 +68,14 @@ COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/nest-cli.json 
 COPY apps/api/src ./apps/api/src
 
 # turbo 会先构建 shared，再构建 api / web；web 的 tsc --noEmit 也在 build 里执行。
-RUN pnpm build
+# 构建后拦一道：dist 里若残留 `.ts` 相对导入说明 Prisma Client 被按 `.ts` 生成过，
+# Node ESM 在运行期会 ERR_MODULE_NOT_FOUND。宁可构建失败，也不要打出坏镜像。
+RUN set -eu; \
+    pnpm build; \
+    if grep -rlE "from ['\"]\.{1,2}/[^'\"]*\.ts['\"]" apps/api/dist >/dev/null; then \
+      echo "error: apps/api/dist contains .ts import specifiers (Prisma Client generated without importFileExtension=js)" >&2; \
+      exit 1; \
+    fi
 
 # ---------- 运行期依赖：仅 production ----------
 FROM base AS prod-deps

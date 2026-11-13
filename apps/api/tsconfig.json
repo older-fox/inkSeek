@@ -12,6 +12,7 @@
     "strictPropertyInitialization": false,
     "isolatedModules": false,
     "verbatimModuleSyntax": false,
+    "rewriteRelativeImportExtensions": true,
     "sourceMap": true,
     "declaration": false,
     "incremental": true,

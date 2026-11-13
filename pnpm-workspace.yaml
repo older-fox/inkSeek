@@ -2,6 +2,11 @@ packages:
   - apps/*
   - packages/*
 
+# 强制全仓单一 fastify 版本：@nestjs/platform-fastify 固定依赖 5.12.7，而 5.12.8 才修复
+# CVE-2026-120216。不统一会出现两份 fastify、类型重复导致 register() 重载报错。
+overrides:
+  fastify: 5.12.8
+
 minimumReleaseAgeExclude:
   - '@vitejs/plugin-react@6.2.1'
   - fastify@5.12.8
