@@ -1,7 +1,12 @@
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "esm"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  // Pin import extensions to `.js`: the generator otherwise derives them from the
+  // project tsconfig and falls back to `.ts` when none is present — as during the
+  // image build, where `prisma generate` runs before tsconfig.json is copied. The
+  // emitted `.ts` specifiers survive compilation and break Node's ESM resolver.
+  importFileExtension = "js"
 }
 
 datasource db {
