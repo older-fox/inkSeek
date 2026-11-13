@@ -87,7 +87,7 @@ export function MindBannedWordsSection({ words }: { words: string[] }) {
           rows={14}
           onChange={(event) => setText(event.target.value)}
           placeholder={'每行一条，例如：\n我记下了\n比之前都重\n行，我认'}
-          className="wizard-textarea min-h-[18rem] font-mono text-[0.78rem] leading-6"
+          className="wizard-textarea min-h-[18rem] font-sans text-[0.78rem] leading-6"
         />
       </label>
 
