@@ -3,5 +3,6 @@ export const CONFIG_KEYS = {
   redisConnection: 'redis.connection',
   bilibiliCookie: 'video.bilibili',
   mindGlobalBannedWords: 'mind.globalBannedWords',
+  mindWebAllowedHosts: 'mind.webAllowedHosts',
   ttsSpeech: 'tts.speech',
 } as const;

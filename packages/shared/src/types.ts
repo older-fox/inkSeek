@@ -91,10 +91,16 @@ export interface SettingsOverview {
   providers: ModelProviderSummary[];
   /** Global banned words applied to every channel's mind prompt. */
   mindBannedWords: string[];
+  /** Hosts the mind may read even when they resolve to private addresses. */
+  webAllowedHosts: string[];
 }
 
 export interface MindBannedWordsResult {
   words: string[];
+}
+
+export interface WebAllowedHostsResult {
+  hosts: string[];
 }
 
 export interface PhoneSettingsResult {

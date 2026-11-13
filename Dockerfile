@@ -101,7 +101,8 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production \
     HOME=/app/data
 
-# Nginx 托管前端，/api 反代 API；ffmpeg 供视频抽帧/照片缩放，adb 供手机焦点使用。
+# Nginx 托管前端，/api 反代 API；ffmpeg 供视频抽帧/照片缩放，adb 供手机焦点使用；
+# chromium 供心智的无头浏览器工具（browser.*）使用，中文字体避免截图与正文出现方框。
 # 镜像源不可强依赖单一站点：清华等镜像会对部分机房 IP 返回 403，所以按
 # APT_MIRROR → 阿里云 → 中科大 → 华为云 → Debian 官方 的顺序逐个尝试，第一个
 # apt-get update 成功的源用于后续安装。每次尝试前恢复原始 sources，避免多次 sed 叠加。
@@ -133,7 +134,9 @@ RUN set -eux; \
       if apt-get update; then ok=1; break; fi; \
     done; \
     [ "$ok" = 1 ] || { echo "all apt mirrors failed" >&2; exit 1; }; \
-    apt-get install -y --no-install-recommends ca-certificates nginx ffmpeg adb; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates nginx ffmpeg adb \
+      chromium fonts-noto-cjk fonts-liberation; \
     rm -rf /var/lib/apt/lists/*; \
     rm -f /etc/nginx/sites-enabled/default
 

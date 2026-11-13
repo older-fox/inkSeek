@@ -20,6 +20,7 @@ import {
   redisSettingsSchema,
   ttsSettingsSchema,
   ttsTestSchema,
+  webAllowedHostsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
   type MindBannedWordsInput,
@@ -37,6 +38,8 @@ import {
   type TtsSettingsResult,
   type TtsTestInput,
   type TtsTestResult,
+  type WebAllowedHostsInput,
+  type WebAllowedHostsResult,
 } from '@inkseek/shared';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { AuthGuard } from '../auth/auth.guard.js';
@@ -95,6 +98,16 @@ export class SettingsController {
     @Body(new ZodValidationPipe(ttsTestSchema)) input: TtsTestInput,
   ): Promise<TtsTestResult> {
     return this.settings.testTts(input);
+  }
+
+  @Put('web-allowed-hosts')
+  @HttpCode(200)
+  @ApiOperation({ summary: '保存网页访问白名单：域名允许在内网解析时仍被心智读取（管理员）' })
+  /** Entries are normalized to bare hostnames; covered subdomains inherit the entry. */
+  updateWebAllowedHosts(
+    @Body(new ZodValidationPipe(webAllowedHostsSchema)) input: WebAllowedHostsInput,
+  ): Promise<WebAllowedHostsResult> {
+    return this.settings.updateWebAllowedHosts(input);
   }
 
   @Put('mind-banned-words')

@@ -2,6 +2,9 @@ import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@ne
 import { access } from 'node:fs/promises';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { LlmService } from '../ai/llm.service.js';
+import { CONFIG_KEYS } from '../config/config-keys.js';
+import { SystemConfigService } from '../config/system-config.service.js';
+import { normalizeAllowedHosts } from './web-allowlist.js';
 import { assertPublicHost, normalizePublicUrl } from './web-search.service.js';
 
 export interface BrowserSnapshot {
@@ -99,7 +102,10 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   private readonly lastUsed = new Map<string, number>();
   private sweepTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly llm: LlmService) {}
+  constructor(
+    private readonly llm: LlmService,
+    private readonly config: SystemConfigService,
+  ) {}
 
   /** Starts the idle-session sweep so abandoned contexts do not leak between runs. */
   onModuleInit(): void {
@@ -120,7 +126,10 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   /** Navigates to a public http(s) URL and returns its first snapshot; rejects local or non-web hosts. */
   async open(personaId: string, rawUrl: string): Promise<BrowserSnapshot> {
     const url = normalizePublicUrl(rawUrl);
-    await assertPublicHost(url);
+    const allowedHosts = normalizeAllowedHosts(
+      await this.config.get<string[]>(CONFIG_KEYS.mindWebAllowedHosts),
+    );
+    await assertPublicHost(url, allowedHosts);
     return this.run(personaId, async (session) => {
       await this.navigate(session, url.toString());
       return this.snapshotOf(session);
@@ -333,7 +342,9 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   private async createSession(): Promise<BrowserSession> {
     const browser = await this.ensureBrowser();
     if (!browser) {
-      throw new Error('没有找到可用的 Chrome/Edge；先安装 Chrome 或 Edge，浏览器学习才能用');
+      throw new Error(
+        '没有找到可用的浏览器（Chrome/Edge/Chromium）；本机请先安装，容器部署请确认镜像内置 Chromium',
+      );
     }
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },
@@ -396,16 +407,16 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
-  /** Finds an installed Chrome/Edge and launches it headless; returns null when none can start. */
+  /**
+   * Launches headless. A system Chrome/Edge wins when present (dev machines);
+   * otherwise Playwright's bundled Chromium is used, which is what the runtime
+   * image installs. Returns null when neither can start.
+   */
   private async launch(): Promise<Browser | null> {
     const executablePath = await findBrowserExecutable();
-    if (!executablePath) {
-      this.logger.warn('未找到 Chrome/Edge，浏览器工具不可用');
-      return null;
-    }
     try {
       const browser = await chromium.launch({
-        executablePath,
+        ...(executablePath ? { executablePath } : {}),
         headless: true,
         args: [
           '--no-sandbox',
@@ -416,7 +427,9 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
           '--lang=zh-CN',
         ],
       });
-      this.logger.log(`无头浏览器已启动：${executablePath}`);
+      this.logger.log(
+        `无头浏览器已启动：${executablePath ?? 'Playwright 内置 Chromium'}`,
+      );
       return browser;
     } catch (error) {
       this.logger.warn(
@@ -516,6 +529,15 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
 
 /** Probes the platform's common Chrome/Edge install paths and returns the first executable found. */
 async function findBrowserExecutable(): Promise<string | null> {
+  const override = process.env['MIND_BROWSER_EXECUTABLE']?.trim();
+  if (override) {
+    try {
+      await access(override);
+      return override;
+    } catch {
+      // Fall through to the platform probe list.
+    }
+  }
   const candidates =
     process.platform === 'win32'
       ? [

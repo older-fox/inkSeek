@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
+import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { RedisCacheService } from '../redis/redis-cache.service.js';
 import { readString } from './mind.types.js';
+import { isHostAllowed, normalizeAllowedHosts } from './web-allowlist.js';
 
 export interface WebSearchResult {
   title: string;
@@ -90,8 +92,11 @@ export class WebSearchService {
    */
   async read(rawUrl: string): Promise<WebReadResult> {
     let current = normalizePublicUrl(rawUrl);
+    const allowedHosts = normalizeAllowedHosts(
+      await this.config.get<string[]>(CONFIG_KEYS.mindWebAllowedHosts),
+    );
     for (let redirects = 0; redirects <= READ_MAX_REDIRECTS; redirects += 1) {
-      await assertPublicHost(current);
+      await assertPublicHost(current, allowedHosts);
       const response = await fetch(current.toString(), {
         redirect: 'manual',
         signal: AbortSignal.timeout(READ_TIMEOUT_MS),
@@ -238,9 +243,16 @@ export function normalizePublicUrl(value: string): URL {
   return url;
 }
 
-/** Resolves the hostname and rejects localhost or any record pointing at a private address. */
-export async function assertPublicHost(url: URL): Promise<void> {
+/**
+ * Resolves the hostname and rejects localhost or any record pointing at a
+ * private address. Hosts in the operator allowlist skip the check, which is
+ * how split-horizon sites that only resolve internally stay readable.
+ */
+export async function assertPublicHost(url: URL, allowedHosts: readonly string[] = []): Promise<void> {
   const host = url.hostname.trim().toLowerCase();
+  if (isHostAllowed(host, allowedHosts)) {
+    return;
+  }
   if (!host || host === 'localhost' || host.endsWith('.localhost')) {
     throw new Error('不能读取本地地址');
   }
@@ -249,7 +261,7 @@ export async function assertPublicHost(url: URL): Promise<void> {
     throw new Error('无法解析网页地址');
   }
   if (addresses.some((entry) => isPrivateAddress(entry.address))) {
-    throw new Error('不能读取内网地址');
+    throw new Error('不能读取内网地址（如确需访问，请在设置 → 网页访问 里加入该域名）');
   }
 }
 

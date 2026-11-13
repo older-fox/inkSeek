@@ -73,6 +73,8 @@ import type {
   TtsSettingsResult,
   TtsTestInput,
   TtsTestResult,
+  WebAllowedHostsInput,
+  WebAllowedHostsResult,
 } from '@inkseek/shared';
 
 const API_BASE = '/api/v1';
@@ -166,6 +168,11 @@ export const api = {
     }),
   updateMindBannedWords: (input: MindBannedWordsInput) =>
     request<MindBannedWordsResult>('/settings/mind-banned-words', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateWebAllowedHosts: (input: WebAllowedHostsInput) =>
+    request<WebAllowedHostsResult>('/settings/web-allowed-hosts', {
       method: 'PUT',
       body: JSON.stringify(input),
     }),

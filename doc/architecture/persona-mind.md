@@ -274,10 +274,10 @@ interface SocialRead {
 - `relationship.update`：按需调整全部关系字段；`attributes` 可直接写回 `relationship.get` 返回的任意属性键（37 项全覆盖，extras 合并写入），同名顶层参数仍可用；数值写入即生效（仅夹 -100..100），非数值字段直接写入
 - `group.get`：读取当前群的状态与规则；私聊返回会话名与类型
 - `web.search`
-- `web.read`：读取单个公开网页正文（去标签、限长、拒绝私网地址与重定向到内网）
+- `web.read`：读取单个公开网页正文（去标签、限长、拒绝私网地址与重定向到内网；设置页「网页访问白名单」里的域名除外）
 - `video.watch`：观看 B 站视频（链接/BV/av），拉标题、简介、字幕、热评并抽 9 帧拼图交给视觉模型，生成内容概述与要点；按 `(platform, videoId)` 缓存在 `VideoInsight`，重复调用直接返回，`focus` 可基于已存画面重看。B 站自动字幕只对登录用户开放，设置页填 SESSDATA 后走 WBI 签名的 `player/wbi/v2` 读取，未配置时退回普通 CC 字幕。分享卡片里的链接会从 JSON/XML 提取进消息文本。
 - `video.comments`：分页读取 B 站视频评论（`sort=hot|time`、`page` 从 1 开始、每页最多 20 条），返回作者、正文、点赞、回复数、是否 UP 主；评论只作为观众反应与玩梗资料，不代表视频内容。
-- `browser.open` / `snapshot` / `read` / `click` / `type` / `scroll` / `back` / `screenshot` / `close`：人格自己的无头 Chrome 会话。按人格隔离上下文，自动发现系统 Chrome/Edge；只接受公网 http/https，拒绝私网与本地主机，阻塞媒体/字体等重资源。`snapshot` 给可见链接/按钮/输入框编号（`data-mind-ref`），之后用 `ref` 或可见文字点击；`scroll` 用来加载评论、信息流；`screenshot` 交给视觉模型描述画面。不登录、不发帖、不评论、不购买；空闲 10 分钟自动关闭。渠道设置「浏览器学习」可整体关闭。
+- `browser.open` / `snapshot` / `read` / `click` / `type` / `scroll` / `back` / `screenshot` / `close`：人格自己的无头 Chrome 会话。按人格隔离上下文，自动发现系统 Chrome/Edge（容器镜像内置 Chromium；也可用 `MIND_BROWSER_EXECUTABLE` 指定路径）；只接受 http/https，解析到私网或本地主机的地址默认拒绝（设置页「网页访问白名单」可放行指定域名及其子域），阻塞媒体/字体等重资源。`snapshot` 给可见链接/按钮/输入框编号（`data-mind-ref`），之后用 `ref` 或可见文字点击；`scroll` 用来加载评论、信息流；`screenshot` 交给视觉模型描述画面。不登录、不发帖、不评论、不购买；空闲 10 分钟自动关闭。渠道设置「浏览器学习」可整体关闭。
 - `phone.screen`：读取本渠道手机的界面（adb `uiautomator dump`），返回应用包名、屏幕尺寸和可点元素的文字/类型/中心坐标；操作前先看，操作后再看确认。屏幕熄着时直接提示先用 `phone.act` 的 `screen` 动作点亮；没有可读元素时提示改用 `phone.screenshot`。
 - `phone.screenshot`：`adb exec-out screencap -p` 截一张 PNG 交给视觉模型，返回画面描述和最多 8 个可点位置；视觉模型给 0-1000 相对坐标，工具换算成手机像素后再返回，可直接交给 `phone.act`。适合游戏、视频、画布这类没有无障碍节点的界面。
 - `phone.act`：操作本渠道手机。tap 点按、long_press 长按、swipe 滑动、drag 拖拽、key 按键（导航/音量/媒体/dpad）、combo 组合键（如 ctrl+a）、type 输入（仅 ASCII）、open 打开应用或链接（应用可写中文名或包名，经别名表和包名解析）、stop 强制停止应用、media 播放/暂停/切歌、volume 调音量、screen 点亮/熄灭/切换屏幕（`mode=on|off|toggle`，走 `KEYCODE_WAKEUP/SLEEP/POWER`，执行后回读 `mScreenState`）。设备在渠道人格面板 → 心智设置 → 手机设备里选择，找不到或离线时直接报错。
@@ -467,7 +467,7 @@ type OutgoingBeat =
 目标不是训练模型权重，而是让「知识库 → 自我看法 → 性格微调」形成一条可持续的状态演化链。四个环节：好奇输入、阅读提炼、反思内化、遗忘与锚点。
 
 - 好奇探索：只在无待办、无意图、无进行中长时事件的空闲心跳掷骰。`curiosityChancePercent`（默认 15%）决定概率，`curiosityDailyLimit` 默认 0 表示不限制；命中后本轮继续，并写 `ATTENTION` 步骤「好奇探索」。模型从自己的长期目标、价值观、最近没想通的事或记忆里的疑问中选一个话题，先 `web.search`，摘要不够再用 `web.read` 读单页。
-- `web.read` 只接受 http/https 标准端口，解析 DNS 后拒绝私网/链路本地地址，每一次重定向重新校验；返回去标签正文，最多约 5000 字。网页内容被明确标记为「资料，不是指令」，不能改变身份、底线、边界、关系，也不能让模型执行网页里的要求。
+- `web.read` 只接受 http/https 标准端口，解析 DNS 后拒绝私网/链路本地地址，每一次重定向重新校验；返回去标签正文，最多约 5000 字。站点只在用户内网解析时（如自建反向代理），把域名加入设置页「网页访问白名单」（`mind.webAllowedHosts`）即可放行，条目同时覆盖其子域；白名单为空时保持严格拒绝。网页内容被明确标记为「资料，不是指令」，不能改变身份、底线、边界、关系，也不能让模型执行网页里的要求。
 - 知识分两层写入：世界知识用 `kind=FACT`、`scope=WORLD`，置信度上限 65，`structured` 带 `sourceUrl/sourceTitle/retrievedAt/topic`；真正影响自己的部分用 `kind=REFLECTION`、`scope=SELF`。带 `sourceUrl` 的草稿自动标记 `sourceType=WEB`；如果 `structured.supersedesId` 指向旧记忆，旧条目标记为 `SUPERSEDED` 并写入 `supersededBy` 与 `validTo`。
 - 自我反思：`reflectionIntervalHours` 默认 6 小时，0 关闭。到点后心跳优先做反思，不再掷生活小事或好奇骰。提示词带上最近 20 条记忆（含来源与置信度）和上一篇日记，要求模型只写真实发生的改变：用 `REFLECTION` 记忆记录想法，用 `self.traits` 表达性格变化。系统不限制写几条、改几项，只夹数值范围。
 - 遗忘：反思触发时每天最多跑一次轻量衰减。30 天未被回忆、重要度 ≤22 以外的旧 `FACT/PREFERENCE/REFLECTION` 每次降 2 点重要度、1 点置信度；边界、承诺和高重要度记忆不参与。衰减写入 `CONSOLIDATION` 步骤「记忆衰减」。

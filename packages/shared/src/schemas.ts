@@ -54,6 +54,12 @@ export const mindBannedWordsSchema = z.object({
     .max(500, '最多 500 条禁用词'),
 });
 
+export const webAllowedHostsSchema = z.object({
+  hosts: z
+    .array(z.string().trim().min(1, '域名不能为空').max(253, '单个域名最多 253 个字符'))
+    .max(100, '最多 100 个域名'),
+});
+
 export const phoneConnectSchema = z.object({
   address: z.string().trim().min(1, '请填写 IP:端口').max(120, '地址过长'),
 });
@@ -200,6 +206,7 @@ export type RedisConnectionInput = z.infer<typeof redisConnectionSchema>;
 export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type BilibiliSettingsInput = z.infer<typeof bilibiliSettingsSchema>;
 export type MindBannedWordsInput = z.infer<typeof mindBannedWordsSchema>;
+export type WebAllowedHostsInput = z.infer<typeof webAllowedHostsSchema>;
 export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
 export type PhonePairInput = z.infer<typeof phonePairSchema>;
 export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;

@@ -8,6 +8,7 @@ import { ModelProviderSection } from '@/components/model-provider-section';
 import { PhoneSettingsSection } from '@/components/phone-settings-section';
 import { RedisSettingsSection } from '@/components/redis-settings-section';
 import { TtsSettingsSection } from '@/components/tts-settings-section';
+import { WebAccessSection } from '@/components/web-access-section';
 import { ApiError } from '@/lib/api';
 import { meQuery, settingsQuery } from '@/lib/queries';
 
@@ -142,7 +143,15 @@ export function SettingsPage() {
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.45, delay: 0.23, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <WebAccessSection hosts={overview?.webAllowedHosts ?? []} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <TtsSettingsSection tts={overview?.tts ?? null} />
             </motion.div>
@@ -150,7 +159,7 @@ export function SettingsPage() {
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.26, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.45, delay: 0.27, ease: [0.22, 1, 0.36, 1] }}
             >
               <ModelProviderSection providers={providers} />
             </motion.div>
