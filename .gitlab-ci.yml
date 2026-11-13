@@ -139,7 +139,7 @@ check:typecheck:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "api"
 
-# 运行镜像：Nginx(80) + Nest API(3100)。
+# 运行镜像：对外仅暴露 3000（Nginx）；Nest API 仅内部 127.0.0.1:3100。
 docker:image:
   extends: .docker_job
   variables:
@@ -147,9 +147,9 @@ docker:image:
     DOCKER_REPO: $CI_REGISTRY_IMAGE
     DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/cache
 
-# 迁移镜像：只带 Prisma CLI 和 migrations，部署时作为一次性任务运行：
+# 迁移镜像：常规版本升级由 runtime 容器启动时自动 `prisma migrate deploy`，无需手动跑。
+# 本镜像保留给手动/应急迁移（例如回滚后单独补迁移）：
 #   docker run --rm -e DATABASE_URL=... <registry>/<project>/migrate:<tag>
-# 与运行镜像分开，避免把 Prisma CLI / 引擎塞进常驻镜像。
 docker:migrate:
   extends: .docker_job
   variables:

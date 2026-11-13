@@ -60,7 +60,7 @@ pnpm --filter @inkseek/web dev
 | API         | 3100               |
 | Swagger     | 3100 `/api/docs`   |
 
-Vite 将 `/api` 代理到 `http://localhost:3100`。如端口被占用，需同时调整 `apps/api/src/main.ts` 与 `apps/web/vite.config.ts`。
+API 只监听回环 `127.0.0.1:3100`，Vite 将 `/api` 代理到 `http://127.0.0.1:3100`。如端口被占用，需同时调整 `apps/api/src/main.ts` 与 `apps/web/vite.config.ts`。
 
 ## 排障
 

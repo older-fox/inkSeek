@@ -23,7 +23,8 @@ const JSON_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 
 /**
  * Boots the Fastify-backed API: cookies, static media roots, global prefix,
- * the exception filter and Swagger, then listens on all interfaces.
+ * the exception filter and Swagger, then listens on loopback only — public
+ * traffic reaches the API through Nginx, which owns the single exposed port.
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -76,7 +77,7 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
-  await app.listen(API_PORT, '0.0.0.0');
+  await app.listen(API_PORT, '127.0.0.1');
   Logger.log(`API listening on http://localhost:${API_PORT}/api/v1`, 'Bootstrap');
   Logger.log(`OpenAPI docs on http://localhost:${API_PORT}/api/docs`, 'Bootstrap');
 }

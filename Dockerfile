@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# inkSeek Platform 单容器镜像：Nginx 提供 web 静态文件，Nest API 监听 127.0.0.1:3100。
+# inkSeek Platform 单容器镜像：Nginx 对外暴露 3000，Nest API 仅监听回环 127.0.0.1:3100。
 #
 # 构建约束：
 #   · GitLab Runner 是容器内 runner，没有 docker daemon / dind 权限：CI 用 kaniko 构建并推送。
@@ -8,8 +8,8 @@
 #   · 运行镜像只带 production 依赖；Prisma Client 在构建阶段生成并编译进 dist。
 #
 # 目标（CI 分别构建）：
-#   runtime（默认）：Nginx:80 + API:3100，挂载 /app/data 持久化聊天媒体
-#   migrate：只含 Prisma CLI + schema/migrations，部署时一次性执行 prisma migrate deploy
+#   runtime（默认）：对外仅 3000（Nginx），API 仅内部 127.0.0.1:3100，挂载 /app/data 持久化聊天媒体
+#   migrate：单独镜像，保留给手动/应急迁移；常规版本升级由 runtime 启动时自动执行。
 #
 # 加速 build args（CI 中同名变量可覆盖）：
 #   NODE_IMAGE            基础镜像，默认 Docker Hub 加速域名
@@ -82,9 +82,12 @@ COPY packages/shared/package.json ./packages/shared/
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm install --frozen-lockfile --prod --ignore-scripts
 
-# ---------- 运行镜像：Nginx + Node API ----------
+# ---------- 运行镜像：Nginx + Node API（启动时自动迁移） ----------
 FROM ${NODE_IMAGE} AS runtime
 ARG APT_MIRROR=http://mirrors.aliyun.com
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma
+ARG PRISMA_VERSION=7.10.1
 # 与本地 `apps/api` 一致：ConfigModule 会从 ../../.env 读取，挂载 /app/.env 也能生效。
 WORKDIR /app/apps/api
 # HOME 指到数据卷：adb 的配对密钥落在 $HOME/.android，容器重建后不用重新配对。
@@ -127,6 +130,19 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     rm -f /etc/nginx/sites-enabled/default
 
+# 启动即自动迁移：把 Prisma CLI + schema/migrations 内嵌进运行镜像，由 entrypoint 在启动
+# API 前执行 `prisma migrate deploy`（幂等，只应用未执行的迁移）。版本升级换镜像即可，不再
+# 需要单独跑 migrate 镜像。代价是运行镜像多一份 Prisma CLI/引擎体积。
+RUN set -eu; \
+    mkdir -p /app/migrate; \
+    cd /app/migrate; \
+    printf '{"type":"module","private":true}\n' > package.json; \
+    PRISMA_ENGINES_MIRROR="$PRISMA_ENGINES_MIRROR" \
+    PRISMA_SKIP_POSTINSTALL_GENERATE=true \
+    npm install --no-audit --no-fund --registry "$NPM_REGISTRY" prisma@${PRISMA_VERSION}
+COPY apps/api/prisma.config.ts /app/migrate/prisma.config.ts
+COPY apps/api/prisma /app/migrate/prisma
+
 # pnpm 的 node_modules 是符号链接农场：根 .pnpm、各 workspace 的 node_modules 都要保留，
 # 相对链接才能解析到 @inkseek/shared 与 @prisma/client。
 COPY --from=prod-deps /app/node_modules /app/node_modules
@@ -146,14 +162,14 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh; \
 
 # 聊天图片 / 语音 / 表情 / 卡片背景都在 /app/data 下，部署时必须挂卷。
 VOLUME ["/app/data"]
-EXPOSE 80 3100
+EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3100/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# ---------- 迁移镜像：独立一次性任务，不把 Prisma CLI 塞进运行镜像 ----------
+# ---------- 迁移镜像：手动/应急用，常规升级由 runtime 启动时自动 migrate ----------
 FROM ${NODE_IMAGE} AS migrate
 ARG NPM_REGISTRY
 ARG PRISMA_ENGINES_MIRROR
