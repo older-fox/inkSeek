@@ -92,6 +92,22 @@ export const modelProviderSchema = z.object({
   apiKey: z.string().trim().min(1, '请填写 API Key').max(512, 'API Key 过长'),
 });
 
+export const ttsAudioFormats = ['mp3', 'wav', 'opus', 'aac', 'flac'] as const;
+
+export const ttsSettingsSchema = z.object({
+  endpoint: httpUrlSchema,
+  apiKey: z.string().trim().max(512, 'API Key 过长').optional().or(z.literal('')),
+  clearKey: z.boolean().optional().default(false),
+  model: z.string().trim().min(1, '请填写模型名称').max(120, '模型名称过长'),
+  voice: z.string().trim().min(1, '请填写音色').max(120, '音色过长'),
+  format: z.enum(ttsAudioFormats).default('mp3'),
+  speed: z.coerce.number().min(0.5, '速度范围为 0.5-2').max(2, '速度范围为 0.5-2').default(1),
+});
+
+export const ttsTestSchema = z.object({
+  text: z.string().trim().min(1, '请填写试听文本').max(500, '试听文本最多 500 个字符'),
+});
+
 const webSocketUrlSchema = z
   .string()
   .trim()
@@ -192,6 +208,9 @@ export type BootstrapInput = z.infer<typeof bootstrapSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ModelProviderProtocol = z.infer<typeof modelProviderProtocolSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
+export type TtsAudioFormat = (typeof ttsAudioFormats)[number];
+export type TtsSettingsInput = z.infer<typeof ttsSettingsSchema>;
+export type TtsTestInput = z.infer<typeof ttsTestSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
 export type ChatDirectConversationInput = z.infer<typeof chatDirectConversationSchema>;

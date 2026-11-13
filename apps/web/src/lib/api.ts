@@ -69,6 +69,10 @@ import type {
   SaveChannelPersonaInput,
   SavePersonaInput,
   SettingsOverview,
+  TtsSettingsInput,
+  TtsSettingsResult,
+  TtsTestInput,
+  TtsTestResult,
 } from '@inkseek/shared';
 
 const API_BASE = '/api/v1';
@@ -148,6 +152,16 @@ export const api = {
   updateBilibiliSettings: (input: BilibiliSettingsInput) =>
     request<BilibiliSettingsResult>('/settings/bilibili', {
       method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateTtsSettings: (input: TtsSettingsInput) =>
+    request<TtsSettingsResult>('/settings/tts', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  testTts: (input: TtsTestInput) =>
+    request<TtsTestResult>('/settings/tts/test', {
+      method: 'POST',
       body: JSON.stringify(input),
     }),
   updateMindBannedWords: (input: MindBannedWordsInput) =>

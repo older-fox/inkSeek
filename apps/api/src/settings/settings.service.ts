@@ -18,7 +18,12 @@ import {
   type RedisSettingsInput,
   type RedisSettingsResult,
   type SettingsOverview,
+  type TtsSettingsInput,
+  type TtsSettingsResult,
+  type TtsTestInput,
+  type TtsTestResult,
 } from '@inkseek/shared';
+import { TtsService } from '../ai/tts.service.js';
 import { BilibiliAuthService } from '../config/bilibili-auth.service.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
@@ -44,11 +49,12 @@ export class SettingsService {
     private readonly providerProbe: ModelProviderProbeService,
     private readonly bilibili: BilibiliAuthService,
     private readonly phone: PhoneService,
+    private readonly tts: TtsService,
   ) {}
 
   /** Reads every settings block in parallel; secrets are reduced to hints before returning. */
   async getOverview(): Promise<SettingsOverview> {
-    const [redisRecord, providers, bilibili, phone, bannedRecord] = await Promise.all([
+    const [redisRecord, providers, bilibili, phone, bannedRecord, tts] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
       this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
       this.bilibili.overview(),
@@ -56,6 +62,7 @@ export class SettingsService {
       this.prisma.systemConfig.findUnique({
         where: { key: CONFIG_KEYS.mindGlobalBannedWords },
       }),
+      this.tts.overview(),
     ]);
 
     return {
@@ -64,6 +71,7 @@ export class SettingsService {
       phone,
       providers: providers.map(toProviderSummary),
       mindBannedWords: readMindBannedWords(bannedRecord?.value),
+      tts,
     };
   }
 
@@ -77,6 +85,16 @@ export class SettingsService {
   /** Delegates validation and storage to the Bilibili service. */
   async updateBilibili(input: BilibiliSettingsInput): Promise<BilibiliSettingsResult> {
     return { bilibili: await this.bilibili.save(input) };
+  }
+
+  /** Probes the cloud speech endpoint before persisting the configuration. */
+  async updateTts(input: TtsSettingsInput): Promise<TtsSettingsResult> {
+    return this.tts.save(input);
+  }
+
+  /** Synthesizes a preview clip with the saved configuration for playback. */
+  async testTts(input: TtsTestInput): Promise<TtsTestResult> {
+    return this.tts.test(input);
   }
 
   /** Pass-through to adb over the address saved in settings. */

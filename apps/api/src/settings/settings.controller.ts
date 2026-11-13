@@ -18,6 +18,8 @@ import {
   phoneDisconnectSchema,
   phonePairSchema,
   redisSettingsSchema,
+  ttsSettingsSchema,
+  ttsTestSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
   type MindBannedWordsInput,
@@ -31,6 +33,10 @@ import {
   type RedisSettingsInput,
   type RedisSettingsResult,
   type SettingsOverview,
+  type TtsSettingsInput,
+  type TtsSettingsResult,
+  type TtsTestInput,
+  type TtsTestResult,
 } from '@inkseek/shared';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { AuthGuard } from '../auth/auth.guard.js';
@@ -69,6 +75,26 @@ export class SettingsController {
     @Body(new ZodValidationPipe(bilibiliSettingsSchema)) input: BilibiliSettingsInput,
   ): Promise<BilibiliSettingsResult> {
     return this.settings.updateBilibili(input);
+  }
+
+  @Put('tts')
+  @HttpCode(200)
+  @ApiOperation({ summary: '测试并保存云端语音合成配置（管理员）' })
+  /** Synthesizes a short probe clip before storing, so a broken endpoint cannot be saved. */
+  updateTts(
+    @Body(new ZodValidationPipe(ttsSettingsSchema)) input: TtsSettingsInput,
+  ): Promise<TtsSettingsResult> {
+    return this.settings.updateTts(input);
+  }
+
+  @Post('tts/test')
+  @HttpCode(200)
+  @ApiOperation({ summary: '用已保存配置试听一段语音（管理员）' })
+  /** Returns the synthesized clip as base64 for in-page playback. */
+  testTts(
+    @Body(new ZodValidationPipe(ttsTestSchema)) input: TtsTestInput,
+  ): Promise<TtsTestResult> {
+    return this.settings.testTts(input);
   }
 
   @Put('mind-banned-words')

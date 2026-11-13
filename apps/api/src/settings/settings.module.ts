@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai/ai.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { PhoneModule } from '../phone/phone.module.js';
 import { RedisModule } from '../redis/redis.module.js';
@@ -7,7 +8,7 @@ import { SettingsController } from './settings.controller.js';
 import { SettingsService } from './settings.service.js';
 
 @Module({
-  imports: [AuthModule, RedisModule, PhoneModule],
+  imports: [AuthModule, RedisModule, PhoneModule, AiModule],
   controllers: [SettingsController],
   providers: [SettingsService, ModelProviderProbeService],
 })

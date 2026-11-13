@@ -1,4 +1,4 @@
-import type { ModelProviderProtocol } from './schemas.js';
+import type { ModelProviderProtocol, TtsAudioFormat } from './schemas.js';
 
 export type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -50,6 +50,17 @@ export interface BilibiliSettings {
   updatedAt: string;
 }
 
+export interface TtsSettings {
+  endpoint: string;
+  model: string;
+  voice: string;
+  format: TtsAudioFormat;
+  speed: number;
+  hasKey: boolean;
+  keyHint: string;
+  updatedAt: string;
+}
+
 export interface PhoneDeviceInfo {
   serial: string;
   state: string;
@@ -75,6 +86,7 @@ export interface PhoneDeviceList {
 export interface SettingsOverview {
   redis: RedisSettings | null;
   bilibili: BilibiliSettings | null;
+  tts: TtsSettings | null;
   phone: PhoneSettings;
   providers: ModelProviderSummary[];
   /** Global banned words applied to every channel's mind prompt. */
@@ -96,6 +108,18 @@ export interface RedisSettingsResult {
 
 export interface BilibiliSettingsResult {
   bilibili: BilibiliSettings;
+}
+
+export interface TtsSettingsResult {
+  tts: TtsSettings;
+  latencyMs: number;
+}
+
+export interface TtsTestResult {
+  audioBase64: string;
+  mimeType: string;
+  byteSize: number;
+  latencyMs: number;
 }
 
 export interface ModelProviderSaveResult {
