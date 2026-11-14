@@ -41,6 +41,7 @@ import { MindToolsService, MIND_TOOL_MENU, type MindToolContext } from './mind-t
 import {
   clamp,
   formatSceneForPrompt,
+  formatZoned,
   localDateKey,
   MIND_MAX_TOOL_STEPS,
   MindPlannerProtocolError,
@@ -49,6 +50,7 @@ import {
   parseDsmlToolCalls,
   parseJsonObject,
   parseToolCallEnvelopes,
+  personaTimeZone,
   personaValueText,
   readNumber,
   readString,
@@ -1944,48 +1946,28 @@ function typoStyle(level: number): string {
   return '错字较多，但不要影响理解';
 }
 
-/** Localized date line with weekday and time period; falls back to server time on a bad zone. */
+/** Localized date line with weekday and time period, always in the persona zone. */
 function formatNowLabel(date: Date, timeZone: string | null): string {
-  try {
-    const formatted = new Intl.DateTimeFormat('zh-CN', {
-      timeZone: timeZone || undefined,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(date);
-    return `${formatted}（${timePeriodLabel(date, timeZone)}${timeZone ? `，${timeZone}` : ''}）`;
-  } catch {
-    return `${date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })}（${timePeriodLabel(date, null)}）`;
-  }
+  const zone = personaTimeZone(timeZone);
+  const formatted = formatZoned(date, zone, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${formatted}（${timePeriodLabel(date, zone)}，${zone}）`;
 }
 
-/** Clock time in the given zone; invalid input is returned as-is instead of throwing. */
+/** Clock time in the persona zone; invalid input is returned as-is instead of throwing. */
 function formatClockTime(iso: string, timeZone?: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return iso;
   }
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: timeZone && timeZone !== 'server-local' ? timeZone : undefined,
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
-  } catch {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  }
+  return formatZoned(date, timeZone, { hour: '2-digit', minute: '2-digit' });
 }
 
 /** Minimal do-not-speak plan, used whenever the model output cannot be trusted. */

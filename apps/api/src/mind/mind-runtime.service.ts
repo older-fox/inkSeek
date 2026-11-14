@@ -41,6 +41,7 @@ import { PersonaStateService } from './persona-state.service.js';
 import { PersonaStyleNoteService } from './persona-style-note.service.js';
 import {
   clamp,
+  formatZoned,
   isMindTurnInterrupted,
   localDateKey,
   localHour,
@@ -48,6 +49,7 @@ import {
   MIND_ACTIVE_EXCHANGE_MINUTES,
   MindPlannerProtocolError,
   normalizeTimeZone,
+  personaTimeZone,
   readString,
   relationScoreOf,
   type MindActiveIntentionsBrief,
@@ -1056,7 +1058,7 @@ export class MindRuntimeService implements OnModuleInit {
     );
     const wakeBrief: MindWakeBrief = {
       now,
-      timeZone: timeZone ?? 'server-local',
+      timeZone: personaTimeZone(timeZone),
       state,
       dueTodos: dueTodos.map((todo) => ({
         id: todo.id,
@@ -3436,22 +3438,9 @@ function seedBigrams(text: string): Set<string> {
   return grams;
 }
 
-/** Minute of hour in the persona timezone, falling back to server-local time. */
+/** Minute of hour in the persona timezone. */
 function localMinute(date: Date, timeZone: string | null): number {
-  if (timeZone) {
-    try {
-      return Number(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone,
-          minute: 'numeric',
-          hour12: false,
-        }).format(date),
-      );
-    } catch {
-      // Fall back to the server local minute.
-    }
-  }
-  return date.getMinutes();
+  return Number(formatZoned(date, timeZone, { minute: 'numeric', hour12: false }, 'en-US'));
 }
 
 /** Minutes left in the persona-local day; used to defer until the daily budget resets. */

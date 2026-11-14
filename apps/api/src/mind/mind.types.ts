@@ -682,30 +682,39 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
-/** Calendar day in the given zone as YYYY-MM-DD; bad zones fall back to server time. */
+/**
+ * Zone used when a persona card has no usable `time_zone`. Never fall back to
+ * the host timezone: the server usually runs in UTC, which would silently
+ * override the persona's clock.
+ */
+export const DEFAULT_TIME_ZONE = 'Asia/Shanghai';
+
+/** Persona zone with a deterministic default; never null. */
+export function personaTimeZone(raw?: string | null): string {
+  return normalizeTimeZone(raw) ?? DEFAULT_TIME_ZONE;
+}
+
+/** Formats in the resolved persona zone; unlike bare `Intl` it never reads the host zone. */
+export function formatZoned(
+  date: Date,
+  timeZone: string | null | undefined,
+  options: Intl.DateTimeFormatOptions,
+  locale = 'zh-CN',
+): string {
+  return new Intl.DateTimeFormat(locale, {
+    ...options,
+    timeZone: personaTimeZone(timeZone),
+  }).format(date);
+}
+
+/** Calendar day in the persona zone as YYYY-MM-DD. */
 export function localDateKey(date: Date, timeZone?: string | null): string {
-  try {
-    if (timeZone) {
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).formatToParts(date);
-      const year = parts.find((part) => part.type === 'year')?.value;
-      const month = parts.find((part) => part.type === 'month')?.value;
-      const day = parts.find((part) => part.type === 'day')?.value;
-      if (year && month && day) {
-        return `${year}-${month}-${day}`;
-      }
-    }
-  } catch {
-    // Fall back to the server local date.
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return formatZoned(
+    date,
+    timeZone,
+    { year: 'numeric', month: '2-digit', day: '2-digit' },
+    'en-CA',
+  );
 }
 
 const TIME_ZONE_ALIASES = new Map<string, string>([
@@ -775,22 +784,9 @@ export function timePeriodLabel(date: Date, timeZone?: string | null): string {
   return '深夜';
 }
 
-/** Hour of day in the given zone; bad zones fall back to the server's local hour. */
+/** Hour of day in the persona zone. */
 export function localHour(date: Date, timeZone?: string | null): number {
-  try {
-    if (timeZone) {
-      return Number(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone,
-          hour: 'numeric',
-          hour12: false,
-        }).format(date),
-      );
-    }
-  } catch {
-    // Fall back to the server local hour.
-  }
-  return date.getHours();
+  return Number(formatZoned(date, timeZone, { hour: 'numeric', hour12: false }, 'en-US'));
 }
 
 /** Quiet windows wrap past midnight when start > end; missing config falls back to 0–7. */
@@ -846,18 +842,9 @@ export function formatSceneForPrompt(
     .join('\n');
 }
 
-/** HH:MM in the target zone; falls back to server local time on bad zones. */
+/** HH:MM in the persona zone. */
 function formatLocalClock(date: Date, timeZone?: string | null): string {
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      timeZone: timeZone || undefined,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(date);
-  } catch {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  }
+  return formatZoned(date, timeZone, { hour: '2-digit', minute: '2-digit', hour12: false }, 'en-GB');
 }
 
 /** Short gap wording that promotes to the largest sensible unit. */

@@ -7,9 +7,11 @@ import { selfTraitLines } from './mind-behavior.js';
 import { criticalAdvisory } from './mind-fatigue.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import {
+  formatZoned,
   localHour,
   normalizeTimeZone,
   parseJsonObject,
+  personaTimeZone,
   readNumber,
   readString,
   type MindSleepBrief,
@@ -284,7 +286,7 @@ export class PersonaLongEventService {
     });
     return {
       localTime: localClock(now, zone),
-      timeZone: zone ?? 'server-local',
+      timeZone: personaTimeZone(zone),
       sleepDepth,
       lastSleep:
         last && endedAt
@@ -813,19 +815,7 @@ function suggestRest(input: {
 
 /** HH:MM in the target zone; falls back to server local time on bad zones. */
 function localClock(date: Date, timeZone?: string | null): string {
-  try {
-    if (timeZone) {
-      return new Intl.DateTimeFormat('en-GB', {
-        timeZone,
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(date);
-    }
-  } catch {
-    // Fall back to server local time.
-  }
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return formatZoned(date, timeZone, { hour: '2-digit', minute: '2-digit', hour12: false }, 'en-GB');
 }
 
 /** One-decimal hour count for prompt sentences. */

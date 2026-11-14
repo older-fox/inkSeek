@@ -43,8 +43,9 @@ import {
   PHONE_FOCUS_MAX_STEPS,
   clamp,
   elapsedLabel,
+  formatZoned,
   localHour,
-  normalizeTimeZone,
+  personaTimeZone,
   parseJsonObject,
   readNumber,
   readString,
@@ -2346,30 +2347,23 @@ function formatHistoryValue(value: unknown): string {
 /** Returns the persona's local time, hour, tz and current-activity duration for the time.now tool. */
 function timeNow(context: MindToolContext) {
   const values = context.scene.persona.values as Record<string, unknown> | null;
-  const timeZone = normalizeTimeZone(readString(values?.['time_zone'])) ?? undefined;
+  const timeZone = personaTimeZone(readString(values?.['time_zone']));
   const now = new Date();
   const since = context.state.activitySince;
-  const local = (() => {
-    try {
-      return new Intl.DateTimeFormat('zh-CN', {
-        timeZone: timeZone || undefined,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(now);
-    } catch {
-      return now.toLocaleString('zh-CN');
-    }
-  })();
+  const local = formatZoned(now, timeZone, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
   return {
     iso: now.toISOString(),
     local,
-    localHour: localHour(now, timeZone ?? null),
-    timeZone: timeZone ?? 'server-local',
+    localHour: localHour(now, timeZone),
+    timeZone,
     activity: context.state.currentActivity,
     activityMinutes: since
       ? Math.max(0, Math.round((now.getTime() - since.getTime()) / 60_000))
