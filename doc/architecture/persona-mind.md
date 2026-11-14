@@ -98,7 +98,7 @@ Scene {
 | `MindLearningLog`     | 学习会话账本   | personaId、channelId、trigger（HEARTBEAT/MANUAL）、status、reason、sources、learned、styleNotes、summary、error、runId、startedAt/finishedAt；记录「看了什么、留下什么、学了哪些表达」，不复制记忆行                                                                                                                      |
 | `PersonaStyleNote`    | 学到的说话方式 | personaId、channelId、scope（SELF/RELATION）、contactId、dimension（length/punctuation/particles/openings/humor/rhythm/vocabulary/tone）、content、samples、sources、confidence、evidenceCount、status（ACTIVE/PAUSED/PROMOTED）、appliedCount/lastAppliedAt、lastSeenAt/promotedAt；是人格卡之上的适配层，不是第二份人设 |
 | `PersonaJournal`      | 日记/反思      | personaInstanceId、date、content、mood、consolidatedMemoryIds                                                                                                                                                                                                                                                             |
-| `LlmCallLog`          | LLM 调用账本   | source、provider、model、system、prompt/response、tokens、latency、error、runId、channelId/personaId；正文只保留最近 200 条，更早的归属调用只留用量                                                                                                                                                                       |
+| `LlmCallLog`          | LLM 调用账本   | source、provider、model、system、prompt/response、tokens（含缓存命中/未命中）、planner step、latency、error、runId、channelId/personaId；正文只保留最近 200 条，更早的归属调用只留用量                                                                                                                                    |
 
 单一真源（2026-11-04 收敛完成）：
 
@@ -209,12 +209,16 @@ interface SocialRead {
 长期底色（场景内 3 条相关的重要长期记忆）
 最近经历（当前场景可见总量/近 7 天新增 + 12 条相关记忆，日期按人格时区）
 陈年记忆（超过 180 天、最久没被召回的最多 3 条，带 id/天数/重要度/置信度，由模型决定留或忘）
-最近对话（最近 200 条；单条截 160 字，本地时间，跨 30 分钟标注「隔 N 小时」，跨天带日期）
-我最近说过（不在上面 200 条内、但 6 小时内自己说过的发言，最多 8 条）
-可用工具（全部工具名 + 一句话用途，可直接调用；参数不确定再 tools.search）
+我最近说过（不在最近 200 条内、但 6 小时内自己说过的发言，最多 8 条）
+表情库（最近/常用 12 张，id + 标签 + 80 字描述）
+触发（trigger + 模式）
 ```
 
 角色卡全量进入提示词（2026-11-07 起）：禁用语、说话风格、句长/标点/语气词/开场、幽默/冲突/记忆倾向、知识边界、防破面总纲/触发/禁止/收场/允许元话题、拒绝模板、称呼限制、敏感点/触碰偏好/尺度、禁忌/不可妥协、风格样本、在线策略，以及世界观、背景故事、种族、职业、身高体重、体型/外貌/发型/服装/声音、价值观、害怕、软肋、长期/当前目标、困难、卡片里的活动/位置都完整输出，不再截断或省略。资料段明确「只用于理解人物，不主动复述、背设定或当背景话题；当前活动/位置以【此刻】为准」，避免把背景讲成独白。对话内容仍由最近对话、最近记忆和当前处境推算；对话节奏的兴趣判断也照旧使用目标/价值观短句。提示词里的每个数值都必须带一句「这个数值会让 TA 怎么做」，避免模型把数字当装饰。心跳提示词额外带 `WakeBrief`，夜间消息直接列出最近 5 条原文而不是只给条数，其余部分一致。
+
+提示词分层与上下文缓存（2026-11-15）：请求不再是一整段 user prompt。system 承载稳定内容——规则、角色卡、表情库和【可用工具】菜单；最近 200 条对话按「一条消息一条 user 消息」发送（单条截 160 字，本地时间，跨 30 分钟标注「隔 N 小时」，跨天带日期），保持数组前缀不变；每轮变化的【此刻】、关系、记忆、未结意图、触发等留在最后一条 user 简报里。工具循环追加工具结果时只追加在简报之后，所以同一轮多个步骤能复用前缀缓存，跨轮也能命中未变化的历史消息。DeepSeek 的 `prompt_cache_hit_tokens/prompt_cache_miss_tokens`、OpenAI 的 `prompt_tokens_details.cached_tokens`、Gemini 的 `cachedContentTokenCount` 都会解析并落库（`LlmCallLog.cachedTokens/cacheMissTokens/step`，`AgentRun.cachedTokens/cacheMissTokens/reasoningTokens`）；洞察页的用量条显示缓存命中、未命中、思考 token 和命中率。历史窗口仍会随新消息滑动，窗口一变前缀就失效，因此分渠道的命中率会有差异。
+
+工具循环收敛（2026-11-15）：单条工具结果回填上限从 6000 字符降到 2500；同一轮里「工具名 + 参数」完全相同的调用不再执行第二次，直接要求模型输出 final；结果为空（空对象、空数组或全是空值）时同样提示「没有带来新信息，直接输出 final」，避免空转多烧一整份上下文。
 
 ### 6.2 对话节奏与兴趣
 
@@ -301,6 +305,7 @@ AI 腔治理（2026-11-14）：参照 lieflat-less-ai-tone 的去 AI 味语料�
 - `self.attributes.list`：列出人格卡与实时状态的全部属性键、中文标签、分组、类型和是否有值，不返回值
 - `self.attributes.get`：按一个或多个键读取属性完整值；数值型属性附带行为含义，实时状态（精力/压力/社交电量/情绪/整洁等）直接从 `PersonaState` 读取
 - `self.attributes.update`：按对象批量修改任意自身属性；卡片键写入 `ChatChannelPersona.values` 并记录修订历史，实时状态键写入 `PersonaState`，数值按该键范围夹取
+- `file.act`：在 `data/private/<渠道ID>` 里增删改查文本文件，每个渠道（人格）只能看到自己的子树，跨渠道路径既不可寻址也读不到。`action=list|read|write|delete`，`path` 必须是相对本渠道目录的路径（`list` 省略即根目录），`write` 用 `content` 且可 `append=true`，`read` 按 `offset`/`maxChars` 分页（默认 1800 字、上限 2200 字，返回 `nextOffset` 接着读，避免被提示词的工具结果上限截断）。单次写入 ≤256KB，只处理 UTF-8 文本，二进制直接拒绝；删除只允许文件或空目录。工具没有任何执行动作，不调用 shell、不解析脚本；路径含 `..`、绝对路径、Windows 盘符或非法字符时拒绝，路径链上出现符号链接也拒绝，解析后的真实路径必须仍在渠道目录内；渠道 ID 不符合安全字符集时直接报错。试跑模式下 `write`/`delete` 返回跳过结果，不落盘。`data/` 已在 `.gitignore` 中，文件仅存在于部署实例本地。
 - `time.now`
 
 工具循环限制：最多 10 步；连续 8 次工具调用后才提示可以收敛。记忆、反思、关系与性格的写入条数不设上限；关系数值由人格全权写入，只夹在 -100..100，自身与群数值仍走漂移限幅。发送只能生成 `message.plan`，由执行器提交。
@@ -515,6 +520,10 @@ type OutgoingBeat =
 `ChatMindSettings.imageDescriptionPrompt` 覆盖心智补描述时的内置提示词（留空 = 内置默认）。它只影响尚未生成描述的图片：已有 `ChatMediaObject.description` 直接复用，改提示词不会触发重跑。
 
 识图模型单独配置：设置页「识图模型」把图片描述、手机识屏、网页截图、表情标注和视频抽帧统一指向 `SystemConfig` 的 `ai.visionModel`（`providerId`/`model`，留空跟随默认）。保存时用内置图片真实识别一次，模型回「无法查看这张图片」或返回空内容时拒绝保存。拒绝文案永远不会写入 `ChatMediaObject.description`；同一渠道同一 sha256 的失败进入 120 秒负缓存，并发请求合并成一次模型调用，避免反复烧额度。
+
+识图前缩放（2026-11-15）：图片 token 由像素决定，不是文件大小。图片描述前先用 ffprobe 读尺寸，长边超过 1280 时用 ffmpeg 等比缩到 1280 以内并转 JPEG（q=3）；已经够小、GIF 或 ffmpeg 不可用时直接使用原图。原图字节仍按 sha256 存进媒体库，只有送给模型的那一份被缩小，影响不到网页展示和重新识别。
+
+历史描述重识别（2026-11-14）：同一张卡片里的「重新识别全部」按媒体 id 游标分批调用 `POST /settings/vision-model/redescribe`（每批 5 张），对已有描述的 `ChatMediaObject` 强制重跑当前识图模型并覆盖描述，用来修正旧提示词留下的错误描述。没有关联消息的旧图片会跳过，失败的单张保留原描述并仅在结果里计数；过程会真实消耗识图 token。表情库里的单张表情仍用 `sticker.describe` 重新识别。
 
 ### 语音发送
 
