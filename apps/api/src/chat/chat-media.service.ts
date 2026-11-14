@@ -343,6 +343,18 @@ export class ChatMediaService implements OnModuleInit {
   }
 
   /**
+   * Stores outbound speech under the channel's voice root. The bytes are
+   * generated locally from text, so there is no remote URL to fall back to.
+   */
+  async saveVoiceDataUrl(channelId: string, dataUrl: string): Promise<StoredMedia | null> {
+    const match = /^data:(audio\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+    if (!match?.[1] || !match[2]) {
+      return null;
+    }
+    return this.saveBase64(channelId, match[2], null, VOICE_TARGET, null, match[1]);
+  }
+
+  /**
    * Downloads a remote image into the channel store. Any failure degrades to a
    * remote-URL fallback so the message still carries a usable media reference.
    */

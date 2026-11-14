@@ -15,6 +15,7 @@ import type {
   ChatMessagePage,
   ChatMessageSummary,
   ChatSendMessageInput,
+  DeepseekTtsSettingsInput,
   AgentActionRecord,
   AgentIntentionRecord,
   AgentRunDetail,
@@ -71,6 +72,8 @@ import type {
   SettingsOverview,
   TtsSettingsInput,
   TtsSettingsResult,
+  TtsProviderInput,
+  TtsProviderResult,
   TtsTestInput,
   TtsTestResult,
   ToolMaxTokensInput,
@@ -164,6 +167,16 @@ export const api = {
     }),
   updateTtsSettings: (input: TtsSettingsInput) =>
     request<TtsSettingsResult>('/settings/tts', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateDeepseekTts: (input: DeepseekTtsSettingsInput) =>
+    request<TtsSettingsResult>('/settings/tts/deepseek', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateTtsProvider: (input: TtsProviderInput) =>
+    request<TtsProviderResult>('/settings/tts/provider', {
       method: 'PUT',
       body: JSON.stringify(input),
     }),

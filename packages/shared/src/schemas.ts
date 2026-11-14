@@ -147,6 +147,22 @@ export const ttsTestSchema = z.object({
   text: z.string().trim().min(1, '请填写试听文本').max(500, '试听文本最多 500 个字符'),
 });
 
+export const ttsProviders = ['openai', 'deepseek'] as const;
+export type TtsProvider = (typeof ttsProviders)[number];
+
+export const ttsProviderSchema = z.object({
+  provider: z.enum(ttsProviders),
+});
+
+export const deepseekTtsVoices = ['stella', 'tide'] as const;
+export type DeepseekTtsVoiceId = (typeof deepseekTtsVoices)[number];
+
+export const deepseekTtsSettingsSchema = z.object({
+  apiKey: z.string().trim().max(512, 'API Key 过长').optional().or(z.literal('')),
+  clearKey: z.boolean().optional().default(false),
+  voiceId: z.enum(deepseekTtsVoices).default('stella'),
+});
+
 const webSocketUrlSchema = z
   .string()
   .trim()
@@ -179,15 +195,25 @@ const chatImageDataUrlSchema = z
   .max(12_000_000, '单张图片过大')
   .regex(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '图片格式不受支持');
 
+const chatVoiceDataUrlSchema = z
+  .string()
+  .max(12_000_000, '单条语音过大')
+  .regex(/^data:audio\/[a-zA-Z0-9.+-]+;base64,/, '语音格式不受支持');
+
 export const sendChatMessageSchema = z
   .object({
     text: z.string().max(4000, '消息最多 4000 个字符').default(''),
     images: z.array(chatImageDataUrlSchema).max(4, '一次最多发送 4 张图片').optional().default([]),
+    voices: z.array(chatVoiceDataUrlSchema).max(1, '一次最多发送 1 条语音').optional().default([]),
   })
-  .refine((value) => value.text.trim().length > 0 || value.images.length > 0, {
-    message: '请输入消息内容',
-    path: ['text'],
-  });
+  .refine(
+    (value) =>
+      value.text.trim().length > 0 || value.images.length > 0 || value.voices.length > 0,
+    {
+      message: '请输入消息内容',
+      path: ['text'],
+    },
+  );
 
 export const chatConversationQuerySchema = z.object({
   kind: z.enum(['PRIVATE', 'GROUP']),
@@ -254,6 +280,8 @@ export type ModelProviderInput = z.infer<typeof modelProviderSchema>;
 export type TtsAudioFormat = (typeof ttsAudioFormats)[number];
 export type TtsSettingsInput = z.infer<typeof ttsSettingsSchema>;
 export type TtsTestInput = z.infer<typeof ttsTestSchema>;
+export type TtsProviderInput = z.infer<typeof ttsProviderSchema>;
+export type DeepseekTtsSettingsInput = z.infer<typeof deepseekTtsSettingsSchema>;
 export type ChatChannelConnectInput = z.infer<typeof connectChatChannelSchema>;
 export type ChatSendMessageInput = z.infer<typeof sendChatMessageSchema>;
 export type ChatDirectConversationInput = z.infer<typeof chatDirectConversationSchema>;

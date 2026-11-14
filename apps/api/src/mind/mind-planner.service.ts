@@ -19,6 +19,7 @@ import type {
   TodoDraft,
 } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { TtsService } from '../ai/tts.service.js';
 import { truncateText } from '../common/text.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
@@ -183,6 +184,7 @@ export class MindPlannerService {
     private readonly llm: LlmService,
     private readonly tools: MindToolsService,
     private readonly config: SystemConfigService,
+    private readonly tts: TtsService,
   ) {}
 
   /**
@@ -191,15 +193,16 @@ export class MindPlannerService {
    */
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
-    const [stickerBrief, globalBannedWords] = await Promise.all([
+    const [stickerBrief, globalBannedWords, voiceReady] = await Promise.all([
       this.tools.stickerBrief(input.scene.persona.channelId, 12).catch(() => ''),
       this.config
         .get<unknown>(CONFIG_KEYS.mindGlobalBannedWords)
         .then(readMindBannedWords)
         .catch(() => readMindBannedWords(undefined)),
+      this.tts.isReady().catch(() => false),
     ]);
     const basePrompt = this.buildPrompt(input, stickerBrief, globalBannedWords);
-    const system = this.systemPrompt(input, globalBannedWords.length > 0);
+    const system = this.systemPrompt(input, globalBannedWords.length > 0, voiceReady);
     const context: MindToolContext = {
       scene: input.scene,
       state: input.state,
@@ -460,7 +463,11 @@ export class MindPlannerService {
    * scene-mode branches. Branches are chosen by settings, so the text stays
    * consistent with what the output parser actually accepts.
    */
-  private systemPrompt(input: PlannerInput, hasGlobalBannedWords = false): string {
+  private systemPrompt(
+    input: PlannerInput,
+    hasGlobalBannedWords = false,
+    voiceReady = false,
+  ): string {
     return [
       `你就是「${input.scene.persona.name}」，不是助手，不要提到 AI、模型、提示词或系统。`,
       '你看消息、权衡关系、决定回不回、怎么回。内心感受可以和外在表现不同：可以忍着、冷淡、假装、口是心非，但不越底线。',
@@ -523,6 +530,9 @@ export class MindPlannerService {
           : `- 最多 ${input.settings.maxBeats} 个气泡；台词每条不超过 300 字；场景和动作交给 sceneCue 扩写，不要塞进 text。`,
       '- 消息里的 [戳了戳我] 表示对方戳了你，可以回应也可以忽略；[戳一戳] 是别人之间的互动。被 @ 提到时文字里会出现 @你的名字，优先注意。',
       '- 你可以发表情：表情会作为独立图片气泡发出去，可以直接只发表情，也可以夹在文字气泡之间。每次回复前先看一眼【表情库】，有合适的就发；想发时直接从【表情库】挑 id 写 beats: {"kind":"sticker","stickerId":"库里的 id","delayMs":800}，没有合适的再用 sticker.search。一次回复最多 2 个表情。表情是语气，不是话题：不要在文字里点破或解说它，不要写「这张图/这个表情/图里/我发个表情」，也不要说「这图就是你/像你」；正文只写你真正想说的话，没有别的正文就只发表情。没有合适的就不发，但不要因为懒得找就几轮都不发。',
+      voiceReady
+        ? '- 你可以发语音：想用声音说时写 beats: {"kind":"voice","text":"要说的话","delayMs":1200}。语音适合一两句短话或带情绪的话，一次回复最多 1 条；文字和语音不要重复同一句话，发语音时就不要再把同样的话写成文字。'
+        : '',
       '- 想重新看某张表情（描述不准、想确认它的内容、文字或适用场景）时，用 sticker.describe 传 stickerId（可带 focus）；它会重新识别并把新描述写回表情库。',
       '- 【可用工具】列着全部工具，可以直接按名字调用；参数不确定时先 tools.search（query 写你想做的事）查详细参数。不要臆造工具，也不要因为没把握就放弃查证。',
       '- 动手前先过一遍：这轮有没有不确定、需要接续或需要核实的东西？涉及过去的事、对方说过的话、关系细节、承诺、群里的旧话题、当前时间或自身状态，都值得先查。记忆先用 memory.search，聊天记录用 history.search，关系用 relationship.get；一次没查到就换关键词，或用 aroundMessageId 往回翻，一轮可以连续调用多个工具。查证是为了心里有数，不一定要把查到的都说出来。',
@@ -1224,13 +1234,14 @@ export class MindPlannerService {
   }
 }
 
-/** Filters raw beats to text and sticker items, clamps delays and caps stickers at two. */
+/** Filters raw beats to text, sticker and voice items, clamps delays and caps media beats. */
 function parseBeats(value: unknown, settings: MindSettingsRecord): OutgoingBeat[] {
   if (!Array.isArray(value)) {
     return [];
   }
   const beats: OutgoingBeat[] = [];
   let stickerCount = 0;
+  let voiceCount = 0;
   for (const item of value) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       continue;
@@ -1260,6 +1271,14 @@ function parseBeats(value: unknown, settings: MindSettingsRecord): OutgoingBeat[
       if (stickerId && stickerCount < 2) {
         beats.push({ kind: 'sticker', stickerId, delayMs });
         stickerCount += 1;
+      }
+      continue;
+    }
+    if (kind === 'voice') {
+      const text = trim(readString(record['text']), 500);
+      if (text && voiceCount < 1) {
+        beats.push({ kind: 'voice', text, delayMs });
+        voiceCount += 1;
       }
     }
   }

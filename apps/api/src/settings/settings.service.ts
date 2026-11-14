@@ -22,6 +22,9 @@ import {
   type TtsSettingsResult,
   type TtsTestInput,
   type TtsTestResult,
+  type DeepseekTtsSettingsInput,
+  type TtsProviderInput,
+  type TtsProviderResult,
   type ToolMaxTokensInput,
   type ToolTokenResult,
   type VisionModelInput,
@@ -159,9 +162,19 @@ export class SettingsService {
     return { bilibili: await this.bilibili.save(input) };
   }
 
-  /** Probes the cloud speech endpoint before persisting the configuration. */
+  /** Probes the cloud speech endpoint before persisting the OpenAI-compatible setup. */
   async updateTts(input: TtsSettingsInput): Promise<TtsSettingsResult> {
     return this.tts.save(input);
+  }
+
+  /** Probes DeepSeek's built-in TTS before persisting its key and voice. */
+  async updateDeepseekTts(input: DeepseekTtsSettingsInput): Promise<TtsSettingsResult> {
+    return this.tts.saveDeepseek(input);
+  }
+
+  /** Switches which engine synthesizes; the other configuration is kept. */
+  async updateTtsProvider(input: TtsProviderInput): Promise<TtsProviderResult> {
+    return this.tts.setProvider(input);
   }
 
   /** Synthesizes a preview clip with the saved configuration for playback. */

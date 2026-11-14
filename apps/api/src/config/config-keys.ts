@@ -6,6 +6,8 @@ export const CONFIG_KEYS = {
   mindWebAllowedHosts: 'mind.webAllowedHosts',
   mindWebSearch: 'mind.webSearch',
   ttsSpeech: 'tts.speech',
+  ttsDeepseek: 'tts.deepseek',
+  ttsProvider: 'tts.provider',
   aiMaxTokens: 'ai.maxTokens',
   aiVisionModel: 'ai.visionModel',
 } as const;

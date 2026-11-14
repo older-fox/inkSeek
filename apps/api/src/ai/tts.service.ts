@@ -4,13 +4,21 @@ import {
   GatewayTimeoutException,
   Injectable,
 } from '@nestjs/common';
-import type {
-  TtsAudioFormat,
-  TtsSettings,
-  TtsSettingsInput,
-  TtsSettingsResult,
-  TtsTestInput,
-  TtsTestResult,
+import {
+  deepseekTtsVoices,
+  ttsProviders,
+  type DeepseekTtsSettings,
+  type DeepseekTtsSettingsInput,
+  type DeepseekTtsVoiceId,
+  type TtsAudioFormat,
+  type TtsOverview,
+  type TtsProvider,
+  type TtsProviderInput,
+  type TtsSettings,
+  type TtsSettingsInput,
+  type TtsSettingsResult,
+  type TtsTestInput,
+  type TtsTestResult,
 } from '@inkseek/shared';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
@@ -19,6 +27,9 @@ import { PrismaService } from '../database/prisma.service.js';
 const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const PROBE_TEXT = '你好，这是一条语音合成测试。';
+/** DeepSeek's built-in voices; the endpoint returns a WAV body. */
+const DEEPSEEK_TTS_ENDPOINT = 'https://api.deepseek.com/v1/tools/tts';
+const DEEPSEEK_MIME = 'audio/wav';
 
 const FORMAT_MIME: Record<TtsAudioFormat, string> = {
   mp3: 'audio/mpeg',
@@ -37,16 +48,28 @@ interface TtsConfig {
   speed: number;
 }
 
+interface DeepseekConfig {
+  /** Fixed official endpoint unless an override was stored for a compatible proxy. */
+  endpoint: string;
+  apiKey: string;
+  voiceId: DeepseekTtsVoiceId;
+}
+
 interface SpeechResult {
   audio: Buffer;
   mimeType: string;
 }
 
+const PROVIDER_LABELS: Record<TtsProvider, string> = {
+  openai: 'OpenAI 兼容',
+  deepseek: 'DeepSeek 内置',
+};
+
 /**
- * Cloud text-to-speech over the OpenAI-compatible `/audio/speech` protocol.
- * The endpoint, key, model and voice are stored server-side in SystemConfig;
- * only a masked hint ever reaches the client. Saving probes the endpoint with
- * a real synthesis so a broken configuration cannot be persisted.
+ * Cloud text-to-speech with two engines that never run at once: an
+ * OpenAI-compatible `/audio/speech` endpoint and DeepSeek's built-in TTS.
+ * Both configurations are kept side by side; `tts.provider` selects the one
+ * that synthesizes. Keys stay server-side and only masked hints reach the UI.
  */
 @Injectable()
 export class TtsService {
@@ -55,16 +78,31 @@ export class TtsService {
     private readonly config: SystemConfigService,
   ) {}
 
-  /** Client-safe view of the stored configuration; the key is reduced to a hint. */
-  async overview(): Promise<TtsSettings | null> {
-    const record = await this.prisma.systemConfig.findUnique({
-      where: { key: CONFIG_KEYS.ttsSpeech },
-    });
-    const stored = readConfig(record?.value);
-    if (!stored) {
+  /** Client-safe view of both engines plus which one is active. */
+  async overview(): Promise<TtsOverview | null> {
+    const [providerRecord, openaiRecord, deepseekRecord] = await Promise.all([
+      this.configRow(CONFIG_KEYS.ttsProvider),
+      this.configRow(CONFIG_KEYS.ttsSpeech),
+      this.configRow(CONFIG_KEYS.ttsDeepseek),
+    ]);
+    const openai = readConfig(openaiRecord?.value);
+    const deepseek = readDeepseekConfig(deepseekRecord?.value);
+    if (!openai && !deepseek) {
       return null;
     }
-    return toSettings(stored, record?.updatedAt ?? new Date());
+    const provider = readProvider(
+      providerRecord?.value,
+      Boolean(openai?.apiKey),
+      Boolean(deepseek?.apiKey),
+    );
+    return {
+      provider,
+      openai: openai ? toSettings(openai, openaiRecord?.updatedAt ?? new Date()) : null,
+      deepseek: deepseek
+        ? toDeepseekSettings(deepseek, deepseekRecord?.updatedAt ?? new Date())
+        : null,
+      ready: provider === 'openai' ? Boolean(openai?.apiKey) : Boolean(deepseek?.apiKey),
+    };
   }
 
   /**
@@ -99,47 +137,143 @@ export class TtsService {
       await this.requestSpeech(candidate, PROBE_TEXT);
       await this.config.set(CONFIG_KEYS.ttsSpeech, { ...candidate }, true);
       return {
-        tts: toSettings(candidate, new Date()),
+        tts: await this.requireOverview(),
         latencyMs: Math.round(performance.now() - startedAt),
       };
     }
 
     await this.config.set(CONFIG_KEYS.ttsSpeech, { ...candidate }, true);
-    return { tts: toSettings(candidate, new Date()), latencyMs: 0 };
+    return { tts: await this.requireOverview(), latencyMs: 0 };
   }
 
-  /** Synthesizes the requested text with the saved configuration for preview playback. */
+  /** Same lifecycle for the DeepSeek engine: reuse the key, probe, then persist. */
+  async saveDeepseek(input: DeepseekTtsSettingsInput): Promise<TtsSettingsResult> {
+    const record = await this.configRow(CONFIG_KEYS.ttsDeepseek);
+    const existing = readDeepseekConfig(record?.value);
+    const apiKey = input.clearKey ? '' : (input.apiKey?.trim() || existing?.apiKey || '');
+    const candidate: DeepseekConfig = {
+      endpoint: existing?.endpoint ?? DEEPSEEK_TTS_ENDPOINT,
+      apiKey,
+      voiceId: input.voiceId,
+    };
+
+    if (!input.clearKey) {
+      if (!apiKey) {
+        throw new BadRequestException({
+          code: 'TTS_KEY_REQUIRED',
+          message: '请填写 DeepSeek API Key',
+          fieldErrors: { apiKey: ['请填写 DeepSeek API Key'] },
+        });
+      }
+      const startedAt = performance.now();
+      await this.requestDeepseek(candidate, PROBE_TEXT);
+      await this.config.set(CONFIG_KEYS.ttsDeepseek, { ...candidate }, true);
+      return {
+        tts: await this.requireOverview(),
+        latencyMs: Math.round(performance.now() - startedAt),
+      };
+    }
+
+    await this.config.set(CONFIG_KEYS.ttsDeepseek, { ...candidate }, true);
+    return { tts: await this.requireOverview(), latencyMs: 0 };
+  }
+
+  /**
+   * Switches the active engine. Only an engine that already has a key can be
+   * enabled, so "active but unusable" cannot be stored by accident.
+   */
+  async setProvider(input: TtsProviderInput): Promise<{ tts: TtsOverview }> {
+    const view = await this.overview();
+    const configured =
+      input.provider === 'openai'
+        ? Boolean(view?.openai?.hasKey)
+        : Boolean(view?.deepseek?.hasKey);
+    if (!configured) {
+      throw new BadRequestException({
+        code: 'TTS_PROVIDER_NOT_CONFIGURED',
+        message: `请先填写并保存 ${PROVIDER_LABELS[input.provider]} 的 API Key，再启用它`,
+      });
+    }
+    await this.config.set(CONFIG_KEYS.ttsProvider, input.provider);
+    return { tts: await this.requireOverview() };
+  }
+
+  /** Synthesizes the requested text with the active engine for preview playback. */
   async test(input: TtsTestInput): Promise<TtsTestResult> {
-    const stored = await this.requireConfig();
     const startedAt = performance.now();
-    const { audio, mimeType } = await this.requestSpeech(stored, input.text);
+    const active = await this.resolveActive();
+    const { audio, mimeType } =
+      active.provider === 'openai'
+        ? await this.requestSpeech(active.config, input.text)
+        : await this.requestDeepseek(active.config, input.text);
     return {
       audioBase64: audio.toString('base64'),
       mimeType,
       byteSize: audio.length,
       latencyMs: Math.round(performance.now() - startedAt),
+      provider: active.provider,
     };
   }
 
-  /** Synthesizes text with the saved configuration; the entry point for future voice messages. */
+  /** Synthesizes with the active engine; the entry point for voice messages. */
   async synthesize(text: string): Promise<SpeechResult> {
-    const stored = await this.requireConfig();
-    return this.requestSpeech(stored, text);
+    if (!text.trim()) {
+      throw new BadRequestException({ code: 'TTS_TEXT_EMPTY', message: '语音内容为空' });
+    }
+    const active = await this.resolveActive();
+    return active.provider === 'openai'
+      ? this.requestSpeech(active.config, text)
+      : this.requestDeepseek(active.config, text);
   }
 
-  /** Loads the stored configuration or rejects when speech synthesis is not set up. */
-  private async requireConfig(): Promise<TtsConfig> {
-    const record = await this.prisma.systemConfig.findUnique({
-      where: { key: CONFIG_KEYS.ttsSpeech },
-    });
-    const stored = readConfig(record?.value);
-    if (!stored || !stored.apiKey) {
-      throw new BadRequestException({
-        code: 'TTS_NOT_CONFIGURED',
-        message: '还没有可用的语音合成配置，请先在设置中填写 Endpoint 与 API Key',
+  /** True when the active engine has a key; used to decide whether to offer voice beats. */
+  async isReady(): Promise<boolean> {
+    const view = await this.overview();
+    return view?.ready === true;
+  }
+
+  /** Loads the active engine's configuration or explains what is missing. */
+  private async resolveActive(): Promise<
+    { provider: 'openai'; config: TtsConfig } | { provider: 'deepseek'; config: DeepseekConfig }
+  > {
+    const [providerRecord, openaiRecord, deepseekRecord] = await Promise.all([
+      this.configRow(CONFIG_KEYS.ttsProvider),
+      this.configRow(CONFIG_KEYS.ttsSpeech),
+      this.configRow(CONFIG_KEYS.ttsDeepseek),
+    ]);
+    const openai = readConfig(openaiRecord?.value);
+    const deepseek = readDeepseekConfig(deepseekRecord?.value);
+    const provider = readProvider(
+      providerRecord?.value,
+      Boolean(openai?.apiKey),
+      Boolean(deepseek?.apiKey),
+    );
+    if (provider === 'deepseek') {
+      if (!deepseek?.apiKey) {
+        throw notConfigured('DeepSeek 内置');
+      }
+      return { provider, config: deepseek };
+    }
+    if (!openai?.apiKey) {
+      throw notConfigured('OpenAI 兼容');
+    }
+    return { provider, config: openai };
+  }
+
+  /** Re-reads after a save; a just-written row always yields a view. */
+  private async requireOverview(): Promise<TtsOverview> {
+    const view = await this.overview();
+    if (!view) {
+      throw new BadGatewayException({
+        code: 'TTS_CONFIG_UNREADABLE',
+        message: '语音配置写入后无法读取，请刷新设置页重试',
       });
     }
-    return stored;
+    return view;
+  }
+
+  private configRow(key: string) {
+    return this.prisma.systemConfig.findUnique({ where: { key } });
   }
 
   /** One POST to `/audio/speech` bounded by a timeout; maps transport and status errors. */
@@ -228,6 +362,91 @@ export class TtsService {
 
     return { audio, mimeType: FORMAT_MIME[config.format] };
   }
+
+  /** DeepSeek's built-in TTS returns a WAV body; the request has no model/speed fields. */
+  private async requestDeepseek(config: DeepseekConfig, text: string): Promise<SpeechResult> {
+    let response: Response;
+
+    try {
+      response = await fetch(config.endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          text,
+          voice_id: config.voiceId,
+          format: 'wav',
+        }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      if (timedOut) {
+        throw new GatewayTimeoutException({
+          code: 'TTS_TIMEOUT',
+          message: `DeepSeek 语音合成超时（${REQUEST_TIMEOUT_MS / 1000} 秒），请稍后重试`,
+        });
+      }
+      throw new BadGatewayException({
+        code: 'TTS_UNREACHABLE',
+        message: '无法连接 DeepSeek 语音服务，请检查服务器网络',
+      });
+    }
+
+    if (!response.ok) {
+      const detail = await readErrorDetail(response, config.apiKey);
+      const message =
+        response.status === 401 || response.status === 403
+          ? 'DeepSeek 语音服务拒绝了该密钥，请检查 API Key'
+          : response.status === 429
+            ? 'DeepSeek 语音服务触发限流，请稍后重试'
+            : `DeepSeek 语音服务返回 HTTP ${response.status}`;
+      throw new BadGatewayException({
+        code: 'TTS_PROVIDER_ERROR',
+        message: detail ? `${message}（${detail}）` : message,
+        fieldErrors:
+          response.status === 401 || response.status === 403 ? { apiKey: [message] } : undefined,
+      });
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const detail = await readErrorDetail(response, config.apiKey);
+      throw new BadGatewayException({
+        code: 'TTS_BAD_RESPONSE',
+        message: detail
+          ? `DeepSeek 语音返回了错误信息（${detail}）`
+          : 'DeepSeek 语音返回了 JSON 而非音频，请检查音色设置',
+      });
+    }
+
+    const audio = Buffer.from(await response.arrayBuffer());
+    if (audio.length === 0) {
+      throw new BadGatewayException({
+        code: 'TTS_EMPTY',
+        message: 'DeepSeek 语音返回了空音频',
+      });
+    }
+    if (audio.length > MAX_AUDIO_BYTES) {
+      throw new BadGatewayException({
+        code: 'TTS_TOO_LARGE',
+        message: '语音合成结果超过 20MB，请缩短文本',
+      });
+    }
+
+    return { audio, mimeType: DEEPSEEK_MIME };
+  }
+}
+
+/** Shared empty-config rejection so both engines name what is missing. */
+function notConfigured(label: string): BadRequestException {
+  return new BadRequestException({
+    code: 'TTS_NOT_CONFIGURED',
+    message: `还没有可用的${label}语音配置，请先在设置中填写 API Key`,
+  });
 }
 
 /** Reads the stored configuration defensively; missing core fields read as unset. */
@@ -262,6 +481,47 @@ function toSettings(config: TtsConfig, updatedAt: Date): TtsSettings {
     voice: config.voice,
     format: config.format,
     speed: config.speed,
+    hasKey: Boolean(config.apiKey),
+    keyHint: config.apiKey.length > 4 ? `••••${config.apiKey.slice(-4)}` : '••••',
+    updatedAt: updatedAt.toISOString(),
+  };
+}
+
+/** Reads the DeepSeek block; a missing endpoint falls back to the official one. */
+function readDeepseekConfig(value: unknown): DeepseekConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const endpoint =
+    typeof record.endpoint === 'string' && record.endpoint.trim()
+      ? record.endpoint.trim()
+      : DEEPSEEK_TTS_ENDPOINT;
+  const voiceId = deepseekTtsVoices.includes(record.voiceId as DeepseekTtsVoiceId)
+    ? (record.voiceId as DeepseekTtsVoiceId)
+    : 'stella';
+  return {
+    endpoint,
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
+    voiceId,
+  };
+}
+
+/** Accepts a stored engine only if it is known; otherwise follows the configured keys. */
+function readProvider(value: unknown, hasOpenaiKey: boolean, hasDeepseekKey: boolean): TtsProvider {
+  if (typeof value === 'string' && ttsProviders.includes(value as TtsProvider)) {
+    return value as TtsProvider;
+  }
+  if (!hasOpenaiKey && hasDeepseekKey) {
+    return 'deepseek';
+  }
+  return 'openai';
+}
+
+/** Projects the DeepSeek configuration into its masked client view. */
+function toDeepseekSettings(config: DeepseekConfig, updatedAt: Date): DeepseekTtsSettings {
+  return {
+    voiceId: config.voiceId,
     hasKey: Boolean(config.apiKey),
     keyHint: config.apiKey.length > 4 ? `••••${config.apiKey.slice(-4)}` : '••••',
     updatedAt: updatedAt.toISOString(),

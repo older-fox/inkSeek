@@ -1,4 +1,9 @@
-import type { ModelProviderProtocol, TtsAudioFormat } from './schemas.js';
+import type {
+  DeepseekTtsVoiceId,
+  ModelProviderProtocol,
+  TtsAudioFormat,
+  TtsProvider,
+} from './schemas.js';
 
 export type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -89,6 +94,25 @@ export interface TtsSettings {
   updatedAt: string;
 }
 
+export interface DeepseekTtsSettings {
+  voiceId: DeepseekTtsVoiceId;
+  hasKey: boolean;
+  keyHint: string;
+  updatedAt: string;
+}
+
+/**
+ * Both engines keep their own saved configuration; only `provider` is active,
+ * so switching never discards the other setup.
+ */
+export interface TtsOverview {
+  provider: TtsProvider;
+  openai: TtsSettings | null;
+  deepseek: DeepseekTtsSettings | null;
+  /** The active engine has a key and can synthesize right now. */
+  ready: boolean;
+}
+
 export interface WebSearchSettings {
   /** Empty means web search is disabled; no fallback provider is called. */
   endpoint: string;
@@ -125,7 +149,7 @@ export interface PhoneDeviceList {
 export interface SettingsOverview {
   redis: RedisSettings | null;
   bilibili: BilibiliSettings | null;
-  tts: TtsSettings | null;
+  tts: TtsOverview | null;
   phone: PhoneSettings;
   providers: ModelProviderSummary[];
   /** Hard ceiling for a single model call, in tokens. */
@@ -162,8 +186,12 @@ export interface BilibiliSettingsResult {
 }
 
 export interface TtsSettingsResult {
-  tts: TtsSettings;
+  tts: TtsOverview;
   latencyMs: number;
+}
+
+export interface TtsProviderResult {
+  tts: TtsOverview;
 }
 
 export interface TtsTestResult {
@@ -171,6 +199,8 @@ export interface TtsTestResult {
   mimeType: string;
   byteSize: number;
   latencyMs: number;
+  /** Engine that produced the clip, so the UI can label the preview. */
+  provider: TtsProvider;
 }
 
 export interface ModelProviderSaveResult {

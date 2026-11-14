@@ -333,7 +333,8 @@ interface ActionPlan {
 type OutgoingBeat =
   | { kind: 'text'; text: string; delayMs: number; replyTo?: string; mentions?: string[] }
   | { kind: 'sticker'; stickerId: string; delayMs: number }
-  | { kind: 'face'; faceId: string; delayMs: number };
+  | { kind: 'face'; faceId: string; delayMs: number }
+  | { kind: 'voice'; text: string; delayMs: number };
 ```
 
 每轮写回与漂移（`MindDriftService`）：规划器可以提出`self.activity`、`self.traits`、`groupStance` 与 `relationshipSignals`；自身与群数值落库前由服务端限幅，对个人关系数值不再按轮/日/冷却设限，只夹存储范围。
@@ -512,6 +513,17 @@ type OutgoingBeat =
 `ChatMindSettings.imageDescriptionPrompt` 覆盖心智补描述时的内置提示词（留空 = 内置默认）。它只影响尚未生成描述的图片：已有 `ChatMediaObject.description` 直接复用，改提示词不会触发重跑。
 
 识图模型单独配置：设置页「识图模型」把图片描述、手机识屏、网页截图、表情标注和视频抽帧统一指向 `SystemConfig` 的 `ai.visionModel`（`providerId`/`model`，留空跟随默认）。保存时用内置图片真实识别一次，模型回「无法查看这张图片」或返回空内容时拒绝保存。拒绝文案永远不会写入 `ChatMediaObject.description`；同一渠道同一 sha256 的失败进入 120 秒负缓存，并发请求合并成一次模型调用，避免反复烧额度。
+
+### 语音发送
+
+语音合成支持两种引擎，二选一启用，切换由设置页「语音服务」下拉框完成：
+
+- **OpenAI 兼容**：`tts.speech` 保存 Endpoint、密钥、模型、音色、格式与语速，合成时 POST `{Endpoint}/audio/speech`。
+- **DeepSeek 内置**：`tts.deepseek` 只保存密钥与音色（`stella`/`tide`），合成时 POST `https://api.deepseek.com/v1/tools/tts`，固定返回 WAV，单次最多 10,000 字。
+
+`tts.provider` 记录当前启用的引擎；两份配置互不覆盖，切换不会删除另一份。只有已有密钥的引擎才能被启用；未设置 `tts.provider` 时按已有密钥推断。每次保存（包括 OpenAI 兼容配置的修改）都会先用测试文本真实合成一次，失败不落库。密钥只保存服务端，接口只返回掩码提示。
+
+规划器在启用引擎可用时多出一条语音规则：人格可以输出 `{"kind":"voice","text":"要说的话","delayMs":1200}`，一次回复最多 1 条语音，且不再重复写同一句文字。执行器用当前启用的引擎合成音频，转成 `data:audio/...` 交给 `ChatService.sendMessage`；`ChatMessagesService.send` 把语音作为 OneBot `record` 段发给 NapCat，同时把字节按渠道写入 `data/chat/channels/<channelId>/voices`、在 `ChatVoiceAsset` 里记录 URL、MIME、大小、时长与合成原文（`description`）。只有语音的消息 `kind=VOICE`，与文字/图片混合时 `kind=MIXED`；会话列表预览显示「[语音]」，网页端沿用现有 `VoiceBar` 播放并显示转写文本。
 
 ## 10. API 与 UI
 

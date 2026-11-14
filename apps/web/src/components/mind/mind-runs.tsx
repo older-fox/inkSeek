@@ -1046,6 +1046,7 @@ function readBeats(plan: Record<string, unknown> | null): BeatView[] {
 function beatLabel(kind: string): string {
   if (kind === 'sticker') return '表情';
   if (kind === 'face') return 'QQ 表情';
+  if (kind === 'voice') return '语音';
   return '文字';
 }
 

@@ -18,6 +18,8 @@ import {
   phoneDisconnectSchema,
   phonePairSchema,
   redisSettingsSchema,
+  deepseekTtsSettingsSchema,
+  ttsProviderSchema,
   ttsSettingsSchema,
   ttsTestSchema,
   toolMaxTokensSchema,
@@ -41,6 +43,9 @@ import {
   type TtsSettingsResult,
   type TtsTestInput,
   type TtsTestResult,
+  type DeepseekTtsSettingsInput,
+  type TtsProviderInput,
+  type TtsProviderResult,
   type ToolMaxTokensInput,
   type ToolTokenResult,
   type VisionModelInput,
@@ -97,6 +102,26 @@ export class SettingsController {
     @Body(new ZodValidationPipe(ttsSettingsSchema)) input: TtsSettingsInput,
   ): Promise<TtsSettingsResult> {
     return this.settings.updateTts(input);
+  }
+
+  @Put('tts/provider')
+  @HttpCode(200)
+  @ApiOperation({ summary: '切换语音合成引擎（OpenAI 兼容 / DeepSeek 内置）' })
+  /** Only an engine with a saved key can be enabled; the other setup is kept. */
+  updateTtsProvider(
+    @Body(new ZodValidationPipe(ttsProviderSchema)) input: TtsProviderInput,
+  ): Promise<TtsProviderResult> {
+    return this.settings.updateTtsProvider(input);
+  }
+
+  @Put('tts/deepseek')
+  @HttpCode(200)
+  @ApiOperation({ summary: '测试并保存 DeepSeek 内置语音合成配置（管理员）' })
+  /** Synthesizes a probe clip with the chosen voice before storing the key. */
+  updateDeepseekTts(
+    @Body(new ZodValidationPipe(deepseekTtsSettingsSchema)) input: DeepseekTtsSettingsInput,
+  ): Promise<TtsSettingsResult> {
+    return this.settings.updateDeepseekTts(input);
   }
 
   @Post('tts/test')

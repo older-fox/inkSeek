@@ -6,6 +6,7 @@ import type {
   MindSettingsRecord,
   OutgoingBeat,
 } from '@inkseek/shared';
+import { TtsService } from '../ai/tts.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AgentAction } from '../generated/prisma/client.js';
 import type { MindScene } from './mind.types.js';
@@ -32,6 +33,7 @@ export class MindActionExecutor {
     private readonly prisma: PrismaService,
     private readonly moduleRef: ModuleRef,
     private readonly stickers: StickerService,
+    private readonly tts: TtsService,
   ) {}
 
   /**
@@ -221,6 +223,7 @@ export class MindActionExecutor {
       const summary = await chat.sendMessage(scene.conversation.id, {
         text: beat.text,
         images: [],
+        voices: [],
       });
       return summary.id;
     }
@@ -233,9 +236,23 @@ export class MindActionExecutor {
       const summary = await chat.sendMessage(scene.conversation.id, {
         text: '',
         images: [dataUrl],
+        voices: [],
         imageDescriptions: description ? [description] : undefined,
       });
       await this.stickers.recordUsage(beat.stickerId, channelId);
+      return summary.id;
+    }
+    if (beat.kind === 'voice') {
+      // The active engine may have been disabled between planning and sending;
+      // synthesize failures fail this beat so the remaining bubbles stop.
+      const speech = await this.tts.synthesize(beat.text);
+      const dataUrl = `data:${speech.mimeType};base64,${speech.audio.toString('base64')}`;
+      const summary = await chat.sendMessage(scene.conversation.id, {
+        text: '',
+        images: [],
+        voices: [dataUrl],
+        voiceDescriptions: [beat.text],
+      });
       return summary.id;
     }
     throw new Error(`暂不支持发送 ${beat.kind} 类型的消息段（动作 ${actionId}）`);

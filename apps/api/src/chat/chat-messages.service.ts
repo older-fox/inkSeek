@@ -447,12 +447,15 @@ export class ChatMessagesService {
       text: string;
       images?: string[];
       imageDescriptions?: string[];
+      voices?: string[];
+      voiceDescriptions?: string[];
       sentAt?: Date;
     },
   ): Promise<ChatMessageSummary> {
     const text = input.text.trim();
     const segments: OneBotSegment[] = [];
     const pendingImages: { dataUrl: string; position: number }[] = [];
+    const pendingVoices: { dataUrl: string; position: number }[] = [];
 
     if (text.length > 0) {
       segments.push({ type: 'text', data: { text } });
@@ -463,6 +466,14 @@ export class ChatMessagesService {
         const position = segments.length;
         segments.push({ type: 'image', data: { file: `base64://${parsed.base64}` } });
         pendingImages.push({ dataUrl, position });
+      }
+    });
+    (input.voices ?? []).forEach((dataUrl) => {
+      const parsed = parseAudioDataUrl(dataUrl);
+      if (parsed) {
+        const position = segments.length;
+        segments.push({ type: 'record', data: { file: `base64://${parsed.base64}` } });
+        pendingVoices.push({ dataUrl, position });
       }
     });
 
@@ -496,16 +507,41 @@ export class ChatMessagesService {
         }),
       )
     ).filter((item): item is PositionedMedia => item !== null);
+    const voiceAssets = (
+      await Promise.all(
+        pendingVoices.map(async ({ dataUrl, position }, index) => {
+          const asset = await this.media.saveVoiceDataUrl(channel.id, dataUrl);
+          return asset
+            ? { ...asset, position, description: input.voiceDescriptions?.[index] ?? null }
+            : null;
+        }),
+      )
+    ).filter(
+      (item): item is PositionedMedia & { description: string | null } => item !== null,
+    );
     const assetsByPosition = new Map(imageAssets.map((asset) => [asset.position, asset]));
+    const voicesByPosition = new Map(voiceAssets.map((asset) => [asset.position, asset]));
     const storedSegments = segments.map((segment, position) => {
-      if (segment.type !== 'image') {
-        return segment;
+      if (segment.type === 'image') {
+        const asset = assetsByPosition.get(position);
+        return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
       }
-      const asset = assetsByPosition.get(position);
-      return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+      if (segment.type === 'record') {
+        const asset = voicesByPosition.get(position);
+        return { type: 'record', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+      }
+      return segment;
     });
     const kind: ChatMessageKind =
-      imageAssets.length > 0 ? (text.length > 0 ? 'MIXED' : 'IMAGE') : 'TEXT';
+      voiceAssets.length > 0
+        ? text.length > 0 || imageAssets.length > 0
+          ? 'MIXED'
+          : 'VOICE'
+        : imageAssets.length > 0
+          ? text.length > 0
+            ? 'MIXED'
+            : 'IMAGE'
+          : 'TEXT';
     const senderName = input.isSelf ? channel.displayName : contact.nickname;
 
     const { id } = await this.prisma.$transaction(async (tx) => {
@@ -535,6 +571,18 @@ export class ChatMessagesService {
               position: asset.position,
             })),
           },
+          voices: {
+            create: voiceAssets.map((asset) => ({
+              url: asset.url,
+              fileName: asset.fileName,
+              mimeType: asset.mimeType,
+              byteSize: asset.byteSize,
+              duration: asset.duration,
+              description: asset.description,
+              remoteUrl: asset.remoteUrl,
+              position: asset.position,
+            })),
+          },
         },
         select: { id: true },
       });
@@ -543,7 +591,7 @@ export class ChatMessagesService {
         where: { id: conversation.id },
         data: {
           lastMessageAt: now,
-          lastMessagePreview: previewOf(text, kind, imageAssets.length, 0),
+          lastMessagePreview: previewOf(text, kind, imageAssets.length, voiceAssets.length),
           lastMessageSender: senderName,
         },
       });
@@ -575,10 +623,17 @@ export class ChatMessagesService {
     channel: ChatChannel,
     conversation: ChatConversation,
     client: OneBotRequester,
-    input: { text: string; images: string[]; imageDescriptions?: string[] },
+    input: {
+      text: string;
+      images: string[];
+      imageDescriptions?: string[];
+      voices?: string[];
+      voiceDescriptions?: string[];
+    },
   ): Promise<ChatMessageSummary> {
     const segments: OneBotSegment[] = [];
     const pendingImages: { dataUrl: string; position: number }[] = [];
+    const pendingVoices: { dataUrl: string; position: number }[] = [];
 
     if (input.text.length > 0) {
       segments.push({ type: 'text', data: { text: input.text } });
@@ -590,6 +645,15 @@ export class ChatMessagesService {
         const position = segments.length;
         segments.push({ type: 'image', data: { file: `base64://${parsed.base64}` } });
         pendingImages.push({ dataUrl, position });
+      }
+    });
+
+    (input.voices ?? []).forEach((dataUrl) => {
+      const parsed = parseAudioDataUrl(dataUrl);
+      if (parsed) {
+        const position = segments.length;
+        segments.push({ type: 'record', data: { file: `base64://${parsed.base64}` } });
+        pendingVoices.push({ dataUrl, position });
       }
     });
 
@@ -649,18 +713,43 @@ export class ChatMessagesService {
         }),
       )
     ).filter((item): item is PositionedMedia => item !== null);
+    const voiceAssets = (
+      await Promise.all(
+        pendingVoices.map(async ({ dataUrl, position }, index) => {
+          const asset = await this.media.saveVoiceDataUrl(channel.id, dataUrl);
+          return asset
+            ? { ...asset, position, description: input.voiceDescriptions?.[index] ?? null }
+            : null;
+        }),
+      )
+    ).filter(
+      (item): item is PositionedMedia & { description: string | null } => item !== null,
+    );
     const assetsByPosition = new Map(imageAssets.map((asset) => [asset.position, asset]));
+    const voicesByPosition = new Map(voiceAssets.map((asset) => [asset.position, asset]));
     // Keep the archived segment list ordered but swap transport blobs for stored
     // media URLs so the column never duplicates megabytes of base64.
     const storedSegments = segments.map((segment, position) => {
-      if (segment.type !== 'image') {
-        return segment;
+      if (segment.type === 'image') {
+        const asset = assetsByPosition.get(position);
+        return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
       }
-      const asset = assetsByPosition.get(position);
-      return { type: 'image', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+      if (segment.type === 'record') {
+        const asset = voicesByPosition.get(position);
+        return { type: 'record', data: asset ? { file: asset.url } : {} } satisfies OneBotSegment;
+      }
+      return segment;
     });
     const kind: ChatMessageKind =
-      imageAssets.length > 0 ? (input.text.length > 0 ? 'MIXED' : 'IMAGE') : 'TEXT';
+      voiceAssets.length > 0
+        ? input.text.length > 0 || imageAssets.length > 0
+          ? 'MIXED'
+          : 'VOICE'
+        : imageAssets.length > 0
+          ? input.text.length > 0
+            ? 'MIXED'
+            : 'IMAGE'
+          : 'TEXT';
     const text = input.text;
 
     let id: string;
@@ -692,6 +781,18 @@ export class ChatMessagesService {
                 position: asset.position,
               })),
             },
+            voices: {
+              create: voiceAssets.map((asset) => ({
+                url: asset.url,
+                fileName: asset.fileName,
+                mimeType: asset.mimeType,
+                byteSize: asset.byteSize,
+                duration: asset.duration,
+                description: asset.description,
+                remoteUrl: asset.remoteUrl,
+                position: asset.position,
+              })),
+            },
           },
           select: { id: true },
         });
@@ -700,7 +801,7 @@ export class ChatMessagesService {
           where: { id: conversation.id },
           data: {
             lastMessageAt: now,
-            lastMessagePreview: previewOf(text, kind, imageAssets.length, 0),
+            lastMessagePreview: previewOf(text, kind, imageAssets.length, voiceAssets.length),
             lastMessageSender: channel.displayName,
           },
         });
@@ -1717,5 +1818,11 @@ function toOneBotId(value: string): number | string {
 /** Splits an image data URL into its base64 payload, or null when it is not one. */
 function parseImageDataUrl(dataUrl: string): { base64: string } | null {
   const match = /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(dataUrl);
+  return match?.[1] ? { base64: match[1] } : null;
+}
+
+/** Same for synthesized speech; NapCat accepts a `record` segment built from base64. */
+function parseAudioDataUrl(dataUrl: string): { base64: string } | null {
+  const match = /^data:audio\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(dataUrl);
   return match?.[1] ? { base64: match[1] } : null;
 }

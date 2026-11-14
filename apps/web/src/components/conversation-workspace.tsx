@@ -759,7 +759,11 @@ export function ConversationWorkspace({ kind }: { kind: ConversationKind }) {
 
   const sendMutation = useMutation({
     mutationFn: (input: { conversationId: string; text: string; images: string[] }) =>
-      api.sendChatMessage(input.conversationId, { text: input.text, images: input.images }),
+      api.sendChatMessage(input.conversationId, {
+        text: input.text,
+        images: input.images,
+        voices: [],
+      }),
     onSuccess: (_message, input) => {
       // Only clear when the sender is still looking at that conversation.
       if (input.conversationId === activeConversation?.id) {

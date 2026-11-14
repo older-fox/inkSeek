@@ -675,7 +675,8 @@ export type OutgoingBeat =
       mentions?: string[];
     }
   | { kind: 'sticker'; stickerId: string; delayMs: number }
-  | { kind: 'face'; faceId: string; delayMs: number };
+  | { kind: 'face'; faceId: string; delayMs: number }
+  | { kind: 'voice'; text: string; delayMs: number };
 
 export interface MemoryDraft {
   kind: PersonaMemoryKind;

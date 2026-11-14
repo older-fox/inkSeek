@@ -449,7 +449,7 @@ export class ChatService {
   /** Direct lines store locally; QQ lines need an online client or the send is rejected. */
   async sendMessage(
     conversationId: string,
-    input: ChatSendMessageInput & { imageDescriptions?: string[] },
+    input: ChatSendMessageInput & { imageDescriptions?: string[]; voiceDescriptions?: string[] },
   ): Promise<ChatMessageSummary> {
     const conversation = await this.prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -469,6 +469,8 @@ export class ChatService {
         text: input.text,
         images: input.images,
         imageDescriptions: input.imageDescriptions,
+        voices: input.voices,
+        voiceDescriptions: input.voiceDescriptions,
       });
     }
 
@@ -493,6 +495,8 @@ export class ChatService {
         text: input.text,
         images: input.images,
         imageDescriptions: input.imageDescriptions,
+        voices: input.voices,
+        voiceDescriptions: input.voiceDescriptions,
       });
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {
