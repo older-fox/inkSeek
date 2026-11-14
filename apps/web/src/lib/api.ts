@@ -80,6 +80,8 @@ import type {
   ToolTokenResult,
   VisionModelInput,
   VisionModelResult,
+  VisionRedescribeInput,
+  VisionRedescribeResult,
   WebAllowedHostsInput,
   WebAllowedHostsResult,
 } from '@inkseek/shared';
@@ -191,6 +193,11 @@ export const api = {
   updateVisionModel: (input: VisionModelInput) =>
     request<VisionModelResult>('/settings/vision-model', {
       method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  redescribeVisionImages: (input: VisionRedescribeInput) =>
+    request<VisionRedescribeResult>('/settings/vision-model/redescribe', {
+      method: 'POST',
       body: JSON.stringify(input),
     }),
   updateMindBannedWords: (input: MindBannedWordsInput) =>

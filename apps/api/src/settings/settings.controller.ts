@@ -24,6 +24,7 @@ import {
   ttsTestSchema,
   toolMaxTokensSchema,
   visionModelSchema,
+  visionRedescribeSchema,
   webAllowedHostsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
@@ -49,6 +50,8 @@ import {
   type ToolTokenResult,
   type VisionModelInput,
   type VisionModelResult,
+  type VisionRedescribeInput,
+  type VisionRedescribeResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
 } from '@inkseek/shared';
@@ -147,6 +150,16 @@ export class SettingsController {
     @Body(new ZodValidationPipe(visionModelSchema)) input: VisionModelInput,
   ): Promise<VisionModelResult> {
     return this.settings.updateVisionModel(input);
+  }
+
+  @Post('vision-model/redescribe')
+  @HttpCode(200)
+  @ApiOperation({ summary: '分批重新识别历史图片描述（管理员）' })
+  /** Re-runs the vision model over stored descriptions; each call handles one bounded batch. */
+  redescribeVisionImages(
+    @Body(new ZodValidationPipe(visionRedescribeSchema)) input: VisionRedescribeInput,
+  ): Promise<VisionRedescribeResult> {
+    return this.settings.redescribeVisionImages(input);
   }
 
   @Put('web-allowed-hosts')

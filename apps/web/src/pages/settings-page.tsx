@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DEFAULT_TOOL_MAX_TOKENS } from '@inkseek/shared';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { motion } from 'motion/react';
+import type { ReactNode } from 'react';
 import { BilibiliSettingsSection } from '@/components/bilibili-settings-section';
 import { GhostButton } from '@/components/button';
 import { MindBannedWordsSection } from '@/components/mind-banned-words-section';
@@ -89,7 +90,7 @@ export function SettingsPage() {
         </div>
       </motion.header>
 
-      <div className="mt-10 space-y-6">
+      <div className="mt-10 space-y-4">
         {settings.isPending ? (
           <>
             <div className="h-64 animate-pulse rounded-2xl border border-mist-100/[0.06] bg-ink-900/30" />
@@ -111,67 +112,37 @@ export function SettingsPage() {
           </div>
         ) : (
           <>
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
-            >
+            <SectionDivider index="01" title="连接与账号" caption="Redis · 手机桥接 · B 站登录态" />
+            <Card delay={0.12}>
               <RedisSettingsSection redis={overview?.redis ?? null} />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.16}>
               <PhoneSettingsSection phone={overview?.phone ?? EMPTY_PHONE} />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.2}>
               <BilibiliSettingsSection bilibili={overview?.bilibili ?? null} />
-            </motion.div>
+            </Card>
 
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
+            <SectionDivider index="02" title="表达与边界" caption="全局禁用词 · 网页访问白名单" />
+            <Card delay={0.22}>
               <MindBannedWordsSection words={overview?.mindBannedWords ?? []} />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.23, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.23}>
               <WebAccessSection hosts={overview?.webAllowedHosts ?? []} />
-            </motion.div>
+            </Card>
 
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            >
+            <SectionDivider
+              index="03"
+              title="语音与模型"
+              caption="语音合成 · token 预算 · 识图 · 模型提供商"
+            />
+            <Card delay={0.25}>
               <TtsSettingsSection tts={overview?.tts ?? null} providers={providers} />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.26, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.26}>
               <ToolTokenSection maxTokens={overview?.maxTokens ?? DEFAULT_TOOL_MAX_TOKENS} />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.265, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.265}>
               <VisionModelSection
                 visionModel={
                   overview?.visionModel ?? {
@@ -184,18 +155,46 @@ export function SettingsPage() {
                 }
                 providers={providers}
               />
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.27, ease: [0.22, 1, 0.36, 1] }}
-            >
+            </Card>
+            <Card delay={0.27}>
               <ModelProviderSection providers={providers} />
-            </motion.div>
+            </Card>
           </>
         )}
       </div>
     </div>
+  );
+}
+
+function SectionDivider({
+  index,
+  title,
+  caption,
+}: {
+  index: string;
+  title: string;
+  caption: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 pt-6 first:pt-0">
+      <span className="font-mono text-[0.6rem] tracking-[0.24em] text-brass-400/70">{index}</span>
+      <h2 className="font-display text-[0.92rem] font-semibold tracking-tight text-mist-200">
+        {title}
+      </h2>
+      <span className="hidden text-[0.66rem] text-mist-600 sm:inline">{caption}</span>
+      <span className="h-px flex-1 bg-gradient-to-r from-mist-100/[0.12] to-transparent" />
+    </div>
+  );
+}
+
+function Card({ delay, children }: { delay: number; children: ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
   );
 }

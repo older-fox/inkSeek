@@ -63,6 +63,13 @@ export const visionModelSchema = z.object({
   model: z.string().trim().max(120, '模型名称过长').optional().default(''),
 });
 
+/** One bounded batch of the historical image re-description sweep. */
+export const visionRedescribeSchema = z.object({
+  /** Media id of the last row handled; empty starts from the beginning. */
+  cursor: z.string().trim().max(64, '游标过长').optional().default(''),
+  limit: z.number().int().min(1).max(20).optional().default(5),
+});
+
 export const webAllowedHostsSchema = z.object({
   hosts: z
     .array(z.string().trim().min(1, '域名不能为空').max(253, '单个域名最多 253 个字符'))
@@ -248,6 +255,7 @@ export type MindBannedWordsInput = z.infer<typeof mindBannedWordsSchema>;
 export type WebAllowedHostsInput = z.infer<typeof webAllowedHostsSchema>;
 export type ToolMaxTokensInput = z.infer<typeof toolMaxTokensSchema>;
 export type VisionModelInput = z.infer<typeof visionModelSchema>;
+export type VisionRedescribeInput = z.infer<typeof visionRedescribeSchema>;
 export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
 export type PhonePairInput = z.infer<typeof phonePairSchema>;
 export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;

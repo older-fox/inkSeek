@@ -79,6 +79,24 @@ export interface VisionModelResult {
   reasoningTokens: number | null;
 }
 
+export interface VisionRedescribeFailure {
+  mediaId: string;
+  message: string;
+}
+
+/** One batch of the sweep that re-runs the vision model over stored descriptions. */
+export interface VisionRedescribeResult {
+  /** Rows newly described in this batch. */
+  processed: number;
+  /** Rows skipped because no stored asset or owning channel could be found. */
+  skipped: number;
+  failures: VisionRedescribeFailure[];
+  /** Pass back as the next cursor; null when the sweep reached the end. */
+  nextCursor: string | null;
+  /** Candidate rows still ahead of nextCursor. */
+  remaining: number;
+}
+
 export interface ToolTokenResult {
   maxTokens: number;
 }

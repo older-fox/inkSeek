@@ -1,5 +1,10 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { LlmService } from '../ai/llm.service.js';
 import { isVisionRefusal } from '../ai/vision-guards.js';
 import { readVisionTarget } from '../ai/vision-model.service.js';
@@ -132,9 +137,10 @@ export class ImageDescriptionService {
     }
 
     const vision = await readVisionTarget(this.config);
+    const prepared = await prepareVisionImage(image);
     const completion = await this.llm.complete({
       prompt,
-      images: [{ mimeType: image.mimeType, base64: image.base64 }],
+      images: [{ mimeType: prepared.mimeType, base64: prepared.base64 }],
       providerId: emptyToNull(input.providerId) ?? vision.providerId,
       model: emptyToNull(input.model) ?? vision.model,
       temperature: DESCRIPTION_TEMPERATURE,
@@ -179,6 +185,7 @@ export class ImageDescriptionService {
     channelId: string,
     reference: string,
     prompt?: string,
+    force = false,
   ): Promise<{
     mediaId: string | null;
     description: string;
@@ -188,7 +195,8 @@ export class ImageDescriptionService {
       channelId,
       reference,
       prompt: prompt?.trim() || SCENE_DESCRIPTION_PROMPT,
-      source: 'mind.image-description',
+      force,
+      source: force ? 'settings.vision-redescribe' : 'mind.image-description',
     });
     if (!result.cached && result.mediaId) {
       await this.prisma.chatMediaObject.updateMany({
@@ -232,3 +240,85 @@ function truncate(value: string, length: number): string {
   const chars = Array.from(value);
   return chars.length > length ? `${chars.slice(0, length).join('')}…` : value;
 }
+
+/** Image token cost follows pixels, not bytes: shrink oversized chat images before the vision call. */
+const VISION_MAX_EDGE = 1280;
+
+/**
+ * Caps the long edge at 1280 and re-encodes as JPEG. Animated GIFs and images
+ * that already fit pass through untouched; missing ffmpeg falls back to the
+ * original bytes instead of failing the description.
+ */
+async function prepareVisionImage(image: {
+  mimeType: string;
+  base64: string;
+  buffer: Buffer;
+}): Promise<{ mimeType: string; base64: string }> {
+  if (!/^image\/(jpeg|png|webp|bmp)$/iu.test(image.mimeType)) {
+    return { mimeType: image.mimeType, base64: image.base64 };
+  }
+
+  const work = await mkdtemp(join(tmpdir(), 'inkseek-vision-')).catch(() => null);
+  if (!work) {
+    return { mimeType: image.mimeType, base64: image.base64 };
+  }
+  try {
+    const input = join(work, 'source');
+    const output = join(work, 'scaled.jpg');
+    await writeFile(input, image.buffer);
+
+    let width = 0;
+    let height = 0;
+    try {
+      const probe = await execFileAsync(
+        'ffprobe',
+        [
+          '-v',
+          'error',
+          '-select_streams',
+          'v:0',
+          '-show_entries',
+          'stream=width,height',
+          '-of',
+          'csv=p=0',
+          input,
+        ],
+        { timeout: 10_000 },
+      );
+      const [rawWidth, rawHeight] = probe.stdout.trim().split(',').map(Number);
+      width = Number(rawWidth) || 0;
+      height = Number(rawHeight) || 0;
+    } catch {
+      // Unknown dimensions: fall through to the scaled copy rather than guess.
+    }
+
+    if (width > 0 && height > 0 && Math.max(width, height) <= VISION_MAX_EDGE) {
+      return { mimeType: image.mimeType, base64: image.base64 };
+    }
+
+    await execFileAsync(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        input,
+        '-vf',
+        `scale='min(${VISION_MAX_EDGE},iw)':'min(${VISION_MAX_EDGE},ih)':force_original_aspect_ratio=decrease`,
+        '-q:v',
+        '3',
+        '-frames:v',
+        '1',
+        output,
+      ],
+      { timeout: 25_000 },
+    );
+    const scaled = await readFile(output);
+    return { mimeType: 'image/jpeg', base64: scaled.toString('base64') };
+  } catch {
+    return { mimeType: image.mimeType, base64: image.base64 };
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+const execFileAsync = promisify(execFile);

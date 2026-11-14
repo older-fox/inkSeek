@@ -5,10 +5,10 @@ import type {
   VisionModelSettings,
 } from '@inkseek/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Eye, ImageOff, ScanEye, ShieldCheck, Sparkles } from 'lucide-react';
+import { ChevronDown, Eye, ImageOff, RefreshCw, ScanEye, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { PrimaryButton } from '@/components/button';
+import { GhostButton, PrimaryButton } from '@/components/button';
 import { Field, InputShell } from '@/components/field';
 import { ApiError, api } from '@/lib/api';
 import { settingsQuery } from '@/lib/queries';
@@ -35,12 +35,56 @@ export function VisionModelSection({ visionModel, providers }: VisionModelSectio
   const [providerId, setProviderId] = useState(visionModel.providerId ?? '');
   const [model, setModel] = useState(visionModel.model ?? '');
   const [result, setResult] = useState<VisionModelResult | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweep, setSweep] = useState<{
+    processed: number;
+    failed: number;
+    remaining: number;
+    total: number;
+  } | null>(null);
 
   useEffect(() => {
     setProviderId(visionModel.providerId ?? '');
     setModel(visionModel.model ?? '');
     setResult(null);
   }, [visionModel]);
+
+  /** Walks the stored descriptions in small batches so no single request runs for minutes. */
+  const runRedescribe = async () => {
+    if (sweeping) {
+      return;
+    }
+    setSweeping(true);
+    setSweep(null);
+    let cursor = '';
+    let processed = 0;
+    let failed = 0;
+    let total = 0;
+    try {
+      for (;;) {
+        const batch = await api.redescribeVisionImages({ cursor, limit: 5 });
+        processed += batch.processed;
+        failed += batch.failures.length;
+        if (total === 0) {
+          total = processed + batch.skipped + failed + batch.remaining;
+        }
+        cursor = batch.nextCursor ?? '';
+        setSweep({ processed, failed, remaining: batch.remaining, total });
+        if (!batch.nextCursor || batch.remaining === 0) {
+          break;
+        }
+      }
+      toast.success(
+        total === 0
+          ? '没有已有描述的图片需要重新识别'
+          : `重新识别完成：${processed} 张${failed > 0 ? `，失败 ${failed} 张` : ''}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : '重新识别失败，请稍后重试');
+    } finally {
+      setSweeping(false);
+    }
+  };
 
   const provider = providers.find((item) => item.id === providerId);
   const suggestions = provider?.models ?? [];
@@ -204,6 +248,35 @@ export function VisionModelSection({ visionModel, providers }: VisionModelSectio
           <p className="mt-2 flex items-center gap-1.5 text-[0.72rem] text-mist-600">
             <ImageOff className="size-3.5" />
             还没有探测过。保存时会用内置图片实际识别一次。
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[0.78rem] text-mist-200">历史图片描述</p>
+            <p className="mt-1 max-w-lg text-[0.68rem] leading-5 text-mist-600">
+              用当前识图模型把已有描述逐张重新识别并覆盖，适合修正旧提示词留下的错误描述。会消耗识图
+              token；没有关联消息的旧图片会跳过，失败的单张保留原描述。
+            </p>
+          </div>
+          <GhostButton
+            type="button"
+            disabled={sweeping}
+            onClick={() => void runRedescribe()}
+            className="h-9 shrink-0 px-3 text-[0.72rem]"
+          >
+            <RefreshCw className={`size-3.5 ${sweeping ? 'animate-spin' : ''}`} />
+            {sweeping ? '重新识别中…' : '重新识别全部'}
+          </GhostButton>
+        </div>
+        {sweep && (
+          <p className="mt-2 font-mono text-[0.62rem] text-mist-500">
+            {sweeping ? '进行中' : '已完成'} {sweep.processed}
+            {sweep.total > 0 ? `/${sweep.total}` : ''}
+            {sweep.failed > 0 ? ` · 失败 ${sweep.failed}` : ''}
+            {sweeping && sweep.remaining > 0 ? ` · 剩余 ${sweep.remaining}` : ''}
           </p>
         )}
       </div>

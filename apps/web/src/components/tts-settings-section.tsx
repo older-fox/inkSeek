@@ -25,6 +25,8 @@ import {
   KeyRound,
   Link2,
   Mic,
+  Radio,
+  Sparkles,
   Volume2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -298,7 +300,7 @@ export function TtsSettingsSection({ tts, providers }: TtsSettingsSectionProps) 
   return (
     <section className="relative overflow-hidden rounded-2xl border border-mist-100/[0.07] bg-ink-900/40 p-5 backdrop-blur-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3.5">
+        <div className="flex min-w-0 flex-1 items-start gap-3.5">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-mist-100/[0.07] bg-ink-950/50 text-brass-300">
             <AudioLines className="size-[1.1rem]" strokeWidth={1.6} />
           </span>
@@ -306,15 +308,15 @@ export function TtsSettingsSection({ tts, providers }: TtsSettingsSectionProps) 
             <h2 className="font-display text-[1.05rem] font-semibold tracking-tight text-mist-100">
               语音合成
             </h2>
-            <p className="mt-1 max-w-xl text-[0.78rem] leading-6 text-mist-500">
+            <p className="mt-1 max-w-2xl text-[0.78rem] leading-6 text-mist-500">
               {
-                '两种引擎任选其一：OpenAI 兼容的 /audio/speech，或 DeepSeek 内置 TTS。切换不会删除另一份配置，心智发语音时只使用当前启用的一项。每次保存都会先真实合成一段测试音频，通过才会落库；密钥只保存在服务端。'
+                '两种引擎任选其一：OpenAI 兼容的 /audio/speech，或 DeepSeek 内置 TTS。切换不会删除另一份配置，心智发语音时只用当前启用的一项；每次保存都会先真实合成一段测试音频，通过才落库。'
               }
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {tts?.ready ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-jade-400/25 bg-jade-400/[0.07] px-2.5 py-1 font-mono text-[0.58rem] uppercase tracking-[0.14em] text-jade-300">
               <CheckCircle2 className="size-3" />
@@ -333,420 +335,444 @@ export function TtsSettingsSection({ tts, providers }: TtsSettingsSectionProps) 
         </div>
       </div>
 
-      <div className="mt-5 max-w-xs">
-        <Field label="语音服务" htmlFor="settings-tts-provider" hint="同一时间只启用一项">
-          <div className="relative">
-            <select
-              id="settings-tts-provider"
-              className="wizard-input wizard-select"
-              value={provider}
-              disabled={providerMutation.isPending}
-              onChange={(event) => {
-                const next = event.target.value as TtsProvider;
-                if (next !== provider) {
-                  providerMutation.mutate({ provider: next });
-                }
-              }}
+      <div
+        id="settings-tts-provider"
+        role="group"
+        aria-label="语音服务"
+        className="mt-5 grid max-w-xl gap-2 sm:grid-cols-2"
+      >
+        {ttsProviders.map((item) => {
+          const active = provider === item;
+          const saved = item === 'openai' ? openai : deepseek;
+          const detail = !saved?.hasKey
+            ? '还没有可用凭据'
+            : item === 'deepseek' && deepseek?.providerName
+              ? `复用 ${deepseek.providerName} 的密钥`
+              : `${saved.keyHint} 已保存`;
+          return (
+            <button
+              key={item}
+              type="button"
+              disabled={providerMutation.isPending || active}
+              onClick={() => providerMutation.mutate({ provider: item })}
+              className={[
+                'group flex items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition',
+                active
+                  ? 'border-brass-400/40 bg-brass-400/[0.09] shadow-[0_10px_28px_-20px_rgba(230,189,122,0.9)]'
+                  : 'border-mist-100/[0.08] bg-ink-950/30 hover:border-mist-100/[0.16] hover:bg-ink-950/50',
+                providerMutation.isPending ? 'opacity-70' : '',
+              ].join(' ')}
             >
-              {ttsProviders.map((item) => (
-                <option key={item} value={item}>
+              <span
+                className={[
+                  'grid size-8 shrink-0 place-items-center rounded-lg border',
+                  active
+                    ? 'border-brass-400/30 bg-brass-400/10 text-brass-300'
+                    : 'border-mist-100/[0.08] text-mist-500 group-hover:text-mist-300',
+                ].join(' ')}
+              >
+                {item === 'openai' ? <Radio className="size-4" /> : <Sparkles className="size-4" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-[0.78rem] font-medium text-mist-100">
                   {PROVIDER_LABELS[item]}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
-          </div>
-        </Field>
+                  {active && <CheckCircle2 className="size-3 text-jade-300" />}
+                </span>
+                <span className="mt-0.5 block truncate font-mono text-[0.6rem] text-mist-600">
+                  {detail}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {provider === 'openai' ? (
-        <form className="mt-6 space-y-5" onSubmit={handleSave} noValidate>
-          <Field
-            label="Endpoint"
-            htmlFor="settings-tts-endpoint"
-            hint="含版本路径，如 /v1"
-            error={errors.endpoint?.message}
-          >
-            <InputShell
-              icon={<Link2 className="size-4" strokeWidth={1.7} />}
-              invalid={Boolean(errors.endpoint)}
-            >
-              <input
-                id="settings-tts-endpoint"
-                type="url"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="https://api.openai.com/v1"
-                {...form.register('endpoint')}
-              />
-            </InputShell>
-          </Field>
-
-          <Field
-            label="API Key"
-            htmlFor="settings-tts-api-key"
-            hint={keyHint}
-            error={errors.apiKey?.message}
-          >
-            <InputShell
-              icon={<KeyRound className="size-4" strokeWidth={1.7} />}
-              invalid={Boolean(errors.apiKey)}
-              trailing={
-                <button
-                  type="button"
-                  onClick={() => setShowKey((value) => !value)}
-                  className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
-                  aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
-                >
-                  {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              }
-            >
-              <input
-                id="settings-tts-api-key"
-                type={showKey ? 'text' : 'password'}
-                autoComplete="new-password"
-                spellCheck={false}
-                disabled={clearKey}
-                placeholder={openai?.hasKey && !clearKey ? '留空保持已保存密钥' : 'sk-...'}
-                {...form.register('apiKey')}
-              />
-            </InputShell>
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="模型" htmlFor="settings-tts-model" error={errors.model?.message}>
-              <InputShell
-                icon={<Cpu className="size-4" strokeWidth={1.7} />}
-                invalid={Boolean(errors.model)}
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0">
+          {provider === 'openai' ? (
+            <form className="space-y-4" onSubmit={handleSave} noValidate>
+              <Field
+                label="Endpoint"
+                htmlFor="settings-tts-endpoint"
+                hint="含版本路径，如 /v1"
+                error={errors.endpoint?.message}
               >
-                <input
-                  id="settings-tts-model"
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="例如：tts-1 / cosyvoice-v1"
-                  {...form.register('model')}
-                />
-              </InputShell>
-            </Field>
-
-            <Field label="音色" htmlFor="settings-tts-voice" error={errors.voice?.message}>
-              <InputShell
-                icon={<Mic className="size-4" strokeWidth={1.7} />}
-                invalid={Boolean(errors.voice)}
-              >
-                <input
-                  id="settings-tts-voice"
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="例如：alloy / 音色名称"
-                  {...form.register('voice')}
-                />
-              </InputShell>
-            </Field>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-[0.7rem] font-medium uppercase tracking-[0.16em] text-mist-500">
-                  音频格式
-                </span>
-                <span className="flex items-center gap-1 text-[0.68rem] text-mist-600">
-                  <FileAudio className="size-3" />
-                  response_format
-                </span>
-              </div>
-              <div className="relative">
-                <select
-                  id="settings-tts-format"
-                  aria-label="音频格式"
-                  className="wizard-input wizard-select"
-                  {...form.register('format')}
+                <InputShell
+                  icon={<Link2 className="size-4" strokeWidth={1.7} />}
+                  invalid={Boolean(errors.endpoint)}
                 >
-                  {ttsAudioFormats.map((format) => (
-                    <option key={format} value={format}>
-                      {FORMAT_LABELS[format]}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
+                  <input
+                    id="settings-tts-endpoint"
+                    type="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="https://api.openai.com/v1"
+                    {...form.register('endpoint')}
+                  />
+                </InputShell>
+              </Field>
+
+              <Field
+                label="API Key"
+                htmlFor="settings-tts-api-key"
+                hint={keyHint}
+                error={errors.apiKey?.message}
+              >
+                <InputShell
+                  icon={<KeyRound className="size-4" strokeWidth={1.7} />}
+                  invalid={Boolean(errors.apiKey)}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={() => setShowKey((value) => !value)}
+                      className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
+                      aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                    >
+                      {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  }
+                >
+                  <input
+                    id="settings-tts-api-key"
+                    type={showKey ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    disabled={clearKey}
+                    placeholder={openai?.hasKey && !clearKey ? '留空保持已保存密钥' : 'sk-...'}
+                    {...form.register('apiKey')}
+                  />
+                </InputShell>
+              </Field>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="模型" htmlFor="settings-tts-model" error={errors.model?.message}>
+                  <InputShell
+                    icon={<Cpu className="size-4" strokeWidth={1.7} />}
+                    invalid={Boolean(errors.model)}
+                  >
+                    <input
+                      id="settings-tts-model"
+                      type="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="例如：tts-1 / cosyvoice-v1"
+                      {...form.register('model')}
+                    />
+                  </InputShell>
+                </Field>
+
+                <Field label="音色" htmlFor="settings-tts-voice" error={errors.voice?.message}>
+                  <InputShell
+                    icon={<Mic className="size-4" strokeWidth={1.7} />}
+                    invalid={Boolean(errors.voice)}
+                  >
+                    <input
+                      id="settings-tts-voice"
+                      type="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="例如：alloy / 音色名称"
+                      {...form.register('voice')}
+                    />
+                  </InputShell>
+                </Field>
               </div>
-              {errors.format && <p className="text-xs text-signal-400">{errors.format.message}</p>}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[0.7rem] font-medium uppercase tracking-[0.16em] text-mist-500">
+                      音频格式
+                    </span>
+                    <span className="flex items-center gap-1 text-[0.68rem] text-mist-600">
+                      <FileAudio className="size-3" />
+                      response_format
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <select
+                      id="settings-tts-format"
+                      aria-label="音频格式"
+                      className="wizard-input wizard-select"
+                      {...form.register('format')}
+                    >
+                      {ttsAudioFormats.map((format) => (
+                        <option key={format} value={format}>
+                          {FORMAT_LABELS[format]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
+                  </div>
+                  {errors.format && (
+                    <p className="text-xs text-signal-400">{errors.format.message}</p>
+                  )}
+                </div>
+
+                <Field
+                  label="语速"
+                  htmlFor="settings-tts-speed"
+                  hint="0.5 - 2"
+                  error={errors.speed?.message}
+                >
+                  <InputShell
+                    icon={<Gauge className="size-4" strokeWidth={1.7} />}
+                    invalid={Boolean(errors.speed)}
+                  >
+                    <input
+                      id="settings-tts-speed"
+                      type="number"
+                      inputMode="decimal"
+                      step={0.1}
+                      min={0.5}
+                      max={2}
+                      {...form.register('speed', { valueAsNumber: true })}
+                    />
+                  </InputShell>
+                </Field>
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-mist-100/[0.06] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="min-w-0 max-w-md flex-1 text-[0.68rem] leading-5 text-mist-600">
+                  保存前会向 <span className="font-mono text-mist-500">Endpoint/audio/speech</span>{' '}
+                  真实合成一次；密钥只保存在服务端，清除后语音合成暂停使用。
+                </p>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+                  {openai?.hasKey && (
+                    <GhostButton
+                      type="button"
+                      onClick={() => setClearKey((value) => !value)}
+                      className={[
+                        'h-11 whitespace-nowrap px-3.5 text-[0.72rem]',
+                        clearKey
+                          ? 'border-brass-400/30 bg-brass-400/[0.08] text-brass-300'
+                          : 'hover:border-signal-400/30 hover:text-signal-400',
+                      ].join(' ')}
+                    >
+                      {clearKey ? '恢复保留密钥' : '清除已保存密钥'}
+                    </GhostButton>
+                  )}
+                  <PrimaryButton
+                    type="submit"
+                    loading={saveMutation.isPending}
+                    className="h-11 w-full whitespace-nowrap sm:w-auto sm:px-6"
+                  >
+                    {clearKey ? '清除密钥' : '测试并保存'}
+                  </PrimaryButton>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <p className="rounded-lg border border-mist-100/[0.06] bg-ink-950/30 px-3.5 py-2.5 text-[0.68rem] leading-6 text-mist-500">
+                {'官方地址 '}
+                <span className="font-mono text-mist-400">api.deepseek.com/v1/tools/tts</span>
+                {'，固定输出 WAV，单次最多 10,000 字，无需填写 Endpoint、模型或格式。'}
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10.5rem]">
+                <Field
+                  label="凭据来源"
+                  htmlFor="settings-deepseek-tts-provider"
+                  hint={deepseekProviders.length > 0 ? '可复用提供商' : '未接入提供商'}
+                >
+                  <div className="relative">
+                    <select
+                      id="settings-deepseek-tts-provider"
+                      aria-label="DeepSeek 凭据来源"
+                      className="wizard-input wizard-select"
+                      value={deepseekProviderId}
+                      disabled={clearDeepseekKey || saveDeepseekMutation.isPending}
+                      onChange={(event) => setDeepseekProviderId(event.target.value)}
+                    >
+                      <option value="">手动填写 API Key</option>
+                      {deepseekProviders.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} · {providerHost(item.baseUrl)} · {item.keyHint}
+                        </option>
+                      ))}
+                      {deepseekProviderId &&
+                        !deepseekProviders.some((item) => item.id === deepseekProviderId) && (
+                          <option value={deepseekProviderId}>已失效的提供商</option>
+                        )}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
+                  </div>
+                </Field>
+
+                <Field label="音色" htmlFor="settings-deepseek-tts-voice" hint="voice_id">
+                  <div className="relative">
+                    <select
+                      id="settings-deepseek-tts-voice"
+                      aria-label="DeepSeek 音色"
+                      className="wizard-input wizard-select"
+                      value={deepseekVoice}
+                      disabled={clearDeepseekKey}
+                      onChange={(event) =>
+                        setDeepseekVoice(event.target.value as DeepseekTtsVoiceId)
+                      }
+                    >
+                      {deepseekTtsVoices.map((voice) => (
+                        <option key={voice} value={voice}>
+                          {VOICE_LABELS[voice]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
+                  </div>
+                </Field>
+              </div>
+
+              {deepseekProviders.length === 0 && !deepseekProviderId && (
+                <p className="text-[0.68rem] leading-5 text-mist-600">
+                  还没有接入 DeepSeek 的模型提供商，可以在下方手动填写密钥。
+                </p>
+              )}
+
+              {!deepseekProviderId ? (
+                <Field label="API Key" htmlFor="settings-deepseek-tts-key" hint={deepseekKeyHint}>
+                  <InputShell
+                    icon={<KeyRound className="size-4" strokeWidth={1.7} />}
+                    trailing={
+                      <button
+                        type="button"
+                        onClick={() => setShowDeepseekKey((value) => !value)}
+                        className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
+                        aria-label={showDeepseekKey ? '隐藏 API Key' : '显示 API Key'}
+                      >
+                        {showDeepseekKey ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </button>
+                    }
+                  >
+                    <input
+                      id="settings-deepseek-tts-key"
+                      type={showDeepseekKey ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      value={deepseekKey}
+                      disabled={clearDeepseekKey}
+                      onChange={(event) => setDeepseekKey(event.target.value)}
+                      placeholder={
+                        deepseek?.hasKey && !deepseekProviderId && !clearDeepseekKey
+                          ? '留空保持已保存密钥'
+                          : 'sk-...'
+                      }
+                    />
+                  </InputShell>
+                </Field>
+              ) : (
+                <div className="rounded-xl border border-mist-100/[0.07] bg-ink-950/40 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-[0.78rem] text-mist-200">
+                      <KeyRound className="size-3.5 text-brass-300" />
+                      {boundProvider ? boundProvider.name : '已失效的提供商'}
+                    </span>
+                    <span className="font-mono text-[0.66rem] text-mist-600">
+                      {boundProvider ? boundProvider.keyHint : '—'}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-[0.68rem] leading-5 text-mist-600">
+                    {boundProvider
+                      ? `使用模型提供商里保存的密钥（${providerHost(boundProvider.baseUrl)}）；更换密钥只需在模型提供商里修改。`
+                      : '绑定的提供商已被删除，请重新选择或改为手动填写。'}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 border-t border-mist-100/[0.06] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="min-w-0 max-w-md flex-1 text-[0.68rem] leading-5 text-mist-600">
+                  保存前会调用一次真实合成，成功才写入；密钥只保存在服务端，清除后语音合成暂停使用。
+                </p>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+                  {deepseek?.hasKey && (
+                    <GhostButton
+                      type="button"
+                      onClick={() => setClearDeepseekKey((value) => !value)}
+                      className={[
+                        'h-11 whitespace-nowrap px-3.5 text-[0.72rem]',
+                        clearDeepseekKey
+                          ? 'border-brass-400/30 bg-brass-400/[0.08] text-brass-300'
+                          : 'hover:border-signal-400/30 hover:text-signal-400',
+                      ].join(' ')}
+                    >
+                      {clearDeepseekKey ? '恢复保留密钥' : '清除已保存密钥'}
+                    </GhostButton>
+                  )}
+                  <PrimaryButton
+                    type="button"
+                    onClick={handleSaveDeepseek}
+                    loading={saveDeepseekMutation.isPending}
+                    className="h-11 w-full whitespace-nowrap sm:w-auto sm:px-6"
+                  >
+                    {clearDeepseekKey ? '清除密钥' : '测试并保存'}
+                  </PrimaryButton>
+                </div>
+              </div>
             </div>
+          )}
+        </div>
 
-            <Field
-              label="语速"
-              htmlFor="settings-tts-speed"
-              hint="0.5 - 2"
-              error={errors.speed?.message}
-            >
-              <InputShell
-                icon={<Gauge className="size-4" strokeWidth={1.7} />}
-                invalid={Boolean(errors.speed)}
-              >
-                <input
-                  id="settings-tts-speed"
-                  type="number"
-                  inputMode="decimal"
-                  step={0.1}
-                  min={0.5}
-                  max={2}
-                  {...form.register('speed', { valueAsNumber: true })}
-                />
-              </InputShell>
-            </Field>
+        <aside className="flex min-w-0 flex-col rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Volume2 className="size-4 text-brass-300" strokeWidth={1.7} />
+              <h3 className="text-[0.82rem] font-medium text-mist-200">试听</h3>
+            </div>
+            <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] text-mist-600">
+              {PROVIDER_LABELS[provider]}
+            </span>
           </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              保存前会向{' '}
-              <span className="font-mono text-mist-500">{'{Endpoint}'}/audio/speech</span>{' '}
-              发起一次真实合成，成功才会写入。
-            </p>
-
-            {openai?.hasKey && (
-              <button
-                type="button"
-                onClick={() => setClearKey((value) => !value)}
-                className={[
-                  'rounded-lg border px-3 py-1.5 text-[0.68rem] transition',
-                  clearKey
-                    ? 'border-brass-400/30 bg-brass-400/[0.08] text-brass-300'
-                    : 'border-mist-100/[0.08] text-mist-600 hover:border-signal-400/30 hover:text-signal-400',
-                ].join(' ')}
-              >
-                {clearKey ? '恢复保留密钥' : '清除已保存密钥'}
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-3 border-t border-mist-100/[0.06] pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              密钥不会返回前端，清除后语音合成将暂停使用。
-            </p>
-            <PrimaryButton
-              type="submit"
-              loading={saveMutation.isPending}
-              className="h-11 w-full sm:w-auto sm:px-6"
-            >
-              {clearKey ? '清除密钥' : '测试并保存'}
-            </PrimaryButton>
-          </div>
-        </form>
-      ) : (
-        <div className="mt-6 space-y-5">
-          <p className="text-[0.72rem] leading-6 text-mist-500">
-            {'DeepSeek 内置语音使用官方地址 '}
-            <span className="font-mono text-mist-400">api.deepseek.com/v1/tools/tts</span>
-            {'，固定输出 WAV，单次最多 10,000 字；无需填写 Endpoint、模型或格式。'}
+          <p className="mt-1 text-[0.66rem] leading-5 text-mist-600">
+            使用已保存的配置合成一段短音频。
           </p>
 
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[0.7rem] font-medium uppercase tracking-[0.16em] text-mist-500">
-                凭据来源
-              </span>
-              <span className="flex items-center gap-1 text-[0.68rem] text-mist-600">
-                <KeyRound className="size-3" />
-                {deepseekProviders.length > 0 ? '可复用模型提供商' : '未接入 DeepSeek 提供商'}
-              </span>
-            </div>
-            <div className="relative">
-              <select
-                id="settings-deepseek-tts-provider"
-                aria-label="DeepSeek 凭据来源"
-                className="wizard-input wizard-select"
-                value={deepseekProviderId}
-                disabled={clearDeepseekKey || saveDeepseekMutation.isPending}
-                onChange={(event) => setDeepseekProviderId(event.target.value)}
-              >
-                <option value="">手动填写 API Key</option>
-                {deepseekProviders.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · {providerHost(item.baseUrl)} · {item.keyHint}
-                  </option>
-                ))}
-                {deepseekProviderId &&
-                  !deepseekProviders.some((item) => item.id === deepseekProviderId) && (
-                    <option value={deepseekProviderId}>已失效的提供商</option>
-                  )}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
-            </div>
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              {deepseekProviders.length > 0
-                ? '接入过 DeepSeek 的模型提供商可以直接复用密钥，密钥仍只在服务端读取。'
-                : '还没有接入 DeepSeek 的模型提供商，可以在下方手动填写密钥。'}
-            </p>
-          </div>
-
-          {!deepseekProviderId ? (
-            <Field label="API Key" htmlFor="settings-deepseek-tts-key" hint={deepseekKeyHint}>
-              <InputShell
-                icon={<KeyRound className="size-4" strokeWidth={1.7} />}
-                trailing={
-                  <button
-                    type="button"
-                    onClick={() => setShowDeepseekKey((value) => !value)}
-                    className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
-                    aria-label={showDeepseekKey ? '隐藏 API Key' : '显示 API Key'}
-                  >
-                    {showDeepseekKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                }
-              >
-                <input
-                  id="settings-deepseek-tts-key"
-                  type={showDeepseekKey ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  value={deepseekKey}
-                  disabled={clearDeepseekKey}
-                  onChange={(event) => setDeepseekKey(event.target.value)}
-                  placeholder={
-                    deepseek?.hasKey && !deepseekProviderId && !clearDeepseekKey
-                      ? '留空保持已保存密钥'
-                      : 'sk-...'
-                  }
-                />
-              </InputShell>
+          <form className="mt-3 flex flex-1 flex-col gap-3" onSubmit={handleTest} noValidate>
+            <Field
+              label="试听文本"
+              htmlFor="settings-tts-test-text"
+              error={testErrors.text?.message}
+            >
+              <textarea
+                id="settings-tts-test-text"
+                rows={3}
+                maxLength={500}
+                spellCheck={false}
+                disabled={!tts?.ready}
+                placeholder={tts?.ready ? '输入要试听的内容' : '保存并启用配置后即可试听'}
+                className="field-shell min-h-[4.5rem] w-full resize-y px-3 py-2.5 text-[0.8rem] leading-6 disabled:opacity-50"
+                {...testForm.register('text')}
+              />
             </Field>
-          ) : (
-            <div className="rounded-xl border border-mist-100/[0.07] bg-ink-950/40 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-[0.78rem] text-mist-200">
-                  <KeyRound className="size-3.5 text-brass-300" />
-                  {boundProvider ? boundProvider.name : '已失效的提供商'}
-                </span>
-                <span className="font-mono text-[0.66rem] text-mist-600">
-                  {boundProvider ? boundProvider.keyHint : '—'}
+
+            {preview ? (
+              <div className="space-y-1.5">
+                <audio controls src={preview.src} className="h-9 w-full" />
+                <span className="block font-mono text-[0.6rem] text-mist-600">
+                  {PROVIDER_LABELS[preview.provider]} · {preview.latencyMs}ms ·{' '}
+                  {(preview.byteSize / 1024).toFixed(1)} KB
                 </span>
               </div>
-              <p className="mt-1.5 text-[0.68rem] leading-5 text-mist-600">
-                {boundProvider
-                  ? `使用模型提供商里保存的密钥（${providerHost(boundProvider.baseUrl)}）；更换密钥只需在模型提供商里修改。`
-                  : '绑定的提供商已被删除，请重新选择或改为手动填写。'}
+            ) : (
+              <p className="text-[0.66rem] leading-5 text-mist-600">
+                {tts?.ready ? '合成结果会在这里播放。' : '请先保存并启用一份可用配置。'}
               </p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[0.7rem] font-medium uppercase tracking-[0.16em] text-mist-500">
-                音色
-              </span>
-              <span className="flex items-center gap-1 text-[0.68rem] text-mist-600">
-                <Mic className="size-3" />
-                voice_id
-              </span>
-            </div>
-            <div className="relative">
-              <select
-                id="settings-deepseek-tts-voice"
-                aria-label="DeepSeek 音色"
-                className="wizard-input wizard-select"
-                value={deepseekVoice}
-                disabled={clearDeepseekKey}
-                onChange={(event) => setDeepseekVoice(event.target.value as DeepseekTtsVoiceId)}
-              >
-                {deepseekTtsVoices.map((voice) => (
-                  <option key={voice} value={voice}>
-                    {VOICE_LABELS[voice]}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              保存前会调用一次真实合成，成功才会写入。
-            </p>
-
-            {deepseek?.hasKey && (
-              <button
-                type="button"
-                onClick={() => setClearDeepseekKey((value) => !value)}
-                className={[
-                  'rounded-lg border px-3 py-1.5 text-[0.68rem] transition',
-                  clearDeepseekKey
-                    ? 'border-brass-400/30 bg-brass-400/[0.08] text-brass-300'
-                    : 'border-mist-100/[0.08] text-mist-600 hover:border-signal-400/30 hover:text-signal-400',
-                ].join(' ')}
-              >
-                {clearDeepseekKey ? '恢复保留密钥' : '清除已保存密钥'}
-              </button>
             )}
-          </div>
 
-          <div className="flex flex-col gap-3 border-t border-mist-100/[0.06] pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              密钥不会返回前端，清除后语音合成将暂停使用。
-            </p>
-            <PrimaryButton
-              type="button"
-              onClick={handleSaveDeepseek}
-              loading={saveDeepseekMutation.isPending}
-              className="h-11 w-full sm:w-auto sm:px-6"
+            <GhostButton
+              type="submit"
+              disabled={!tts?.ready || testMutation.isPending}
+              className="mt-auto h-10 w-full px-4 text-[0.75rem]"
             >
-              {clearDeepseekKey ? '清除密钥' : '测试并保存'}
-            </PrimaryButton>
-          </div>
-        </div>
-      )}
-
-      <form
-        className="mt-5 space-y-3 rounded-xl border border-mist-100/[0.07] bg-ink-950/40 p-4 sm:p-5"
-        onSubmit={handleTest}
-        noValidate
-      >
-        <div className="flex items-center gap-2">
-          <Volume2 className="size-4 text-brass-300" strokeWidth={1.7} />
-          <h3 className="text-[0.82rem] font-medium text-mist-200">试听</h3>
-          <span className="text-[0.66rem] text-mist-600">使用已保存的配置合成</span>
-        </div>
-
-        <Field label="试听文本" htmlFor="settings-tts-test-text" error={testErrors.text?.message}>
-          <textarea
-            id="settings-tts-test-text"
-            rows={2}
-            maxLength={500}
-            spellCheck={false}
-            disabled={!tts?.ready}
-            placeholder={tts?.ready ? '输入要试听的内容' : '保存并启用配置后即可试听'}
-            className="field-shell min-h-[3.5rem] w-full resize-y px-3 py-2.5 text-[0.82rem] leading-6 disabled:opacity-50"
-            {...testForm.register('text')}
-          />
-        </Field>
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {preview ? (
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <audio controls src={preview.src} className="h-9 w-full" />
-              <span className="font-mono text-[0.62rem] text-mist-600">
-                {PROVIDER_LABELS[preview.provider]} · {preview.latencyMs}ms ·{' '}
-                {(preview.byteSize / 1024).toFixed(1)} KB
-              </span>
-            </div>
-          ) : (
-            <p className="text-[0.68rem] leading-5 text-mist-600">
-              {tts?.ready ? '合成结果会在这里播放。' : '请先保存并启用一份可用配置。'}
-            </p>
-          )}
-          <GhostButton
-            type="submit"
-            disabled={!tts?.ready || testMutation.isPending}
-            className="h-10 w-full shrink-0 px-5 text-[0.78rem] sm:w-auto"
-          >
-            <Volume2 className="size-3.5" />
-            {testMutation.isPending ? '合成中…' : '合成试听'}
-          </GhostButton>
-        </div>
-      </form>
+              <Volume2 className="size-3.5" />
+              {testMutation.isPending ? '合成中…' : '合成试听'}
+            </GhostButton>
+          </form>
+        </aside>
+      </div>
     </section>
   );
 }

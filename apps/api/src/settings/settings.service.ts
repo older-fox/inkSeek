@@ -29,12 +29,15 @@ import {
   type ToolTokenResult,
   type VisionModelInput,
   type VisionModelResult,
+  type VisionRedescribeInput,
+  type VisionRedescribeResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
 } from '@inkseek/shared';
 import { readToolMaxTokens } from '../ai/tool-tokens.js';
 import { TtsService } from '../ai/tts.service.js';
 import { VisionModelService } from '../ai/vision-model.service.js';
+import { ImageDescriptionService } from '../chat/image-description.service.js';
 import { BilibiliAuthService } from '../config/bilibili-auth.service.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
@@ -60,6 +63,7 @@ export class SettingsService {
     private readonly phone: PhoneService,
     private readonly tts: TtsService,
     private readonly visionModel: VisionModelService,
+    private readonly imageDescriptions: ImageDescriptionService,
   ) {}
 
   /** Reads every settings block in parallel; secrets are reduced to hints before returning. */
@@ -112,6 +116,60 @@ export class SettingsService {
   /** Runs a bundled-image probe and stores the target only when the model can see. */
   async updateVisionModel(input: VisionModelInput): Promise<VisionModelResult> {
     return this.visionModel.save(input);
+  }
+
+  /**
+   * Re-runs the vision model over stored image descriptions in bounded batches.
+   * Rows are ordered by id, so the caller passes nextCursor back until remaining
+   * reaches zero; media with no owning message (forward-only) are skipped.
+   */
+  async redescribeVisionImages(input: VisionRedescribeInput): Promise<VisionRedescribeResult> {
+    const cursor = input.cursor.trim();
+    const rows = await this.prisma.chatMediaObject.findMany({
+      where: {
+        description: { not: null },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: input.limit,
+      select: {
+        id: true,
+        images: {
+          where: { messageId: { not: null } },
+          take: 1,
+          select: { url: true, message: { select: { channelId: true } } },
+        },
+      },
+    });
+
+    const failures: VisionRedescribeResult['failures'] = [];
+    let processed = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      const asset = row.images[0];
+      const channelId = asset?.message?.channelId;
+      if (!asset || !channelId) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await this.imageDescriptions.describeForScene(channelId, asset.url, undefined, true);
+        processed += 1;
+      } catch (error) {
+        failures.push({
+          mediaId: row.id,
+          message: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+        });
+      }
+    }
+
+    const nextCursor = rows.at(-1)?.id ?? null;
+    const remaining = nextCursor
+      ? await this.prisma.chatMediaObject.count({
+          where: { description: { not: null }, id: { gt: nextCursor } },
+        })
+      : 0;
+    return { processed, skipped, failures, nextCursor, remaining };
   }
 
   /** Normalizes and stores the list; an empty list is persisted and disables filtering. */
