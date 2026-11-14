@@ -8,10 +8,24 @@ import {
 } from '@inkseek/shared';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { LlmService } from '../ai/llm.service.js';
 import { readVisionTarget } from '../ai/vision-model.service.js';
 import { truncateText } from '../common/text.js';
@@ -67,6 +81,19 @@ export interface MindToolContext {
 
 /** Promisified child_process.execFile, used for ffmpeg image downscaling. */
 const execFileAsync = promisify(execFile);
+
+/** Base directory for `file.act`; each channel gets its own subtree under it and nothing is ever executed. */
+const PRIVATE_FILE_BASE = resolve(
+  fileURLToPath(new URL('../../../../data/private/', import.meta.url)),
+);
+/** Channel ids come from the DB as cuids; this keeps a bad row from escaping the base directory. */
+const PRIVATE_CHANNEL_ID = /^[A-Za-z0-9_-]{1,64}$/u;
+const MAX_PRIVATE_WRITE_BYTES = 256 * 1024;
+const MAX_PRIVATE_READ_BYTES = 256 * 1024;
+/** Tool results are capped at 2500 chars in the prompt, so one read page stays below that. */
+const MAX_PRIVATE_READ_CHARS = 2200;
+const MAX_PRIVATE_LIST_ENTRIES = 200;
+const PRIVATE_PATH_BAD_SEGMENT = /[\\:*?"<>|]/u;
 
 const DRY_RUN_BLOCKED_TOOLS = new Set([
   'memory.create',
@@ -241,6 +268,7 @@ export const MIND_TOOL_MENU: readonly { name: string; hint: string }[] = [
     hint: '改一条未结意图，用来合并重复（id/seed/need/urgency/confidence/risk/earliestAt）',
   },
   { name: 'intention.cancel', hint: '取消一条过时或不想说的意图（id/reason）' },
+  { name: 'file.act', hint: '增删改查本渠道的私有文件（data/private，action/path/content?，不能执行）' },
   { name: 'self.state', hint: '读心情/精力/压力等当前状态（无参数）' },
   { name: 'self.attributes.list', hint: '列出自身属性键（无参数）' },
   { name: 'self.attributes.get', hint: '读自身属性的值（keys）' },
@@ -622,6 +650,19 @@ export const MIND_TOOL_CATALOG = [
     },
   },
   {
+    name: 'file.act',
+    description:
+      '增删改查自己在本渠道的私有目录（data/private 下按渠道隔离）：list 列目录、read 读文本（分页）、write 新建或覆盖（append=true 追加）、delete 删除文件或空目录。path 必须是相对路径，不能越出本渠道目录，也看不到别的渠道的文件；只处理文本，单次写入最多 256KB，读取最多返回约 2200 字，用 nextOffset 接着读。没有执行能力，不能运行任何程序。',
+    input: {
+      action: 'list|read|write|delete',
+      path: 'string? 相对本渠道私有目录的路径；list 省略表示根目录',
+      content: 'string? write 时写入的文本',
+      append: 'boolean? write 时改为追加',
+      offset: 'number? read 起始字符位置，默认 0；接上一页时传 nextOffset',
+      maxChars: 'number? read 这一页最多返回的字符数，200-2200，默认 1800',
+    },
+  },
+  {
     name: 'time.now',
     description: '读取现在的本地时间。',
     input: {},
@@ -812,6 +853,8 @@ export class MindToolsService {
         return this.intentionUpdate(args, context);
       case 'intention.cancel':
         return this.intentionCancel(args, context);
+      case 'file.act':
+        return this.fileAct(args, context);
       case 'self.state':
         return stateSummary(context.state);
       case 'self.attributes.list':
@@ -2060,6 +2103,169 @@ export class MindToolsService {
     return { id: updated.id, status: updated.status, feedback: updated.feedback };
   }
 
+  /**
+   * CRUD for the persona's private scratch directory, isolated under
+   * data/private/<channelId>. Paths are resolved inside that subtree, symlinks
+   * are refused, and there is deliberately no action that could execute a file.
+   */
+  private async fileAct(args: Record<string, unknown>, context: MindToolContext) {
+    const action = readString(args['action']).trim().toLowerCase();
+    if (!['list', 'read', 'write', 'delete'].includes(action)) {
+      throw new Error('action 只能是 list/read/write/delete');
+    }
+    if (context.dryRun && (action === 'write' || action === 'delete')) {
+      return {
+        dryRun: true,
+        blocked: true,
+        note: '试跑模式不写文件：这次调用被跳过，可以当作已经完成来继续规划。',
+      };
+    }
+    const root = privateRootForChannel(context.scene.persona.channelId);
+    const target = resolvePrivateFilePath(root, args['path']);
+    await assertPrivateFilePath(root, target.absolute);
+
+    if (action === 'list') {
+      const info = await stat(target.absolute).catch(() => null);
+      if (!info) {
+        throw new Error(`目录不存在：${target.relativePath || '/'}`);
+      }
+      if (!info.isDirectory()) {
+        throw new Error('这不是目录；读取文件请用 action=read');
+      }
+      const dirents = await readdir(target.absolute, { withFileTypes: true });
+      dirents.sort(
+        (left, right) =>
+          Number(right.isDirectory()) - Number(left.isDirectory()) ||
+          left.name.localeCompare(right.name, 'zh-CN'),
+      );
+      const visible = dirents.slice(0, MAX_PRIVATE_LIST_ENTRIES);
+      const entries = await Promise.all(
+        visible.map(async (entry) => {
+          const child = join(target.absolute, entry.name);
+          const childInfo = await lstat(child).catch(() => null);
+          const type = entry.isDirectory()
+            ? 'dir'
+            : entry.isSymbolicLink()
+              ? 'symlink'
+              : 'file';
+          return {
+            name: entry.name,
+            path: [target.relativePath, entry.name].filter(Boolean).join('/'),
+            type,
+            size: childInfo?.isFile() ? childInfo.size : undefined,
+            modifiedAt: childInfo ? childInfo.mtime.toISOString() : undefined,
+          };
+        }),
+      );
+      return {
+        action,
+        path: target.relativePath || '.',
+        entries,
+        total: dirents.length,
+        truncated: dirents.length > entries.length,
+      };
+    }
+
+    if (!target.relativePath) {
+      throw new Error(`${action} 需要 path（相对 data/private 的路径）`);
+    }
+
+    if (action === 'read') {
+      const info = await stat(target.absolute).catch(() => null);
+      if (!info) {
+        throw new Error(`文件不存在：${target.relativePath}`);
+      }
+      if (info.isDirectory()) {
+        throw new Error('这是目录；查看目录请用 action=list');
+      }
+      if (!info.isFile()) {
+        throw new Error('只能读取普通文件');
+      }
+      const maxChars = Math.round(
+        clamp(readNumber(args['maxChars'], 1800), 200, MAX_PRIVATE_READ_CHARS),
+      );
+      const offset = Math.max(0, Math.round(readNumber(args['offset'], 0)));
+      const byteLimit = Math.min(info.size, MAX_PRIVATE_READ_BYTES);
+      const handle = await open(target.absolute, 'r');
+      let buffer: Buffer;
+      try {
+        const chunk = Buffer.alloc(byteLimit);
+        const { bytesRead } = await handle.read(chunk, 0, byteLimit, 0);
+        buffer = chunk.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+      if (buffer.includes(0)) {
+        throw new Error('这是二进制文件，不能按文本读取');
+      }
+      const chars = [...buffer.toString('utf8')];
+      const end = offset + maxChars;
+      const content = chars.slice(offset, end).join('');
+      return {
+        action,
+        path: target.relativePath,
+        content,
+        offset,
+        nextOffset: end < chars.length ? end : null,
+        size: info.size,
+        truncated: info.size > buffer.length || end < chars.length,
+        modifiedAt: info.mtime.toISOString(),
+      };
+    }
+
+    if (action === 'write') {
+      if (typeof args['content'] !== 'string') {
+        throw new Error('content 必须是字符串');
+      }
+      const content = args['content'];
+      const append = args['append'] === true;
+      const bytes = Buffer.byteLength(content, 'utf8');
+      if (bytes > MAX_PRIVATE_WRITE_BYTES) {
+        throw new Error(`单次写入不能超过 ${MAX_PRIVATE_WRITE_BYTES} 字节`);
+      }
+      const existing = await stat(target.absolute).catch(() => null);
+      if (existing?.isDirectory()) {
+        throw new Error('目标是目录，不能写入');
+      }
+      if (existing && !existing.isFile()) {
+        throw new Error('只能写入普通文件');
+      }
+      if (append && existing && existing.size + bytes > MAX_PRIVATE_WRITE_BYTES) {
+        throw new Error('追加后文件会超过 256KB');
+      }
+      await mkdir(dirname(target.absolute), { recursive: true });
+      await writeFile(target.absolute, content, {
+        encoding: 'utf8',
+        flag: append ? 'a' : 'w',
+      });
+      return {
+        action,
+        path: target.relativePath,
+        bytes,
+        created: !existing,
+        appended: append,
+      };
+    }
+
+    const info = await lstat(target.absolute).catch(() => null);
+    if (!info) {
+      throw new Error(`文件不存在：${target.relativePath}`);
+    }
+    if (info.isDirectory()) {
+      const children = await readdir(target.absolute);
+      if (children.length > 0) {
+        throw new Error('目录不为空；先删除里面的文件，再删空目录');
+      }
+      await rmdir(target.absolute);
+      return { action, path: target.relativePath, deleted: 'dir' };
+    }
+    if (!info.isFile()) {
+      throw new Error('只能删除普通文件或空目录');
+    }
+    await unlink(target.absolute);
+    return { action, path: target.relativePath, deleted: 'file' };
+  }
+
   /** Batch-resolves PERSON/GROUP target ids to display names via contact and conversation lookups. */
   private async intentionTargetNames(
     rows: readonly { targetType: string; targetId: string }[],
@@ -2094,6 +2300,77 @@ export class MindToolsService {
       ...contacts.map((contact) => [contact.id, contact.nickname] as const),
       ...groups.map((group) => [group.id, group.name] as const),
     ]);
+  }
+}
+
+/** Resolves the calling channel's isolated subtree below data/private. */
+function privateRootForChannel(channelId: string): string {
+  if (!PRIVATE_CHANNEL_ID.test(channelId)) {
+    throw new Error('当前渠道没有可用的私有目录标识');
+  }
+  return resolve(PRIVATE_FILE_BASE, channelId);
+}
+
+/** Lexical resolution of a model-supplied path inside the channel subtree; rejects traversal and absolute paths. */
+function resolvePrivateFilePath(
+  root: string,
+  raw: unknown,
+): { absolute: string; relativePath: string } {
+  const input = readString(raw).trim();
+  if (input.includes('\0')) {
+    throw new Error('路径包含非法字符');
+  }
+  if (input.startsWith('/') || input.startsWith('\\') || /^[a-zA-Z]:/u.test(input)) {
+    throw new Error('path 必须是相对当前渠道私有目录的路径');
+  }
+  const segments = input
+    .split(/[\\/]+/u)
+    .filter((part) => part.length > 0 && part !== '.');
+  for (const part of segments) {
+    if (part === '..') {
+      throw new Error('路径不能包含 ..');
+    }
+    if (part.length > 120) {
+      throw new Error('单段路径过长');
+    }
+    if (PRIVATE_PATH_BAD_SEGMENT.test(part)) {
+      throw new Error(`文件名包含非法字符：${part}`);
+    }
+  }
+  const absolute = resolve(root, ...segments);
+  if (absolute !== root && !absolute.startsWith(root + sep)) {
+    throw new Error('路径越出当前渠道私有目录');
+  }
+  return { absolute, relativePath: segments.join('/') };
+}
+
+/** Refuses any existing symlink on the way to the target and verifies the real path stays inside the root. */
+async function assertPrivateFilePath(root: string, absolute: string): Promise<void> {
+  await mkdir(root, { recursive: true });
+  const rootReal = await realpath(root);
+  const rel = relative(root, absolute);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error('路径越出当前渠道私有目录');
+  }
+  let cursor = root;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    cursor = join(cursor, part);
+    const info = await lstat(cursor).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    });
+    if (!info) {
+      break;
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error('不允许操作符号链接');
+    }
+  }
+  const targetReal = await realpath(absolute).catch(() => null);
+  if (targetReal && targetReal !== rootReal && !targetReal.startsWith(rootReal + sep)) {
+    throw new Error('路径指向渠道私有目录之外');
   }
 }
 
