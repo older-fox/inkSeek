@@ -89,6 +89,17 @@ export interface TtsSettings {
   updatedAt: string;
 }
 
+export interface WebSearchSettings {
+  /** Empty means web search is disabled; no fallback provider is called. */
+  endpoint: string;
+  hasKey: boolean;
+  updatedAt: string;
+}
+
+export interface WebSearchSettingsResult {
+  webSearch: WebSearchSettings;
+}
+
 export interface PhoneDeviceInfo {
   serial: string;
   state: string;
@@ -121,6 +132,8 @@ export interface SettingsOverview {
   maxTokens: number;
   /** Dedicated model for image reading; empty means the default provider/model. */
   visionModel: VisionModelSettings;
+  /** Configured search endpoint; null means web search is turned off. */
+  webSearch: WebSearchSettings | null;
   /** Global banned words applied to every channel's mind prompt. */
   mindBannedWords: string[];
   /** Hosts the mind may read even when they resolve to private addresses. */

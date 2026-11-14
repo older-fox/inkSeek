@@ -26,14 +26,22 @@ export interface WebReadResult {
 }
 
 const CACHE_TTL_SECONDS = 900;
+const SEARCH_TIMEOUT_MS = 8_000;
+const FAILURE_TTL_MS = 60_000;
+const FAILURE_CACHE_LIMIT = 200;
 const READ_TIMEOUT_MS = 10_000;
 const READ_MAX_BYTES = 1_000_000;
 const READ_MAX_TEXT = 5000;
 const READ_MAX_REDIRECTS = 3;
+const NOT_CONFIGURED_NOTE =
+  '网页搜索未配置：请在设置 → 网页搜索里填写 Endpoint；直接读网页仍可用 web.read';
+const UNAVAILABLE_NOTE = '网页搜索暂时不可用，稍后再试';
 
 @Injectable()
 export class WebSearchService {
   private readonly logger = new Logger(WebSearchService.name);
+  /** Query keys whose last attempt failed; retried only after a short TTL. */
+  private readonly failures = new Map<string, number>();
 
   constructor(
     private readonly config: SystemConfigService,
@@ -41,9 +49,10 @@ export class WebSearchService {
   ) {}
 
   /**
-   * Searches via the configured endpoint or the keyless DuckDuckGo fallback,
-   * caching results in Redis for 15 minutes (best-effort). Failures degrade to
-   * an empty disabled response rather than throwing.
+   * Searches through the operator-configured endpoint and caches results in
+   * Redis for 15 minutes (best-effort). Without an endpoint web search stays
+   * off instead of calling a public fallback nobody can reach. Failures are
+   * remembered briefly so one dead endpoint cannot stall every turn.
    */
   async search(query: string, limit = 5): Promise<WebSearchResponse> {
     const trimmed = query.trim();
@@ -61,13 +70,20 @@ export class WebSearchService {
       // Redis is best-effort.
     }
 
+    const failureUntil = this.failures.get(cacheKey);
+    if (failureUntil && failureUntil > Date.now()) {
+      return { enabled: false, results: [], note: UNAVAILABLE_NOTE };
+    }
+    this.failures.delete(cacheKey);
+
     try {
-      const config = await this.config.get<Record<string, unknown>>('mind.webSearch');
-      const endpoint = readString(config?.['endpoint']);
+      const config = await this.config.get<Record<string, unknown>>(CONFIG_KEYS.mindWebSearch);
+      const endpoint = readString(config?.['endpoint']).trim();
+      if (!endpoint) {
+        return { enabled: false, results: [], note: NOT_CONFIGURED_NOTE };
+      }
       const apiKey = readString(config?.['apiKey']);
-      const results = endpoint
-        ? await this.searchEndpoint(endpoint, apiKey, trimmed, limit)
-        : await this.searchDuckDuckGo(trimmed, limit);
+      const results = await this.searchEndpoint(endpoint, apiKey, trimmed, limit);
       const response: WebSearchResponse = { enabled: true, results };
       try {
         await this.cache.set(cacheKey, JSON.stringify(response), CACHE_TTL_SECONDS);
@@ -76,12 +92,9 @@ export class WebSearchService {
       }
       return response;
     } catch (error) {
+      this.rememberFailure(cacheKey);
       this.logger.warn(`网页搜索失败：${error instanceof Error ? error.message : String(error)}`);
-      return {
-        enabled: false,
-        results: [],
-        note: '网页搜索不可用，当前没有配置可用的搜索服务',
-      };
+      return { enabled: false, results: [], note: UNAVAILABLE_NOTE };
     }
   }
 
@@ -153,7 +166,7 @@ export class WebSearchService {
       : `${endpoint}${endpoint.includes('?') ? '&' : '?'}q=${encodeURIComponent(query)}&limit=${limit}`;
     const response = await fetch(url, {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new Error(`搜索接口返回 ${response.status}`);
@@ -162,39 +175,20 @@ export class WebSearchService {
     return normalizeResults(payload).slice(0, limit);
   }
 
-  /** Instant-answer API used when no endpoint is configured; abstract + related topics. */
-  private async searchDuckDuckGo(query: string, limit: number): Promise<WebSearchResult[]> {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-    if (!response.ok) {
-      throw new Error(`DuckDuckGo 返回 ${response.status}`);
-    }
-    const payload = (await response.json()) as Record<string, unknown>;
-    const results: WebSearchResult[] = [];
-    const abstract = readString(payload['AbstractText']);
-    if (abstract) {
-      results.push({
-        title: readString(payload['Heading'], query),
-        snippet: abstract,
-        url: readString(payload['AbstractURL']),
-      });
-    }
-    const related = Array.isArray(payload['RelatedTopics']) ? payload['RelatedTopics'] : [];
-    for (const item of related) {
-      if (results.length >= limit) break;
-      if (!item || typeof item !== 'object') continue;
-      const record = item as Record<string, unknown>;
-      const text = readString(record['Text']);
-      const firstUrl = readString(record['FirstURL']);
-      if (text) {
-        results.push({
-          title: text.slice(0, 80),
-          snippet: text,
-          url: firstUrl,
-        });
+  /** Records a failed query so the next attempts return immediately for a minute. */
+  private rememberFailure(key: string): void {
+    if (this.failures.size >= FAILURE_CACHE_LIMIT) {
+      const now = Date.now();
+      for (const [entryKey, until] of this.failures) {
+        if (until <= now) {
+          this.failures.delete(entryKey);
+        }
+      }
+      if (this.failures.size >= FAILURE_CACHE_LIMIT) {
+        this.failures.clear();
       }
     }
-    return results.slice(0, limit);
+    this.failures.set(key, Date.now() + FAILURE_TTL_MS);
   }
 }
 
@@ -248,7 +242,10 @@ export function normalizePublicUrl(value: string): URL {
  * private address. Hosts in the operator allowlist skip the check, which is
  * how split-horizon sites that only resolve internally stay readable.
  */
-export async function assertPublicHost(url: URL, allowedHosts: readonly string[] = []): Promise<void> {
+export async function assertPublicHost(
+  url: URL,
+  allowedHosts: readonly string[] = [],
+): Promise<void> {
   const host = url.hostname.trim().toLowerCase();
   if (isHostAllowed(host, allowedHosts)) {
     return;

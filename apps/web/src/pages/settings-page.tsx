@@ -12,6 +12,7 @@ import { TtsSettingsSection } from '@/components/tts-settings-section';
 import { ToolTokenSection } from '@/components/tool-token-section';
 import { VisionModelSection } from '@/components/vision-model-section';
 import { WebAccessSection } from '@/components/web-access-section';
+import { WebSearchSection } from '@/components/web-search-section';
 import { ApiError } from '@/lib/api';
 import { meQuery, settingsQuery } from '@/lib/queries';
 
@@ -75,7 +76,7 @@ export function SettingsPage() {
               设置
             </h1>
             <p className="mt-3 max-w-2xl text-[0.9rem] leading-7 text-mist-500">
-              维护缓存连接、手机控制、全局禁用词、语音合成、token
+              维护缓存连接、手机控制、全局禁用词、网页搜索、语音合成、token
               预算与识图模型。所有保存动作都会先进行真实连通性测试， 通过后才会落库。
             </p>
           </div>
@@ -149,6 +150,14 @@ export function SettingsPage() {
               transition={{ duration: 0.45, delay: 0.23, ease: [0.22, 1, 0.36, 1] }}
             >
               <WebAccessSection hosts={overview?.webAllowedHosts ?? []} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <WebSearchSection webSearch={overview?.webSearch ?? null} />
             </motion.div>
 
             <motion.div

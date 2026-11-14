@@ -79,6 +79,8 @@ import type {
   VisionModelResult,
   WebAllowedHostsInput,
   WebAllowedHostsResult,
+  WebSearchSettingsInput,
+  WebSearchSettingsResult,
 } from '@inkseek/shared';
 
 const API_BASE = '/api/v1';
@@ -187,6 +189,11 @@ export const api = {
     }),
   updateWebAllowedHosts: (input: WebAllowedHostsInput) =>
     request<WebAllowedHostsResult>('/settings/web-allowed-hosts', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateWebSearchSettings: (input: WebSearchSettingsInput) =>
+    request<WebSearchSettingsResult>('/settings/web-search', {
       method: 'PUT',
       body: JSON.stringify(input),
     }),

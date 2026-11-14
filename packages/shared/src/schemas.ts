@@ -63,6 +63,27 @@ export const visionModelSchema = z.object({
   model: z.string().trim().max(120, '模型名称过长').optional().default(''),
 });
 
+export const webSearchSettingsSchema = z.object({
+  endpoint: z
+    .string()
+    .trim()
+    .max(300, 'Endpoint 过长')
+    .refine((value) => {
+      if (!value) {
+        return true;
+      }
+      try {
+        const url = new URL(value);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    }, '请输入有效的 http(s) 地址')
+    .default(''),
+  apiKey: z.string().trim().max(512, 'API Key 过长').optional().default(''),
+  clearKey: z.boolean().optional().default(false),
+});
+
 export const webAllowedHostsSchema = z.object({
   hosts: z
     .array(z.string().trim().min(1, '域名不能为空').max(253, '单个域名最多 253 个字符'))
@@ -221,6 +242,7 @@ export type MindBannedWordsInput = z.infer<typeof mindBannedWordsSchema>;
 export type WebAllowedHostsInput = z.infer<typeof webAllowedHostsSchema>;
 export type ToolMaxTokensInput = z.infer<typeof toolMaxTokensSchema>;
 export type VisionModelInput = z.infer<typeof visionModelSchema>;
+export type WebSearchSettingsInput = z.infer<typeof webSearchSettingsSchema>;
 export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
 export type PhonePairInput = z.infer<typeof phonePairSchema>;
 export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;

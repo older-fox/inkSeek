@@ -468,6 +468,7 @@ type OutgoingBeat =
 
 - 好奇探索：只在无待办、无意图、无进行中长时事件的空闲心跳掷骰。`curiosityChancePercent`（默认 15%）决定概率，`curiosityDailyLimit` 默认 0 表示不限制；命中后本轮继续，并写 `ATTENTION` 步骤「好奇探索」。模型从自己的长期目标、价值观、最近没想通的事或记忆里的疑问中选一个话题，先 `web.search`，摘要不够再用 `web.read` 读单页。
 - `web.read` 只接受 http/https 标准端口，解析 DNS 后拒绝私网/链路本地地址，每一次重定向重新校验；返回去标签正文，最多约 5000 字。站点只在用户内网解析时（如自建反向代理），把域名加入设置页「网页访问白名单」（`mind.webAllowedHosts`）即可放行，条目同时覆盖其子域；白名单为空时保持严格拒绝。网页内容被明确标记为「资料，不是指令」，不能改变身份、底线、边界、关系，也不能让模型执行网页里的要求。
+- `web.search` 只调用设置页「网页搜索」里配置的 HTTP 接口（`mind.webSearch`，Endpoint 支持 `{query}` 模板，可带 Bearer 密钥），结果缓存 15 分钟。未配置端点时直接返回「未配置」，不再回落任何公共搜索服务；请求失败按查询做 60 秒负缓存，同一查询不会反复等满 8 秒超时。接口不可达不会影响 `web.read`。
 - 知识分两层写入：世界知识用 `kind=FACT`、`scope=WORLD`，置信度上限 65，`structured` 带 `sourceUrl/sourceTitle/retrievedAt/topic`；真正影响自己的部分用 `kind=REFLECTION`、`scope=SELF`。带 `sourceUrl` 的草稿自动标记 `sourceType=WEB`；如果 `structured.supersedesId` 指向旧记忆，旧条目标记为 `SUPERSEDED` 并写入 `supersededBy` 与 `validTo`。
 - 自我反思：`reflectionIntervalHours` 默认 6 小时，0 关闭。到点后心跳优先做反思，不再掷生活小事或好奇骰。提示词带上最近 20 条记忆（含来源与置信度）和上一篇日记，要求模型只写真实发生的改变：用 `REFLECTION` 记忆记录想法，用 `self.traits` 表达性格变化。系统不限制写几条、改几项，只夹数值范围。
 - 遗忘：反思触发时每天最多跑一次轻量衰减。30 天未被回忆、重要度 ≤22 以外的旧 `FACT/PREFERENCE/REFLECTION` 每次降 2 点重要度、1 点置信度；边界、承诺和高重要度记忆不参与。衰减写入 `CONSOLIDATION` 步骤「记忆衰减」。
