@@ -68,6 +68,8 @@ export interface SceneMessage {
   text: string;
   sentAt: string;
   images: string[];
+  /** Stable asset ids rendered beside descriptions so tools can reference an image exactly. */
+  imageRefs?: { id: string; description: string }[];
   /** Images present even when no description was generated. */
   imageCount: number;
   /** At-segment or poke targeting the persona's own account. */
@@ -827,11 +829,17 @@ export function formatSceneForPrompt(
         ? '我'
         : `${message.senderName}${message.replyToSelf ? '（回复我）' : ''}`;
       const images =
-        message.images.length > 0
-          ? `[图片：${message.images.join('；')}]`
-          : message.imageCount > 0
-            ? '[图片]'
-            : '';
+        message.imageRefs && message.imageRefs.length > 0
+          ? message.imageRefs
+              .map((ref) =>
+                ref.description ? `[图片#${ref.id}：${ref.description}]` : `[图片#${ref.id}]`,
+              )
+              .join(' ')
+          : message.images.length > 0
+            ? `[图片：${message.images.join('；')}]`
+            : message.imageCount > 0
+              ? '[图片]'
+              : '';
       const text = message.text.trim();
       // Image-only messages are not empty; avoid prefixing them with [空消息].
       const body =

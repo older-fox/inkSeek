@@ -233,7 +233,7 @@ export const MIND_TOOL_MENU: readonly { name: string; hint: string }[] = [
   { name: 'phone.photo', hint: '看一张相册照片并描述（id/focus）' },
   { name: 'sticker.search', hint: '按情绪或场景搜表情库（query/limit）' },
   { name: 'sticker.describe', hint: '重新识别一张表情（stickerId/focus）' },
-  { name: 'sticker.collect', hint: '把对话里的图片收进表情库（image/tags）' },
+  { name: 'sticker.collect', hint: '把对话里的图片收进表情库（image 传图片 id 或描述）' },
   { name: 'todo.create', hint: '明确邀请+答应后建待办（title/inviteMessageId/acceptMessageId）' },
   { name: 'intention.list', hint: '查未结/已结的待发意图（status/limit）' },
   {
@@ -541,8 +541,8 @@ export const MIND_TOOL_CATALOG = [
   {
     name: 'sticker.collect',
     description:
-      '把当前会话里收到的一张图片收进表情库。image 直接用对话里 [图片：描述] 的描述原文（也可传图片 URL）。',
-    input: { image: 'string（[图片：...] 的描述原文或图片 URL）', tags: 'string[]?' },
+      '把当前会话里收到的一张图片收进表情库。image 传对话里 [图片#id：描述] 的 id；没有 id 时传描述原文或图片 URL。',
+    input: { image: 'string（[图片#id] 的 id、描述原文或图片 URL）', tags: 'string[]?' },
   },
   {
     name: 'todo.create',
@@ -1819,11 +1819,11 @@ export class MindToolsService {
   private async stickerCollect(args: Record<string, unknown>, context: MindToolContext) {
     const image = readString(args['image']).trim();
     if (!image) {
-      throw new Error('image 不能为空；传对话里 [图片：...] 的描述原文');
+      throw new Error('image 不能为空；传对话里 [图片#id] 的 id');
     }
     const source = await this.resolveSceneImage(context, image);
     if (!source) {
-      throw new Error('只能收藏当前会话里出现过的图片；image 传 [图片：描述] 里的描述原文');
+      throw new Error('只能收藏当前会话里出现过的图片；image 传 [图片#id] 的 id 或描述原文');
     }
     const tags = readStringArray(args['tags'])
       .map((tag) => tag.trim())
@@ -1844,24 +1844,33 @@ export class MindToolsService {
   }
 
   /**
-   * Scene messages only carry vision descriptions, not media URLs, so the
-   * agent references a received image by the text after [图片：...]. Accept a
-   * URL too, but stay inside the current conversation to avoid pulling
-   * arbitrary channel media into the sticker library.
+   * Scene messages carry a stable asset id plus a vision description. Prefer
+   * the id, because the model often rewrites the description; fall back to an
+   * exact URL/description match, then to a contained description, and stay
+   * inside the current conversation to avoid pulling arbitrary channel media.
    */
   private async resolveSceneImage(
     context: MindToolContext,
     reference: string,
   ): Promise<{ mediaId?: string; imageUrl?: string } | null> {
     const conversationId = context.scene.conversation.id;
-    const exact = await this.prisma.chatImageAsset.findFirst({
-      where: {
-        message: { conversationId },
-        OR: [{ url: reference }, { media: { description: reference } }],
-      },
-      orderBy: { message: { sentAt: 'desc' } },
-      select: { mediaId: true, url: true },
-    });
+    const referenceId = reference.match(/\bc[a-z0-9]{20,30}\b/)?.[0] ?? '';
+    const byId = referenceId
+      ? await this.prisma.chatImageAsset.findFirst({
+          where: { id: referenceId, message: { conversationId } },
+          select: { mediaId: true, url: true },
+        })
+      : null;
+    const exact =
+      byId ??
+      (await this.prisma.chatImageAsset.findFirst({
+        where: {
+          message: { conversationId },
+          OR: [{ url: reference }, { media: { description: reference } }],
+        },
+        orderBy: { message: { sentAt: 'desc' } },
+        select: { mediaId: true, url: true },
+      }));
     const asset =
       exact ??
       (await this.prisma.chatImageAsset.findFirst({

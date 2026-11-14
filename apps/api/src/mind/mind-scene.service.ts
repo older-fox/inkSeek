@@ -28,6 +28,7 @@ const SELF_HISTORY_LIMIT = 12;
 
 type MessageWithAssets = ChatMessageRecord & {
   images: {
+    id: string;
     url: string;
     media: { description: string | null } | null;
   }[];
@@ -710,6 +711,10 @@ function toSceneMessage(row: MessageWithAssets, accountId: string): SceneMessage
   const images = row.images
     .map((image) => image.media?.description?.trim() || '')
     .filter((description) => description.length > 0);
+  const imageRefs = row.images.map((image) => ({
+    id: image.id,
+    description: image.media?.description?.trim() || '',
+  }));
   const voiceText = row.voices
     .map((voice) => voice.description?.trim() || '')
     .filter((description) => description.length > 0);
@@ -725,6 +730,7 @@ function toSceneMessage(row: MessageWithAssets, accountId: string): SceneMessage
     text,
     sentAt: row.sentAt.toISOString(),
     images,
+    imageRefs,
     imageCount: row.images.length,
     mentionedSelf: accountId.length > 0 && mentionsAccount(row.segments, accountId),
     replyToSelf:

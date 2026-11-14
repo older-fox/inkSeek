@@ -292,7 +292,7 @@ AI 腔治理（2026-11-14）：参照 lieflat-less-ai-tone 的去 AI 味语料�
 - `phone.photos` / `phone.photo`：从 MediaStore 列最近照片或视频（id/文件名/相册/日期/时长）；`phone.photo` 读取某张照片原图，必要时用 ffmpeg 缩到 1280 宽再交给视觉模型描述画面，不带 `focus` 时复用上次描述。
 - `sticker.search`：返回表情 `id`、描述、标签与相似度；`id` 直接作为 `beats[].stickerId`
 - `sticker.describe`：重新识别一张表情（可带 `focus`），新描述与向量写回 `StickerAsset`
-- `sticker.collect`：把本会话收到的图片收进表情库，`image` 传 `[图片：描述]` 的描述原文
+- `sticker.collect`：把本会话收到的图片收进表情库，`image` 传对话里 `[图片#id：描述]` 的 id（模型常会改写描述，所以以稳定 id 为主），id 缺失时才退回描述原文或图片 URL
 - `todo.create`：只有双方明确邀请并明确答应后才可写入
 - `intention.list`：查看未结/已结的待发意图，按紧迫度排序；用于新增前查重和整理旧念头
 - `intention.update`：修改一条未结意图（seed/need/urgency/confidence/risk/earliestAt/expiresAt/目标），用来合并重复
@@ -359,7 +359,7 @@ type OutgoingBeat =
 
 主动消息：由 `AgentIntention` 驱动，经时间、关系、近况、连发、群规门控；主动发送本身不设每日数量上限，是否开口仍由人格按 `engage + beats` 判断。
 
-表情：本地 `StickerAsset`，按渠道隔离（`channelId` + `(channelId, sha256)` 唯一），文件名/视觉描述/标签做本地向量；检索按情绪、意图、关系、场景，且只在本渠道内检索；发送走现有媒体链路。人格想发表情时先 `sticker.search` 拿 `id`，在 `beats` 里写 `{"kind":"sticker","stickerId":"...","delayMs":800}`；表情作为独立图片气泡，可与文字气泡交替，一次回复最多一个。描述不准或想确认内容时可以 `sticker.describe` 带 `focus` 重新看图，新描述与向量写回数据库。人格可用 `sticker.collect` 把本会话收到的图片收进表情库（`image` 传 `[图片：描述]` 的描述原文）；心智页「表情库」只展示当前渠道里 TA 自己收藏的表情，不再展示渠道最近图片或本地目录扫描结果。
+表情：本地 `StickerAsset`，按渠道隔离（`channelId` + `(channelId, sha256)` 唯一），文件名/视觉描述/标签做本地向量；检索按情绪、意图、关系、场景，且只在本渠道内检索；发送走现有媒体链路。人格想发表情时先 `sticker.search` 拿 `id`，在 `beats` 里写 `{"kind":"sticker","stickerId":"...","delayMs":800}`；表情作为独立图片气泡，可与文字气泡交替，一次回复最多一个。描述不准或想确认内容时可以 `sticker.describe` 带 `focus` 重新看图，新描述与向量写回数据库。人格可用 `sticker.collect` 把本会话收到的图片收进表情库（`image` 传 `[图片#id]` 的 id，缺 id 时传描述原文或图片 URL）；心智页「表情库」只展示当前渠道里 TA 自己收藏的表情，不再展示渠道最近图片或本地目录扫描结果。
 
 ## 8. 心跳与待办
 
