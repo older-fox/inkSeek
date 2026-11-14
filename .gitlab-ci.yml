@@ -212,12 +212,4 @@ docker:image:
     DOCKER_REPO: $CI_REGISTRY_IMAGE
     DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/cache
 
-# 迁移镜像：常规版本升级由 runtime 容器启动时自动 `prisma migrate deploy`，无需手动跑。
-# 本镜像保留给手动/应急迁移（例如回滚后单独补迁移）：
-#   docker run --rm -e DATABASE_URL=... <registry>/<project>/migrate:<tag>
-docker:migrate:
-  extends: .docker_job
-  variables:
-    DOCKER_TARGET: migrate
-    DOCKER_REPO: $CI_REGISTRY_IMAGE/migrate
-    DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/migrate/cache
+# 迁移不需要单独镜像：runtime 容器启动时会自动执行 `prisma migrate deploy`。
