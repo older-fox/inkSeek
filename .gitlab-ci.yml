@@ -4,20 +4,29 @@
 # 所以镜像统一用 kaniko 在容器内构建并推送，不依赖 docker build。
 #
 # 加速地址（都可在项目 CI/CD Variables 里覆盖）：
-#   NODE_IMAGE             Docker Hub 加速（node:24-bookworm-slim）
+#   BASE_IMAGE_SOURCE      基础镜像的上游加速地址（node:24-bookworm-slim）
 #   NPM_REGISTRY           npm 加速
 #   APT_MIRROR             Debian apt 加速（运行镜像要装 nginx / ffmpeg / adb）
 #   PRISMA_ENGINES_MIRROR  Prisma 引擎下载加速
 #   KANIKO_IMAGE           kaniko 镜像（gcr.io 经 daocloud 加速）
 #
+# 基础镜像缓存：mirror:base 先把上游基础镜像逐字节复制到项目 registry
+# （<registry>/<project>/base/node:<tag>）。之后每次构建的 FROM 都指向这份副本，
+# 不再重复从第三方加速源拉取；基础镜像没变时该任务只做一次 manifest 存在性检查。
+# 需要刷新上游补丁时，删除 registry 里对应的 base/node 标签，或手动运行流水线并
+# 设置 FORCE_BASE_MIRROR=1。
+#
 # 触发：推送任意分支 / tag、页面手动运行、API 触发都会执行。
 
 stages:
+  - prepare
   - check
   - image
 
 variables:
-  NODE_IMAGE: docker.m.daocloud.io/library/node:24-bookworm-slim
+  BASE_IMAGE_SOURCE: docker.m.daocloud.io/library/node:24-bookworm-slim
+  BASE_IMAGE_NAME: node
+  BASE_IMAGE_TAG: 24-bookworm-slim
   NPM_REGISTRY: https://registry.npmmirror.com
   APT_MIRROR: http://mirrors.aliyun.com
   PRISMA_ENGINES_MIRROR: https://registry.npmmirror.com/-/binary/prisma
@@ -35,12 +44,66 @@ workflow:
       when: always
     - when: never
 
+# 把基础镜像复制到项目 registry。manifest 已存在时直接跳过，只有首次或删掉标签后
+# 才会真正从上游拉取并推送；之后每次流水线只做一次存在性检查，几秒完成。
+mirror:base:
+  stage: prepare
+  image:
+    name: $KANIKO_IMAGE
+    entrypoint: [""]
+  interruptible: true
+  retry:
+    max: 2
+  script:
+    - |
+      BUILD_BASE_IMAGE="$CI_REGISTRY_IMAGE/base/$BASE_IMAGE_NAME:$BASE_IMAGE_TAG"
+      repo_path="${CI_REGISTRY_IMAGE#"$CI_REGISTRY"/}/base/$BASE_IMAGE_NAME"
+      if [ "$FORCE_BASE_MIRROR" != "1" ]; then
+        # registry 走 Bearer challenge：先用 job token 换一个只带 pull 权限的令牌，
+        # 再 HEAD manifest。任何一步失败（网络/鉴权/标签不存在）都回到完整镜像复制。
+        server="${CI_SERVER_URL:-https://$CI_SERVER_HOST}"
+        auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+        token=$(busybox wget -q -O - \
+            --header="Authorization: Basic $auth" \
+            "$server/jwt/auth?service=container_registry&client_id=docker&offline_token=true&scope=repository:$repo_path:pull" \
+            2>/dev/null | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') || true
+        if [ -n "$token" ] && busybox wget -q --spider \
+            --header="Authorization: Bearer $token" \
+            --header="Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json" \
+            "https://$CI_REGISTRY/v2/$repo_path/manifests/$BASE_IMAGE_TAG"; then
+          echo "[ci] base image already mirrored: $BUILD_BASE_IMAGE"
+          exit 0
+        fi
+      fi
+      echo "[ci] mirroring $BASE_IMAGE_SOURCE -> $BUILD_BASE_IMAGE"
+    - mkdir -p /kaniko/.docker
+    - |
+      cat > /kaniko/.docker/config.json <<EOF
+      {"auths":{"$CI_REGISTRY":{"username":"$CI_REGISTRY_USER","password":"$CI_REGISTRY_PASSWORD"}}}
+      EOF
+    - |
+      mkdir -p /tmp/base-context
+      printf 'FROM %s\n' "$BASE_IMAGE_SOURCE" > /tmp/base-context/Dockerfile
+      /kaniko/executor \
+        --context dir:///tmp/base-context \
+        --dockerfile /tmp/base-context/Dockerfile \
+        --destination "$BUILD_BASE_IMAGE" \
+        --snapshot-mode=redo \
+        --image-download-retry=3 \
+        --push-retry=3
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
 # 便宜的检查放在镜像之前：PR 里类型错误不应该先花几分钟跑一次 kaniko。
 # 构建阶段会再次执行 pnpm build，但这里更早暴露问题，也覆盖 lint。
 check:typecheck:
   stage: check
+  # 基础镜像镜像化与检查互不依赖，check 不排队等 prepare。
+  needs: []
   image:
-    name: $NODE_IMAGE
+    name: $BASE_IMAGE_SOURCE
     entrypoint: [""]
   interruptible: true
   variables:
@@ -89,6 +152,8 @@ check:typecheck:
     DOCKER_CACHE_REPO: $CI_REGISTRY_IMAGE/cache
   script:
     - |
+      # FROM 指向 registry 内的基础镜像副本，避免每次从第三方加速源重新拉取。
+      BUILD_BASE_IMAGE="$CI_REGISTRY_IMAGE/base/$BASE_IMAGE_NAME:$BASE_IMAGE_TAG"
       dests="--destination ${DOCKER_REPO}:sha-${CI_COMMIT_SHORT_SHA}"
       if [ -n "$CI_COMMIT_TAG" ]; then
         dests="$dests --destination ${DOCKER_REPO}:${CI_COMMIT_TAG}"
@@ -116,7 +181,7 @@ check:typecheck:
         --context "$CI_PROJECT_DIR" \
         --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
         --target "$DOCKER_TARGET" \
-        --build-arg NODE_IMAGE="$NODE_IMAGE" \
+        --build-arg NODE_IMAGE="$BUILD_BASE_IMAGE" \
         --build-arg NPM_REGISTRY="$NPM_REGISTRY" \
         --build-arg APT_MIRROR="$APT_MIRROR" \
         --build-arg PRISMA_ENGINES_MIRROR="$PRISMA_ENGINES_MIRROR" \
