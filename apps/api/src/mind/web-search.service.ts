@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { lookup } from 'node:dns/promises';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { RedisCacheService } from '../redis/redis-cache.service.js';
-import { readString } from './mind.types.js';
-import { isHostAllowed, normalizeAllowedHosts } from './web-allowlist.js';
+import { MindBrowserService } from './mind-browser.service.js';
+import { normalizeAllowedHosts } from './web-allowlist.js';
+import { assertPublicHost, normalizePublicUrl } from './web-url.js';
 
 export interface WebSearchResult {
   title: string;
@@ -26,15 +26,12 @@ export interface WebReadResult {
 }
 
 const CACHE_TTL_SECONDS = 900;
-const SEARCH_TIMEOUT_MS = 8_000;
 const FAILURE_TTL_MS = 60_000;
 const FAILURE_CACHE_LIMIT = 200;
 const READ_TIMEOUT_MS = 10_000;
 const READ_MAX_BYTES = 1_000_000;
 const READ_MAX_TEXT = 5000;
 const READ_MAX_REDIRECTS = 3;
-const NOT_CONFIGURED_NOTE =
-  '网页搜索未配置：请在设置 → 网页搜索里填写 Endpoint；直接读网页仍可用 web.read';
 const UNAVAILABLE_NOTE = '网页搜索暂时不可用，稍后再试';
 
 @Injectable()
@@ -46,13 +43,14 @@ export class WebSearchService {
   constructor(
     private readonly config: SystemConfigService,
     private readonly cache: RedisCacheService,
+    private readonly browser: MindBrowserService,
   ) {}
 
   /**
-   * Searches through the operator-configured endpoint and caches results in
-   * Redis for 15 minutes (best-effort). Without an endpoint web search stays
-   * off instead of calling a public fallback nobody can reach. Failures are
-   * remembered briefly so one dead endpoint cannot stall every turn.
+   * Searches the live web through the headless browser's Bing results page and
+   * caches hits in Redis for 15 minutes (best-effort). No endpoint needs to be
+   * configured; failures are remembered briefly so one bad query cannot stall
+   * every turn.
    */
   async search(query: string, limit = 5): Promise<WebSearchResponse> {
     const trimmed = query.trim();
@@ -77,14 +75,12 @@ export class WebSearchService {
     this.failures.delete(cacheKey);
 
     try {
-      const config = await this.config.get<Record<string, unknown>>(CONFIG_KEYS.mindWebSearch);
-      const endpoint = readString(config?.['endpoint']).trim();
-      if (!endpoint) {
-        return { enabled: false, results: [], note: NOT_CONFIGURED_NOTE };
-      }
-      const apiKey = readString(config?.['apiKey']);
-      const results = await this.searchEndpoint(endpoint, apiKey, trimmed, limit);
-      const response: WebSearchResponse = { enabled: true, results };
+      const results = await this.browser.search(trimmed, limit);
+      const response: WebSearchResponse = {
+        enabled: true,
+        results,
+        ...(results.length === 0 ? { note: '没有找到结果' } : {}),
+      };
       try {
         await this.cache.set(cacheKey, JSON.stringify(response), CACHE_TTL_SECONDS);
       } catch {
@@ -154,27 +150,6 @@ export class WebSearchService {
     throw new Error('网页重定向次数过多');
   }
 
-  /** Calls a configured search api via {query} template or appended query params. */
-  private async searchEndpoint(
-    endpoint: string,
-    apiKey: string,
-    query: string,
-    limit: number,
-  ): Promise<WebSearchResult[]> {
-    const url = endpoint.includes('{query}')
-      ? endpoint.replace('{query}', encodeURIComponent(query))
-      : `${endpoint}${endpoint.includes('?') ? '&' : '?'}q=${encodeURIComponent(query)}&limit=${limit}`;
-    const response = await fetch(url, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      throw new Error(`搜索接口返回 ${response.status}`);
-    }
-    const payload = (await response.json()) as unknown;
-    return normalizeResults(payload).slice(0, limit);
-  }
-
   /** Records a failed query so the next attempts return immediately for a minute. */
   private rememberFailure(key: string): void {
     if (this.failures.size >= FAILURE_CACHE_LIMIT) {
@@ -190,117 +165,6 @@ export class WebSearchService {
     }
     this.failures.set(key, Date.now() + FAILURE_TTL_MS);
   }
-}
-
-/** Coerces varied search payload shapes (arrays or wrapped lists) into results. */
-function normalizeResults(payload: unknown): WebSearchResult[] {
-  if (Array.isArray(payload)) {
-    return payload
-      .map((item) => {
-        if (!item || typeof item !== 'object') return null;
-        const record = item as Record<string, unknown>;
-        const title = readString(record['title'] ?? record['name']);
-        const snippet = readString(record['snippet'] ?? record['description'] ?? record['content']);
-        const url = readString(record['url'] ?? record['link']);
-        return title || snippet ? { title, snippet, url } : null;
-      })
-      .filter((item): item is WebSearchResult => item !== null);
-  }
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>;
-    const list = record['results'] ?? record['items'] ?? record['data'];
-    if (Array.isArray(list)) {
-      return normalizeResults(list);
-    }
-  }
-  return [];
-}
-
-/** SSRF url guard: http(s) only, standard ports, no credentials, hash dropped. */
-export function normalizePublicUrl(value: string): URL {
-  let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new Error('不是有效的网页地址');
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('只允许 http/https 地址');
-  }
-  if (url.username || url.password) {
-    throw new Error('网页地址不能带登录信息');
-  }
-  if (url.port && url.port !== '80' && url.port !== '443') {
-    throw new Error('只允许标准网页端口');
-  }
-  url.hash = '';
-  return url;
-}
-
-/**
- * Resolves the hostname and rejects localhost or any record pointing at a
- * private address. Hosts in the operator allowlist skip the check, which is
- * how split-horizon sites that only resolve internally stay readable.
- */
-export async function assertPublicHost(
-  url: URL,
-  allowedHosts: readonly string[] = [],
-): Promise<void> {
-  const host = url.hostname.trim().toLowerCase();
-  if (isHostAllowed(host, allowedHosts)) {
-    return;
-  }
-  if (!host || host === 'localhost' || host.endsWith('.localhost')) {
-    throw new Error('不能读取本地地址');
-  }
-  const addresses = await lookup(host, { all: true, verbatim: true });
-  if (addresses.length === 0) {
-    throw new Error('无法解析网页地址');
-  }
-  if (addresses.some((entry) => isPrivateAddress(entry.address))) {
-    throw new Error('不能读取内网地址（如确需访问，请在设置 → 网页访问 里加入该域名）');
-  }
-}
-
-/** True for loopback, RFC1918/link-local/CGNAT ranges and anything malformed. */
-function isPrivateAddress(address: string): boolean {
-  const value = address.trim().toLowerCase();
-  if (value.includes(':')) {
-    if (value.includes('::ffff:')) {
-      return true;
-    }
-    if (value === '::1' || value === '::') {
-      return true;
-    }
-    if (/^f[cd]/.test(value) || /^fe[89ab]/.test(value)) {
-      return true;
-    }
-    return false;
-  }
-  const parts = value.split('.').map(Number);
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
-    return true;
-  }
-  const [a = 0, b = 0] = parts;
-  if (a === 0 || a === 10 || a === 127 || a >= 224) {
-    return true;
-  }
-  if (a === 169 && b === 254) {
-    return true;
-  }
-  if (a === 172 && b >= 16 && b <= 31) {
-    return true;
-  }
-  if (a === 192 && b === 168) {
-    return true;
-  }
-  if (a === 100 && b >= 64 && b <= 127) {
-    return true;
-  }
-  return a === 198 && (b === 18 || b === 19);
 }
 
 /** Statuses that carry a Location header we must follow and re-validate ourselves. */

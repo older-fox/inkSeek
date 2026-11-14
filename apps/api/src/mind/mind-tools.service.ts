@@ -206,7 +206,7 @@ export const MIND_TOOL_MENU: readonly { name: string; hint: string }[] = [
     hint: '调整关系数值/称呼/边界/承诺（contactId/attributes/reason）',
   },
   { name: 'group.get', hint: '读当前群的状态和规则（无参数）' },
-  { name: 'web.search', hint: '搜索网页资料（query/limit）' },
+  { name: 'web.search', hint: '用无头浏览器搜索网页资料（query/limit）' },
   { name: 'web.read', hint: '打开网页读正文（url）' },
   { name: 'video.watch', hint: '看 B 站视频并记住内容（video/focus），同 ID 会缓存' },
   { name: 'video.comments', hint: '分页读 B 站视频评论（video/page?/sort?/limit?）' },

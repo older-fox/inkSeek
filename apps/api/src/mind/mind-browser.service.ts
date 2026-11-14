@@ -6,7 +6,7 @@ import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { readVisionTarget } from '../ai/vision-model.service.js';
 import { normalizeAllowedHosts } from './web-allowlist.js';
-import { assertPublicHost, normalizePublicUrl } from './web-search.service.js';
+import { assertPublicHost, normalizePublicUrl } from './web-url.js';
 
 export interface BrowserSnapshot {
   title: string;
@@ -14,6 +14,12 @@ export interface BrowserSnapshot {
   text: string;
   elements: string[];
   scroll: { y: number; height: number; viewport: number };
+}
+
+export interface BrowserSearchHit {
+  title: string;
+  snippet: string;
+  url: string;
 }
 
 export interface BrowserVisit {
@@ -38,6 +44,22 @@ const NAV_TIMEOUT_MS = 30_000;
 const MAX_VISITS = 60;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+/** Reserved session key so searches never mix with a persona's browsing tabs. */
+const SEARCH_SESSION = '__web_search__';
+const BING_SEARCH_URL = 'https://cn.bing.com/search?q=';
+const SEARCH_RESULTS_SCRIPT = String.raw`(() => {
+  const items = [...document.querySelectorAll('#b_results > li.b_algo')]
+    .filter((item) => !item.classList.contains('b_ad'));
+  return items.map((item) => {
+    const anchor = item.querySelector('h2 a');
+    const paragraph = item.querySelector('.b_caption p, .b_snippet, p');
+    return {
+      title: anchor ? anchor.innerText.trim() : '',
+      url: anchor ? anchor.href : '',
+      snippet: paragraph ? paragraph.innerText.trim() : '',
+    };
+  });
+})()`;
 
 const SNAPSHOT_SCRIPT = String.raw`(() => {
   for (const old of document.querySelectorAll('[data-mind-ref]')) {
@@ -140,6 +162,53 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
   /** Re-reads the current page's elements and text without navigating. */
   async snapshot(personaId: string): Promise<BrowserSnapshot> {
     return this.run(personaId, (session) => this.snapshotOf(session));
+  }
+
+  /**
+   * Runs one query on Bing's public results page and returns title/link/snippet
+   * hits. Search uses a reserved session so its tabs stay out of persona
+   * browsing, and results are read from the live DOM rather than an API.
+   */
+  async search(query: string, limit = 5): Promise<BrowserSearchHit[]> {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return [];
+    }
+    const count = Math.min(20, Math.max(limit + 3, 8));
+    const url = `${BING_SEARCH_URL}${encodeURIComponent(trimmed)}&count=${count}`;
+    return this.run(SEARCH_SESSION, async (session) => {
+      await session.page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+      await session.page.waitForSelector('#b_results', { timeout: 10_000 }).catch(() => undefined);
+      await session.page.waitForTimeout(500).catch(() => undefined);
+      const raw = (await session.page.evaluate(SEARCH_RESULTS_SCRIPT)) as unknown;
+      if (!Array.isArray(raw)) {
+        return [];
+      }
+      const seen = new Set<string>();
+      const results: BrowserSearchHit[] = [];
+      for (const item of raw) {
+        if (!item || typeof item !== 'object') {
+          continue;
+        }
+        const record = item as Record<string, unknown>;
+        const title = typeof record['title'] === 'string' ? record['title'].trim() : '';
+        const href = typeof record['url'] === 'string' ? record['url'].trim() : '';
+        const snippet = typeof record['snippet'] === 'string' ? record['snippet'].trim() : '';
+        if (!href || (!title && !snippet) || seen.has(href)) {
+          continue;
+        }
+        seen.add(href);
+        results.push({
+          title: title.slice(0, 200),
+          snippet: snippet.slice(0, 500),
+          url: href,
+        });
+        if (results.length >= limit) {
+          break;
+        }
+      }
+      return results;
+    });
   }
 
   /** Clicks a snapshotted element by ref or visible text, then re-snapshots once the page settles. */

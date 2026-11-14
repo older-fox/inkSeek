@@ -31,9 +31,6 @@ import {
   type VisionModelResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
-  type WebSearchSettings,
-  type WebSearchSettingsInput,
-  type WebSearchSettingsResult,
 } from '@inkseek/shared';
 import { readToolMaxTokens } from '../ai/tool-tokens.js';
 import { TtsService } from '../ai/tts.service.js';
@@ -77,7 +74,6 @@ export class SettingsService {
       tts,
       maxTokens,
       visionModel,
-      searchRecord,
     ] = await Promise.all([
       this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
       this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
@@ -92,7 +88,6 @@ export class SettingsService {
       this.tts.overview(),
       readToolMaxTokens(this.config),
       this.visionModel.overview(),
-      this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.mindWebSearch } }),
     ]);
 
     return {
@@ -103,7 +98,6 @@ export class SettingsService {
       tts,
       maxTokens,
       visionModel,
-      webSearch: toWebSearchSettings(searchRecord?.value, searchRecord?.updatedAt),
       mindBannedWords: readMindBannedWords(bannedRecord?.value),
       webAllowedHosts: normalizeAllowedHosts(allowedRecord?.value),
     };
@@ -132,29 +126,6 @@ export class SettingsService {
     const hosts = normalizeAllowedHosts(input.hosts);
     await this.config.set(CONFIG_KEYS.mindWebAllowedHosts, hosts);
     return { hosts };
-  }
-
-  /**
-   * Stores the search endpoint used by `web.search`. An empty endpoint turns the
-   * tool off; the previously saved key is reused unless cleared, and clearing
-   * the endpoint drops the key with it.
-   */
-  async updateWebSearch(input: WebSearchSettingsInput): Promise<WebSearchSettingsResult> {
-    const record = await this.prisma.systemConfig.findUnique({
-      where: { key: CONFIG_KEYS.mindWebSearch },
-    });
-    const existing = readWebSearchConfig(record?.value);
-    const endpoint = input.endpoint.trim();
-    const apiKey = endpoint ? (input.clearKey ? '' : input.apiKey?.trim() || existing.apiKey) : '';
-    const savedAt = new Date();
-    await this.config.set(CONFIG_KEYS.mindWebSearch, { endpoint, apiKey }, true);
-    return {
-      webSearch: {
-        endpoint,
-        hasKey: Boolean(apiKey),
-        updatedAt: savedAt.toISOString(),
-      },
-    };
   }
 
   /** Delegates validation and storage to the Bilibili service. */
@@ -369,34 +340,4 @@ function hasPrismaCode(error: unknown, code: string): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === code
   );
-}
-
-interface WebSearchConfig {
-  endpoint: string;
-  apiKey: string;
-}
-
-/** Tolerates malformed stored values; missing fields read as empty strings. */
-function readWebSearchConfig(value: unknown): WebSearchConfig {
-  const record =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  return {
-    endpoint: typeof record['endpoint'] === 'string' ? record['endpoint'].trim() : '',
-    apiKey: typeof record['apiKey'] === 'string' ? record['apiKey'].trim() : '',
-  };
-}
-
-/** Returns null when no endpoint is stored, which the UI renders as "off". */
-function toWebSearchSettings(value: unknown, updatedAt?: Date): WebSearchSettings | null {
-  const config = readWebSearchConfig(value);
-  if (!config.endpoint) {
-    return null;
-  }
-  return {
-    endpoint: config.endpoint,
-    hasKey: Boolean(config.apiKey),
-    updatedAt: (updatedAt ?? new Date()).toISOString(),
-  };
 }

@@ -25,7 +25,6 @@ import {
   toolMaxTokensSchema,
   visionModelSchema,
   webAllowedHostsSchema,
-  webSearchSettingsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
   type MindBannedWordsInput,
@@ -52,8 +51,6 @@ import {
   type VisionModelResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
-  type WebSearchSettingsInput,
-  type WebSearchSettingsResult,
 } from '@inkseek/shared';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { AuthGuard } from '../auth/auth.guard.js';
@@ -160,16 +157,6 @@ export class SettingsController {
     @Body(new ZodValidationPipe(webAllowedHostsSchema)) input: WebAllowedHostsInput,
   ): Promise<WebAllowedHostsResult> {
     return this.settings.updateWebAllowedHosts(input);
-  }
-
-  @Put('web-search')
-  @HttpCode(200)
-  @ApiOperation({ summary: '保存心智网页搜索接口；留空即关闭搜索（管理员）' })
-  /** The endpoint receives `q`/`limit` or a `{query}` template; keys stay server-side. */
-  updateWebSearch(
-    @Body(new ZodValidationPipe(webSearchSettingsSchema)) input: WebSearchSettingsInput,
-  ): Promise<WebSearchSettingsResult> {
-    return this.settings.updateWebSearch(input);
   }
 
   @Put('mind-banned-words')
