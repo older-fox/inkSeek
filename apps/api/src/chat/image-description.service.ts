@@ -1,6 +1,9 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { LlmService } from '../ai/llm.service.js';
+import { isVisionRefusal } from '../ai/vision-guards.js';
+import { readVisionTarget } from '../ai/vision-model.service.js';
+import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { ChatMediaService } from './chat-media.service.js';
 export interface ImageDescriptionInput {
@@ -26,7 +29,11 @@ export interface ImageDescriptionResult {
 const MAX_PROMPT_LENGTH = 4_000;
 const MAX_DESCRIPTION_LENGTH = 2_000;
 const DESCRIPTION_TEMPERATURE = 0.3;
-const DESCRIPTION_MAX_TOKENS = 800;
+/** Thinking models spend a few hundred tokens reasoning before answering. */
+const DESCRIPTION_MAX_TOKENS = 3_000;
+/** Failed images are retried after this window instead of on every scene build. */
+const FAILURE_TTL_MS = 120_000;
+const FAILURE_CACHE_LIMIT = 500;
 const SCENE_DESCRIPTION_PROMPT =
   '请用简洁的中文描述这张图片：先说明主体与场景，再补充关键细节（人物、动作、文字、表情、风格）；如果是表情包，说明它传达的情绪或含义。不要编造图片中没有的内容，控制在 120 字以内。';
 
@@ -36,13 +43,22 @@ const SCENE_DESCRIPTION_PROMPT =
  */
 @Injectable()
 export class ImageDescriptionService {
+  /** Recent failures and in-flight calls, keyed by channel + image hash. */
+  private readonly failures = new Map<string, { message: string; until: number }>();
+  private readonly inflight = new Map<string, Promise<ImageDescriptionResult>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly media: ChatMediaService,
     private readonly llm: LlmService,
+    private readonly config: SystemConfigService,
   ) {}
 
-  /** Describes the image behind a reference, reusing the stored description unless forced. */
+  /**
+   * Describes the image behind a reference, reusing the stored description
+   * unless forced. Concurrent requests for the same bytes share one model call,
+   * and a recent failure is replayed instead of burning tokens again.
+   */
   async describe(
     input: ImageDescriptionInput & { source?: string },
   ): Promise<ImageDescriptionResult> {
@@ -57,6 +73,42 @@ export class ImageDescriptionService {
     const dataUrl = await this.media.toDataUrl(input.channelId, input.reference);
     const image = parseImageDataUrl(dataUrl);
     const sha256 = createHash('sha256').update(image.buffer).digest('hex');
+    const key = `${input.channelId}:${sha256}`;
+
+    const failure = this.failures.get(key);
+    if (failure && failure.until > Date.now()) {
+      throw new BadGatewayException(failure.message);
+    }
+    this.failures.delete(key);
+
+    const running = this.inflight.get(key);
+    if (running) {
+      return running;
+    }
+
+    const task = this.describeOnce(input, prompt, image, sha256);
+    const tracked = task.finally(() => {
+      if (this.inflight.get(key) === tracked) {
+        this.inflight.delete(key);
+      }
+    });
+    this.inflight.set(key, tracked);
+    try {
+      return await tracked;
+    } catch (error) {
+      this.rememberFailure(key, error);
+      throw error;
+    }
+  }
+
+  /** One real attempt: cached description, blob row, then the vision call. */
+  private async describeOnce(
+    input: ImageDescriptionInput & { source?: string },
+    prompt: string,
+    image: { mimeType: string; base64: string; buffer: Buffer },
+    sha256: string,
+  ): Promise<ImageDescriptionResult> {
+    const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
     const existing = await this.prisma.chatMediaObject.findUnique({
       where: { sha256 },
       select: { id: true, description: true },
@@ -79,22 +131,47 @@ export class ImageDescriptionService {
       mediaId = stored?.mediaId ?? null;
     }
 
+    const vision = await readVisionTarget(this.config);
     const completion = await this.llm.complete({
       prompt,
       images: [{ mimeType: image.mimeType, base64: image.base64 }],
-      providerId: emptyToNull(input.providerId),
-      model: emptyToNull(input.model),
+      providerId: emptyToNull(input.providerId) ?? vision.providerId,
+      model: emptyToNull(input.model) ?? vision.model,
       temperature: DESCRIPTION_TEMPERATURE,
       maxTokens: DESCRIPTION_MAX_TOKENS,
       source: input.source?.trim() || 'chat.image-description',
       channelId: input.channelId,
     });
-    const description = truncate(completion.text.trim(), MAX_DESCRIPTION_LENGTH);
-    if (description.length === 0) {
-      throw new BadGatewayException('模型没有返回图片描述');
+    const raw = completion.text.trim();
+    // "抱歉，我无法查看这张图片" is not a description; storing it would be
+    // cached forever and poison every later scene that shows the image.
+    if (isVisionRefusal(raw)) {
+      throw new BadGatewayException(
+        raw ? `识图模型没有描述图片：${truncate(raw, 60)}` : '模型没有返回图片描述',
+      );
     }
+    const description = truncate(raw, MAX_DESCRIPTION_LENGTH);
 
     return { sha256, mediaId, description, cached: false };
+  }
+
+  /** Short-lived negative cache so a broken image is not re-billed every turn. */
+  private rememberFailure(key: string, error: unknown): void {
+    if (this.failures.size >= FAILURE_CACHE_LIMIT) {
+      const now = Date.now();
+      for (const [entryKey, entry] of this.failures) {
+        if (entry.until <= now) {
+          this.failures.delete(entryKey);
+        }
+      }
+      if (this.failures.size >= FAILURE_CACHE_LIMIT) {
+        this.failures.clear();
+      }
+    }
+    this.failures.set(key, {
+      message: error instanceof Error ? error.message : String(error),
+      until: Date.now() + FAILURE_TTL_MS,
+    });
   }
 
   /** Describes an image for the persona mind and persists the result. */

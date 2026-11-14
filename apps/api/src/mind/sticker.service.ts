@@ -4,7 +4,9 @@ import { access, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promis
 import { dirname, extname } from 'node:path';
 import type { StickerRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
+import { readVisionTarget } from '../ai/vision-model.service.js';
 import { channelMediaPath, channelMediaUrl, splitChannelMediaUrl } from '../chat/chat-paths.js';
+import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ChatMediaObject, StickerAsset } from '../generated/prisma/client.js';
 import { embedText, cosineSimilarity } from './mind-vector.js';
@@ -26,6 +28,7 @@ export class StickerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly config: SystemConfigService,
   ) {}
 
   /** Enabled stickers for one channel, most recently used first, capped at 300. */
@@ -250,12 +253,15 @@ export class StickerService {
     const prompt = focus
       ? `重新观察这个表情包，重点确认：${focus}。用一句简短中文描述它的内容、情绪和使用场景。只输出描述，不要解释。`
       : '用一句简短中文描述这个表情包的内容、情绪和使用场景。只输出描述，不要解释。';
+    const vision = await readVisionTarget(this.config);
     const completion = await this.llm.complete({
       prompt,
       system: '你是表情包标注器，输出一行中文。',
       images: [{ mimeType, base64: buffer.toString('base64') }],
+      providerId: vision.providerId,
+      model: vision.model,
       temperature: 0.2,
-      maxTokens: 100,
+      maxTokens: 1_500,
       source: 'mind.sticker',
       channelId,
     });

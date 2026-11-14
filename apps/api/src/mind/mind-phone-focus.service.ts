@@ -2,7 +2,12 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { MindSettingsRecord, PersonaFocusRecord } from '@inkseek/shared';
 import { LlmService } from '../ai/llm.service.js';
 import { PrismaService } from '../database/prisma.service.js';
-import { PhoneService, type PhoneActionInput, type PhoneScreen, type PhoneScreenshot } from '../phone/phone.service.js';
+import {
+  PhoneService,
+  type PhoneActionInput,
+  type PhoneScreen,
+  type PhoneScreenshot,
+} from '../phone/phone.service.js';
 import { MindFocusService } from './mind-focus.service.js';
 import { MindSettingsService } from './mind-settings.service.js';
 import { MindSituationService } from './mind-situation.service.js';
@@ -149,7 +154,13 @@ export class MindPhoneFocusService {
         { keepScreen: true },
       );
     }
-    return this.startFocus(personaId, channelId, goal?.trim() || DEFAULT_GOAL, 'MANUAL', conversationId);
+    return this.startFocus(
+      personaId,
+      channelId,
+      goal?.trim() || DEFAULT_GOAL,
+      'MANUAL',
+      conversationId,
+    );
   }
 
   /** End the current phone session on an explicit instruction ("别玩了"). */
@@ -287,8 +298,8 @@ export class MindPhoneFocusService {
       apps,
     });
 
-    /** One phone-decision call; the caller picks the cap because screenshots burn more. */
-    const ask = (text: string, maxTokens: number) =>
+    /** One phone-decision call; screenshots pass a larger cap, text-only uses the global ceiling. */
+    const ask = (text: string, maxTokens?: number) =>
       this.llm.complete({
         prompt: text,
         system:
@@ -297,21 +308,20 @@ export class MindPhoneFocusService {
         providerId: settings.providerId,
         model: settings.model,
         temperature: 0.5,
-        // Thinking models count reasoning against max_tokens; a 2000 cap came
-        // back as empty content (2000 completion tokens, no text) on a game
-        // screenshot, so leave room and retry once with a larger cap.
-        maxTokens,
+        // Thinking models count reasoning against the budget; a screenshot
+        // needs extra room, and the retry doubles it if the first pass starves.
+        ...(maxTokens ? { maxTokens } : {}),
         source: 'mind.phone',
         runId: runIdOf(state),
       });
 
     let completion;
     try {
-      completion = await ask(prompt, picture ? 4000 : 800);
+      completion = await ask(prompt, picture ? 4000 : undefined);
       if (!completion.text.trim()) {
         completion = await ask(
           `${prompt}\n\n上一次没有返回内容。请立刻只输出一段 JSON 动作，不要解释。`,
-          picture ? 6000 : 2000,
+          picture ? 6000 : undefined,
         );
       }
     } catch (error) {
@@ -394,7 +404,8 @@ export class MindPhoneFocusService {
 
     // One decision may carry several actions. They run in order without asking
     // the model again, so a match-3 batch costs one screenshot instead of five.
-    const executed: { action: string; input: PhoneActionInput; detail: string; reason: string }[] = [];
+    const executed: { action: string; input: PhoneActionInput; detail: string; reason: string }[] =
+      [];
     let failure = '';
     let slept = 0;
     for (const item of plannedSteps) {
@@ -542,7 +553,11 @@ export class MindPhoneFocusService {
     await this.states.update(
       personaId,
       { currentActivity: '玩手机' },
-      { reason: source === 'HEARTBEAT' ? '自己玩一会儿手机' : '开始玩手机', source: 'SYSTEM', runId: run.id },
+      {
+        reason: source === 'HEARTBEAT' ? '自己玩一会儿手机' : '开始玩手机',
+        source: 'SYSTEM',
+        runId: run.id,
+      },
     );
     return { ...focus, state: { ...readFocusState(focus), runId: run.id, source } };
   }
@@ -614,11 +629,13 @@ export class MindPhoneFocusService {
         ...(error ? { error } : {}),
       },
     });
-    await this.states.update(
-      focus.personaId,
-      { currentActivity: '' },
-      { reason: '玩完手机', source: 'SYSTEM', runId },
-    ).catch(() => undefined);
+    await this.states
+      .update(
+        focus.personaId,
+        { currentActivity: '' },
+        { reason: '玩完手机', source: 'SYSTEM', runId },
+      )
+      .catch(() => undefined);
     if (runId) {
       await this.prisma.agentRun
         .update({
@@ -643,7 +660,9 @@ export class MindPhoneFocusService {
             ...(extra?.completionTokens !== undefined
               ? { completionTokens: { increment: extra.completionTokens } }
               : {}),
-            ...(extra?.latencyMs !== undefined ? { latencyMs: { increment: extra.latencyMs } } : {}),
+            ...(extra?.latencyMs !== undefined
+              ? { latencyMs: { increment: extra.latencyMs } }
+              : {}),
           },
         })
         .catch(() => undefined);
@@ -828,7 +847,9 @@ function buildPhonePrompt(input: {
       : '',
     screenSection,
     `【最近动作】\n${history}`,
-    input.lastAction ? `【上一步】${input.lastAction}${input.lastReason ? `（${input.lastReason}）` : ''}` : '',
+    input.lastAction
+      ? `【上一步】${input.lastAction}${input.lastReason ? `（${input.lastReason}）` : ''}`
+      : '',
     input.board
       ? `【上次看到的棋盘】${input.boardAt ? `${elapsedLabel(input.boardAt)}前` : '上一步'}写的，换过牌或连锁后可能已经变了，以这次看到的为准：\n${input.board}`
       : '',
@@ -840,9 +861,7 @@ function buildPhonePrompt(input: {
       '- 除了 tap/swipe，还能用 long_press 长按、drag 拖拽、key 返回/主页/音量/媒体键、combo 组合键、type 输入英文、open 打开应用、stop 关闭应用、media 播放/暂停/切歌（key=play|pause|next|previous）、volume 调音量（direction=raise|lower 或 level=数字）、screen 点亮/熄灭屏幕（mode=on|off|toggle）。',
       '- 屏幕亮着才能看清界面；如果屏幕是黑的，先用 screen 加 mode=on 点亮再操作。持续亮屏也会耗电，玩完要记得关。',
       '- 每个动作可以带 settle（毫秒，默认 700，最多 4000）：执行后用这段时间等界面反应再执行下一个；消消乐换牌后要等连锁消除落定，一般 2000-3000。',
-      input.picture
-        ? '- 先看清截图里的画面、按钮和棋盘，再决定点哪里；看不清就滑动或等待。'
-        : '',
+      input.picture ? '- 先看清截图里的画面、按钮和棋盘，再决定点哪里；看不清就滑动或等待。' : '',
       '- 界面是消消乐这类格子棋盘时，可以用 board 把棋盘写成文字：每行一排、每格一个字符（数字或字母），再用一行图例说明每种字符是什么；换牌坐标照常用截图的相对坐标。',
       '- 输入只支持英文、数字和符号；中文请用手机自带输入法，不要用 type。',
       '- 遇到登录、支付、发布、删除、权限确认这类界面，不要继续操作，返回或结束。',
@@ -1019,7 +1038,10 @@ function readActionBatch(
 /** Models sometimes return the board as one escaped string, sometimes as rows. */
 function readBoard(value: unknown): string {
   if (Array.isArray(value)) {
-    return value.map((row) => readString(row)).filter(Boolean).join('\n');
+    return value
+      .map((row) => readString(row))
+      .filter(Boolean)
+      .join('\n');
   }
   return readString(value).replace(/\\n/gu, '\n');
 }

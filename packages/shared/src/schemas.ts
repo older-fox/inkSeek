@@ -54,6 +54,15 @@ export const mindBannedWordsSchema = z.object({
     .max(500, '最多 500 条禁用词'),
 });
 
+export const toolMaxTokensSchema = z.object({
+  maxTokens: z.number().int('请填写整数').min(256, '至少 256').max(200_000, '最多 200000'),
+});
+
+export const visionModelSchema = z.object({
+  providerId: z.string().trim().max(64, '提供商标识过长').optional().default(''),
+  model: z.string().trim().max(120, '模型名称过长').optional().default(''),
+});
+
 export const webAllowedHostsSchema = z.object({
   hosts: z
     .array(z.string().trim().min(1, '域名不能为空').max(253, '单个域名最多 253 个字符'))
@@ -66,7 +75,10 @@ export const phoneConnectSchema = z.object({
 
 export const phonePairSchema = z.object({
   address: z.string().trim().min(1, '请填写配对地址').max(120, '地址过长'),
-  code: z.string().trim().regex(/^\d{6}$/, '配对码是 6 位数字'),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, '配对码是 6 位数字'),
 });
 
 export const phoneDisconnectSchema = z.object({
@@ -207,6 +219,8 @@ export type RedisSettingsInput = z.infer<typeof redisSettingsSchema>;
 export type BilibiliSettingsInput = z.infer<typeof bilibiliSettingsSchema>;
 export type MindBannedWordsInput = z.infer<typeof mindBannedWordsSchema>;
 export type WebAllowedHostsInput = z.infer<typeof webAllowedHostsSchema>;
+export type ToolMaxTokensInput = z.infer<typeof toolMaxTokensSchema>;
+export type VisionModelInput = z.infer<typeof visionModelSchema>;
 export type PhoneConnectInput = z.infer<typeof phoneConnectSchema>;
 export type PhonePairInput = z.infer<typeof phonePairSchema>;
 export type PhoneDisconnectInput = z.infer<typeof phoneDisconnectSchema>;

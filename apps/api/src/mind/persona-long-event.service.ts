@@ -398,7 +398,6 @@ export class PersonaLongEventService {
         providerId: settings.providerId,
         model: settings.model,
         temperature: 0.2,
-        maxTokens: 220,
         timeoutMs: WAKE_JUDGE_TIMEOUT_MS,
         source: 'mind.long-event.wake',
       });
@@ -410,7 +409,6 @@ export class PersonaLongEventService {
           providerId: settings.providerId,
           model: settings.model,
           temperature: 0.1,
-          maxTokens: 220,
           timeoutMs: WAKE_JUDGE_TIMEOUT_MS,
           source: 'mind.long-event.wake',
         });
@@ -572,7 +570,6 @@ export class PersonaLongEventService {
         providerId: settings.providerId,
         model: settings.model,
         temperature: 0.4,
-        maxTokens: 700,
         timeoutMs: SETTLEMENT_TIMEOUT_MS,
         source: 'mind.long-event.settlement',
       });
@@ -584,7 +581,6 @@ export class PersonaLongEventService {
           providerId: settings.providerId,
           model: settings.model,
           temperature: 0.3,
-          maxTokens: 700,
           timeoutMs: SETTLEMENT_TIMEOUT_MS,
           source: 'mind.long-event.settlement',
         });
@@ -815,7 +811,12 @@ function suggestRest(input: {
 
 /** HH:MM in the target zone; falls back to server local time on bad zones. */
 function localClock(date: Date, timeZone?: string | null): string {
-  return formatZoned(date, timeZone, { hour: '2-digit', minute: '2-digit', hour12: false }, 'en-GB');
+  return formatZoned(
+    date,
+    timeZone,
+    { hour: '2-digit', minute: '2-digit', hour12: false },
+    'en-GB',
+  );
 }
 
 /** One-decimal hour count for prompt sentences. */

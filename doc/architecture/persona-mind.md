@@ -510,6 +510,8 @@ type OutgoingBeat =
 
 `ChatMindSettings.imageDescriptionPrompt` 覆盖心智补描述时的内置提示词（留空 = 内置默认）。它只影响尚未生成描述的图片：已有 `ChatMediaObject.description` 直接复用，改提示词不会触发重跑。
 
+识图模型单独配置：设置页「识图模型」把图片描述、手机识屏、网页截图、表情标注和视频抽帧统一指向 `SystemConfig` 的 `ai.visionModel`（`providerId`/`model`，留空跟随默认）。保存时用内置图片真实识别一次，模型回「无法查看这张图片」或返回空内容时拒绝保存。拒绝文案永远不会写入 `ChatMediaObject.description`；同一渠道同一 sha256 的失败进入 120 秒负缓存，并发请求合并成一次模型调用，避免反复烧额度。
+
 ## 10. API 与 UI
 
 API：
@@ -556,5 +558,6 @@ Web `/mind`：页面拆成「人格简报 + 8 个页签」，不再把配置塞�
 - 隐私防火墙；跨渠道记忆默认隔离。
 - 被动回复上限、静默时段、黑名单、急停开关。
 - 模型分层、注意力过滤、缓存、每日预算。
+- 单次调用 token 上限由 `SystemConfig` 的 `ai.maxTokens` 统一控制（设置页「工具最大 token 数」，默认 20,000）：所有调用方只能请求更小的值，未指定时直接使用该上限；思考模型的推理 token 也计入这笔额度。`finish_reason=length` 且正文为空时抛出 `AI_TOKEN_EXHAUSTED`，并报告推理占用的 token，而不是笼统报「没有返回内容」。
 - 心智 trace 回答「为什么回/不回、想起了什么、改了什么」。
 - 影子/审批模式用于灰度。

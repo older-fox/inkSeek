@@ -8,9 +8,11 @@ import {
 } from '@nestjs/common';
 import type { ModelProviderProtocol } from '@inkseek/shared';
 import { sanitizeText } from '../common/text.js';
+import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider } from '../generated/prisma/client.js';
 import { LlmCallLogService } from './llm-call-log.service.js';
+import { readToolMaxTokens } from './tool-tokens.js';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -53,12 +55,18 @@ export interface LlmCompletion {
   latencyMs: number;
   promptTokens?: number;
   completionTokens?: number;
+  /** Normalized stop reason; `length` means the budget ran out. */
+  finishReason?: string;
+  /** Reasoning tokens, counted inside `completionTokens` by thinking models. */
+  reasoningTokens?: number;
 }
 
 interface LlmUsage {
   text: string;
   promptTokens?: number;
   completionTokens?: number;
+  finishReason?: string;
+  reasoningTokens?: number;
 }
 
 interface ResolvedProvider {
@@ -81,6 +89,7 @@ export class LlmService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly promptLogs: LlmCallLogService,
+    private readonly config: SystemConfigService,
   ) {}
 
   /**
@@ -95,20 +104,32 @@ export class LlmService {
     const startedAt = performance.now();
     let provider: ResolvedProvider | null = null;
     let model: string | null = null;
+    let usage: LlmUsage | null = null;
 
     try {
       provider = await this.resolveProvider(input.providerId);
       model = this.resolveModel(provider, input.model);
-      const result = await this.requestCompletion(provider, model, input);
+      const maxTokens = await this.resolveMaxTokens(input.maxTokens);
+      usage = await this.requestCompletion(provider, model, input, maxTokens);
+      // A thinking model that spent the whole budget on reasoning returns 200
+      // with empty content; say so instead of letting callers report "no output".
+      if (usage.text.trim().length === 0 && usage.finishReason === 'length') {
+        throw new BadGatewayException({
+          code: 'AI_TOKEN_EXHAUSTED',
+          message: `模型把 ${maxTokens} 个 token 用完了${usage.reasoningTokens ? `（其中推理 ${usage.reasoningTokens}）` : ''}，没有留下正文；请提高「工具最大 token 数」或换用非思考模型`,
+        });
+      }
       const latencyMs = Math.round(performance.now() - startedAt);
       const completion: LlmCompletion = {
-        text: result.text,
+        text: usage.text,
         providerId: provider.id,
         providerName: provider.name,
         model,
         latencyMs,
-        promptTokens: result.promptTokens,
-        completionTokens: result.completionTokens,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        finishReason: usage.finishReason,
+        reasoningTokens: usage.reasoningTokens,
       };
       if (input.log !== false) {
         await this.promptLogs.record({
@@ -121,10 +142,12 @@ export class LlmService {
           model,
           system: input.system ?? '',
           prompt: input.prompt,
-          response: result.text,
+          response: usage.text,
           imageCount: input.images?.length ?? 0,
-          promptTokens: result.promptTokens ?? null,
-          completionTokens: result.completionTokens ?? null,
+          promptTokens: usage.promptTokens ?? null,
+          completionTokens: usage.completionTokens ?? null,
+          finishReason: usage.finishReason ?? null,
+          reasoningTokens: usage.reasoningTokens ?? null,
           latencyMs,
           error: null,
         });
@@ -142,16 +165,28 @@ export class LlmService {
           model,
           system: input.system ?? '',
           prompt: input.prompt,
-          response: '',
+          response: usage?.text ?? '',
           imageCount: input.images?.length ?? 0,
-          promptTokens: null,
-          completionTokens: null,
+          promptTokens: usage?.promptTokens ?? null,
+          completionTokens: usage?.completionTokens ?? null,
+          finishReason: usage?.finishReason ?? null,
+          reasoningTokens: usage?.reasoningTokens ?? null,
           latencyMs: Math.round(performance.now() - startedAt),
           error: error instanceof Error ? error.message : String(error),
         });
       }
       throw error;
     }
+  }
+
+  /**
+   * Every call is clamped to the operator's ceiling (`ai.maxTokens`, 20k by
+   * default): callers may ask for less, never for more.
+   */
+  private async resolveMaxTokens(requested?: number): Promise<number> {
+    const limit = await readToolMaxTokens(this.config);
+    const wanted = requested && requested > 0 ? Math.floor(requested) : limit;
+    return Math.min(wanted, limit);
   }
 
   /** Falls back to the first provider that already has detected models. */
@@ -210,10 +245,10 @@ export class LlmService {
     provider: ResolvedProvider,
     model: string,
     input: LlmCompletionInput,
+    maxTokens: number,
   ): Promise<LlmUsage> {
     const images = input.images ?? [];
     const temperature = input.temperature ?? 0.3;
-    const maxTokens = input.maxTokens ?? 1024;
     const timeoutMs = input.timeoutMs ?? REQUEST_TIMEOUT_MS;
     // A lone surrogate anywhere in the payload makes strict providers reject
     // the entire request; scrub both segments before building any protocol body.
@@ -256,6 +291,7 @@ export class LlmService {
         text: joinTextBlocks(asRecord(payload).content),
         promptTokens: readUsageNumber(usage['input_tokens']),
         completionTokens: readUsageNumber(usage['output_tokens']),
+        finishReason: normalizeFinishReason(asRecord(payload)['stop_reason']),
       };
     }
 
@@ -294,6 +330,10 @@ export class LlmService {
         text: joinTextBlocks(asRecord(candidate.content).parts),
         promptTokens: readUsageNumber(usage['promptTokenCount']),
         completionTokens: readUsageNumber(usage['candidatesTokenCount']),
+        finishReason: normalizeFinishReason(candidate['finishReason']),
+        reasoningTokens:
+          readUsageNumber(usage['thoughtsTokenCount']) ??
+          readUsageNumber(usage['reasoningTokenCount']),
       };
     }
 
@@ -332,10 +372,13 @@ export class LlmService {
 
     const choice = asRecord((asRecord(payload).choices as unknown[] | undefined)?.[0]);
     const usage = asRecord(asRecord(payload).usage);
+    const details = asRecord(usage['completion_tokens_details']);
     return {
       text: joinTextBlocks(asRecord(choice.message).content),
       promptTokens: readUsageNumber(usage['prompt_tokens']),
       completionTokens: readUsageNumber(usage['completion_tokens']),
+      finishReason: normalizeFinishReason(choice['finish_reason']),
+      reasoningTokens: readUsageNumber(details['reasoning_tokens']),
     };
   }
 
@@ -449,6 +492,21 @@ function trimBase(baseUrl: string): string {
 /** Providers disagree on whether usage is present, so absent counters stay undefined. */
 function readUsageNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Providers spell the stop reason differently; Gemini's `MAX_TOKENS` means the
+ * same thing as OpenAI's `length`, so normalize it before anyone checks.
+ */
+function normalizeFinishReason(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized === 'max_tokens' ? 'length' : normalized;
 }
 
 /** Safe navigation helper for untyped provider payloads; anything else becomes `{}`. */

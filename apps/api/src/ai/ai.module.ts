@@ -5,11 +5,12 @@ import { AiService } from './ai.service.js';
 import { LlmCallLogService } from './llm-call-log.service.js';
 import { LlmService } from './llm.service.js';
 import { TtsService } from './tts.service.js';
+import { VisionModelService } from './vision-model.service.js';
 
 @Module({
   imports: [AuthModule],
   controllers: [AiController],
-  providers: [AiService, LlmService, LlmCallLogService, TtsService],
-  exports: [LlmService, TtsService],
+  providers: [AiService, LlmService, LlmCallLogService, TtsService, VisionModelService],
+  exports: [LlmService, TtsService, VisionModelService],
 })
 export class AiModule {}

@@ -20,6 +20,8 @@ import {
   redisSettingsSchema,
   ttsSettingsSchema,
   ttsTestSchema,
+  toolMaxTokensSchema,
+  visionModelSchema,
   webAllowedHostsSchema,
   type BilibiliSettingsInput,
   type BilibiliSettingsResult,
@@ -38,6 +40,10 @@ import {
   type TtsSettingsResult,
   type TtsTestInput,
   type TtsTestResult,
+  type ToolMaxTokensInput,
+  type ToolTokenResult,
+  type VisionModelInput,
+  type VisionModelResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
 } from '@inkseek/shared';
@@ -94,10 +100,28 @@ export class SettingsController {
   @HttpCode(200)
   @ApiOperation({ summary: '用已保存配置试听一段语音（管理员）' })
   /** Returns the synthesized clip as base64 for in-page playback. */
-  testTts(
-    @Body(new ZodValidationPipe(ttsTestSchema)) input: TtsTestInput,
-  ): Promise<TtsTestResult> {
+  testTts(@Body(new ZodValidationPipe(ttsTestSchema)) input: TtsTestInput): Promise<TtsTestResult> {
     return this.settings.testTts(input);
+  }
+
+  @Put('max-tokens')
+  @HttpCode(200)
+  @ApiOperation({ summary: '保存单次模型调用的全局 token 上限（管理员）' })
+  /** Callers may ask for less than this ceiling; they are never allowed more. */
+  updateMaxTokens(
+    @Body(new ZodValidationPipe(toolMaxTokensSchema)) input: ToolMaxTokensInput,
+  ): Promise<ToolTokenResult> {
+    return this.settings.updateMaxTokens(input);
+  }
+
+  @Put('vision-model')
+  @HttpCode(200)
+  @ApiOperation({ summary: '用内置图片探测并保存专门的识图模型（管理员）' })
+  /** A model that cannot read the probe image is rejected instead of stored. */
+  updateVisionModel(
+    @Body(new ZodValidationPipe(visionModelSchema)) input: VisionModelInput,
+  ): Promise<VisionModelResult> {
+    return this.settings.updateVisionModel(input);
   }
 
   @Put('web-allowed-hosts')

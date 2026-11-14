@@ -9,8 +9,6 @@ import { readMindBannedWords } from './mind-banned-words.js';
 import { personaValueText, readStringArray } from './mind.types.js';
 import type { MindScene } from './mind.types.js';
 
-const SCENE_MAX_TOKENS = 4000;
-const SCENE_RETRY_MAX_TOKENS = 6000;
 const SCENE_TEXT_LIMIT = 4000;
 
 export interface SceneWriteInput {
@@ -48,8 +46,8 @@ export class MindSceneWriterService {
   ) {}
 
   /**
-   * Turns the planner's cue into narration. Retries once at a larger budget when
-   * the first pass yields nothing; returns null when both passes come back empty.
+   * Turns the planner's cue into narration. Retries once when the first pass
+   * yields nothing; returns null when both passes come back empty.
    */
   async write(input: SceneWriteInput): Promise<SceneWriteResult | null> {
     const cue = input.cue.trim();
@@ -58,14 +56,14 @@ export class MindSceneWriterService {
     }
     const prompt = await this.buildPrompt(input, cue);
     const system = `你就是「${input.scene.persona.name}」，不是助手。只写场景、动作和身体反应，不写台词，不写标题，不解释，不提 AI、模型、提示词或系统。`;
-    const first = await this.complete(input, prompt, system, SCENE_MAX_TOKENS);
+    const first = await this.complete(input, prompt, system);
     let completion = first;
     let promptTokens = first.promptTokens ?? 0;
     let completionTokens = first.completionTokens ?? 0;
     let elapsedMs = first.latencyMs;
     let text = cleanSceneText(first.text);
     if (!text) {
-      completion = await this.complete(input, prompt, system, SCENE_RETRY_MAX_TOKENS);
+      completion = await this.complete(input, prompt, system);
       text = cleanSceneText(completion.text);
       promptTokens += completion.promptTokens ?? 0;
       completionTokens += completion.completionTokens ?? 0;
@@ -86,19 +84,13 @@ export class MindSceneWriterService {
   }
 
   /** Single LLM call with a high temperature; dry runs skip call logging. */
-  private complete(
-    input: SceneWriteInput,
-    prompt: string,
-    system: string,
-    maxTokens: number,
-  ) {
+  private complete(input: SceneWriteInput, prompt: string, system: string) {
     return this.llm.complete({
       prompt,
       system,
       providerId: input.settings.providerId,
       model: input.settings.model,
       temperature: 0.85,
-      maxTokens,
       source: 'mind.scene',
       runId: input.runId,
       log: input.dryRun ? false : undefined,
@@ -122,10 +114,7 @@ export class MindSceneWriterService {
       .get<unknown>(CONFIG_KEYS.mindGlobalBannedWords)
       .then(readMindBannedWords)
       .catch(() => []);
-    const banned = [
-      ...readStringArray(values['banned_words']),
-      ...globalBanned,
-    ]
+    const banned = [...readStringArray(values['banned_words']), ...globalBanned]
       .map((word) => word.trim())
       .filter(Boolean);
 
@@ -185,9 +174,7 @@ export class MindSceneWriterService {
         list('sensitivity_map').length > 0 ? `敏感点：${list('sensitivity_map').join('、')}` : '',
         text('touch_preference') ? `触碰偏好：${text('touch_preference')}` : '',
         list('taboos').length > 0 ? `禁忌：${list('taboos').join('、')}` : '',
-        list('non_negotiable').length > 0
-          ? `不可妥协：${list('non_negotiable').join('、')}`
-          : '',
+        list('non_negotiable').length > 0 ? `不可妥协：${list('non_negotiable').join('、')}` : '',
         text('aftercare_need_base') ? `事后照护需求：${text('aftercare_need_base')}` : '',
       ]
         .filter(Boolean)

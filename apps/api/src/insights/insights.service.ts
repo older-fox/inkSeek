@@ -283,7 +283,6 @@ export class InsightsService {
         prompt,
         system,
         temperature: 0.35,
-        maxTokens: 800,
         source: 'insights.ask',
       });
       const answer = completion.text.trim();

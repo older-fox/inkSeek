@@ -73,6 +73,10 @@ import type {
   TtsSettingsResult,
   TtsTestInput,
   TtsTestResult,
+  ToolMaxTokensInput,
+  ToolTokenResult,
+  VisionModelInput,
+  VisionModelResult,
   WebAllowedHostsInput,
   WebAllowedHostsResult,
 } from '@inkseek/shared';
@@ -164,6 +168,16 @@ export const api = {
   testTts: (input: TtsTestInput) =>
     request<TtsTestResult>('/settings/tts/test', {
       method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateMaxTokens: (input: ToolMaxTokensInput) =>
+    request<ToolTokenResult>('/settings/max-tokens', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  updateVisionModel: (input: VisionModelInput) =>
+    request<VisionModelResult>('/settings/vision-model', {
+      method: 'PUT',
       body: JSON.stringify(input),
     }),
   updateMindBannedWords: (input: MindBannedWordsInput) =>

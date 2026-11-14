@@ -4,6 +4,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { LlmService } from '../ai/llm.service.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
+import { readVisionTarget } from '../ai/vision-model.service.js';
 import { normalizeAllowedHosts } from './web-allowlist.js';
 import { assertPublicHost, normalizePublicUrl } from './web-search.service.js';
 
@@ -236,13 +237,16 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
       const prompt = focus
         ? `这是当前网页的截图。重点看：${focus.slice(0, 160)}。用中文描述可见内容、文字和可操作的位置，只输出描述。`
         : '这是当前网页的截图。用中文描述页面内容、可见文字和主要操作区域，只输出描述。';
+      const vision = await readVisionTarget(this.config);
       const completion = await this.llm
         .complete({
           prompt,
           system: '你是网页截图观察器，输出中文描述。',
           images: [{ mimeType: 'image/png', base64: buffer.toString('base64') }],
+          providerId: vision.providerId,
+          model: vision.model,
           temperature: 0.2,
-          maxTokens: 900,
+          maxTokens: 3_000,
           source: 'mind.browser',
           personaId,
         })
@@ -427,9 +431,7 @@ export class MindBrowserService implements OnModuleInit, OnModuleDestroy {
           '--lang=zh-CN',
         ],
       });
-      this.logger.log(
-        `无头浏览器已启动：${executablePath ?? 'Playwright 内置 Chromium'}`,
-      );
+      this.logger.log(`无头浏览器已启动：${executablePath ?? 'Playwright 内置 Chromium'}`);
       return browser;
     } catch (error) {
       this.logger.warn(

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { DEFAULT_TOOL_MAX_TOKENS } from '@inkseek/shared';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { motion } from 'motion/react';
 import { BilibiliSettingsSection } from '@/components/bilibili-settings-section';
@@ -8,6 +9,8 @@ import { ModelProviderSection } from '@/components/model-provider-section';
 import { PhoneSettingsSection } from '@/components/phone-settings-section';
 import { RedisSettingsSection } from '@/components/redis-settings-section';
 import { TtsSettingsSection } from '@/components/tts-settings-section';
+import { ToolTokenSection } from '@/components/tool-token-section';
+import { VisionModelSection } from '@/components/vision-model-section';
 import { WebAccessSection } from '@/components/web-access-section';
 import { ApiError } from '@/lib/api';
 import { meQuery, settingsQuery } from '@/lib/queries';
@@ -72,8 +75,8 @@ export function SettingsPage() {
               设置
             </h1>
             <p className="mt-3 max-w-2xl text-[0.9rem] leading-7 text-mist-500">
-              维护缓存连接、手机控制、全局禁用词、语音合成与模型接入。所有保存动作都会先进行真实连通性测试，
-              通过后才会落库。
+              维护缓存连接、手机控制、全局禁用词、语音合成、token
+              预算与识图模型。所有保存动作都会先进行真实连通性测试， 通过后才会落库。
             </p>
           </div>
 
@@ -154,6 +157,33 @@ export function SettingsPage() {
               transition={{ duration: 0.45, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <TtsSettingsSection tts={overview?.tts ?? null} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <ToolTokenSection maxTokens={overview?.maxTokens ?? DEFAULT_TOOL_MAX_TOKENS} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.265, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <VisionModelSection
+                visionModel={
+                  overview?.visionModel ?? {
+                    providerId: null,
+                    providerName: null,
+                    model: null,
+                    verifiedAt: null,
+                    lastDescription: null,
+                  }
+                }
+                providers={providers}
+              />
             </motion.div>
 
             <motion.div

@@ -1178,6 +1178,10 @@ model LlmCallLog {
   imageCount       Int      @default(0)
   promptTokens     Int?
   completionTokens Int?
+  /// Normalized provider stop reason (`stop`, `length`, `tool_calls`, …).
+  finishReason     String?
+  /// Reasoning tokens reported by thinking models; already counted in completionTokens.
+  reasoningTokens  Int?
   latencyMs        Int?
   error            String?
   createdAt        DateTime @default(now())

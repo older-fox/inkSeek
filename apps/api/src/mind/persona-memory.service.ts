@@ -750,7 +750,6 @@ export class PersonaMemoryService {
         prompt,
         system: '你是长期记忆整理器，只输出 JSON 数组。',
         temperature: 0.2,
-        maxTokens: 2400,
         source: 'mind.consolidate',
       });
       const parsed = parseJsonArray(completion.text);
@@ -875,8 +874,7 @@ export class PersonaMemoryService {
     let bestScore = 0;
     for (const candidate of candidates) {
       const sameKind = candidate.kind === kind;
-      const recent =
-        Math.abs(now - candidate.occurredAt.getTime()) <= DEDUPE_RECENT_MS;
+      const recent = Math.abs(now - candidate.occurredAt.getTime()) <= DEDUPE_RECENT_MS;
       const threshold = sameKind
         ? recent
           ? DEDUPE_RECENT_THRESHOLD

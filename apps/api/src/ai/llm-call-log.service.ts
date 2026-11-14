@@ -17,6 +17,8 @@ export interface LlmCallLogInput {
   imageCount: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  finishReason?: string | null;
+  reasoningTokens?: number | null;
   latencyMs: number;
   error: string | null;
 }

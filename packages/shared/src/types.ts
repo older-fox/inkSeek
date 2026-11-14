@@ -50,6 +50,34 @@ export interface BilibiliSettings {
   updatedAt: string;
 }
 
+/** Ceiling applied to a single model call when the operator has not changed it. */
+export const DEFAULT_TOOL_MAX_TOKENS = 20_000;
+
+/** Minimum accepted value for the global call ceiling. */
+export const MIN_TOOL_MAX_TOKENS = 256;
+
+export interface VisionModelSettings {
+  providerId: string | null;
+  providerName: string | null;
+  model: string | null;
+  /** Timestamp of the last successful probe with this configuration. */
+  verifiedAt: string | null;
+  /** What the probe saw, so the card can show it is really reading images. */
+  lastDescription: string | null;
+}
+
+export interface VisionModelResult {
+  visionModel: VisionModelSettings;
+  description: string;
+  latencyMs: number;
+  completionTokens: number | null;
+  reasoningTokens: number | null;
+}
+
+export interface ToolTokenResult {
+  maxTokens: number;
+}
+
 export interface TtsSettings {
   endpoint: string;
   model: string;
@@ -89,6 +117,10 @@ export interface SettingsOverview {
   tts: TtsSettings | null;
   phone: PhoneSettings;
   providers: ModelProviderSummary[];
+  /** Hard ceiling for a single model call, in tokens. */
+  maxTokens: number;
+  /** Dedicated model for image reading; empty means the default provider/model. */
+  visionModel: VisionModelSettings;
   /** Global banned words applied to every channel's mind prompt. */
   mindBannedWords: string[];
   /** Hosts the mind may read even when they resolve to private addresses. */

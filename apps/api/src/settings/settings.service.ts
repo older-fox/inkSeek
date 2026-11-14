@@ -22,19 +22,22 @@ import {
   type TtsSettingsResult,
   type TtsTestInput,
   type TtsTestResult,
+  type ToolMaxTokensInput,
+  type ToolTokenResult,
+  type VisionModelInput,
+  type VisionModelResult,
   type WebAllowedHostsInput,
   type WebAllowedHostsResult,
 } from '@inkseek/shared';
+import { readToolMaxTokens } from '../ai/tool-tokens.js';
 import { TtsService } from '../ai/tts.service.js';
+import { VisionModelService } from '../ai/vision-model.service.js';
 import { BilibiliAuthService } from '../config/bilibili-auth.service.js';
 import { CONFIG_KEYS } from '../config/config-keys.js';
 import { SystemConfigService } from '../config/system-config.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ModelProvider, Prisma } from '../generated/prisma/client.js';
-import {
-  normalizeMindBannedWords,
-  readMindBannedWords,
-} from '../mind/mind-banned-words.js';
+import { normalizeMindBannedWords, readMindBannedWords } from '../mind/mind-banned-words.js';
 import { normalizeAllowedHosts } from '../mind/web-allowlist.js';
 import { PhoneService } from '../phone/phone.service.js';
 import { RedisProbeService } from '../redis/redis-probe.service.js';
@@ -53,34 +56,59 @@ export class SettingsService {
     private readonly bilibili: BilibiliAuthService,
     private readonly phone: PhoneService,
     private readonly tts: TtsService,
+    private readonly visionModel: VisionModelService,
   ) {}
 
   /** Reads every settings block in parallel; secrets are reduced to hints before returning. */
   async getOverview(): Promise<SettingsOverview> {
-    const [redisRecord, providers, bilibili, phone, bannedRecord, allowedRecord, tts] =
-      await Promise.all([
-        this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
-        this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
-        this.bilibili.overview(),
-        this.phone.status(),
-        this.prisma.systemConfig.findUnique({
-          where: { key: CONFIG_KEYS.mindGlobalBannedWords },
-        }),
-        this.prisma.systemConfig.findUnique({
-          where: { key: CONFIG_KEYS.mindWebAllowedHosts },
-        }),
-        this.tts.overview(),
-      ]);
+    const [
+      redisRecord,
+      providers,
+      bilibili,
+      phone,
+      bannedRecord,
+      allowedRecord,
+      tts,
+      maxTokens,
+      visionModel,
+    ] = await Promise.all([
+      this.prisma.systemConfig.findUnique({ where: { key: CONFIG_KEYS.redisConnection } }),
+      this.prisma.modelProvider.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.bilibili.overview(),
+      this.phone.status(),
+      this.prisma.systemConfig.findUnique({
+        where: { key: CONFIG_KEYS.mindGlobalBannedWords },
+      }),
+      this.prisma.systemConfig.findUnique({
+        where: { key: CONFIG_KEYS.mindWebAllowedHosts },
+      }),
+      this.tts.overview(),
+      readToolMaxTokens(this.config),
+      this.visionModel.overview(),
+    ]);
 
     return {
       redis: toRedisSettings(redisRecord?.value, redisRecord?.updatedAt),
       bilibili,
       phone,
       providers: providers.map(toProviderSummary),
+      tts,
+      maxTokens,
+      visionModel,
       mindBannedWords: readMindBannedWords(bannedRecord?.value),
       webAllowedHosts: normalizeAllowedHosts(allowedRecord?.value),
-      tts,
     };
+  }
+
+  /** Stores the per-call ceiling; every other caller is clamped to it. */
+  async updateMaxTokens(input: ToolMaxTokensInput): Promise<ToolTokenResult> {
+    await this.config.set(CONFIG_KEYS.aiMaxTokens, input.maxTokens);
+    return { maxTokens: await readToolMaxTokens(this.config) };
+  }
+
+  /** Runs a bundled-image probe and stores the target only when the model can see. */
+  async updateVisionModel(input: VisionModelInput): Promise<VisionModelResult> {
+    return this.visionModel.save(input);
   }
 
   /** Normalizes and stores the list; an empty list is persisted and disables filtering. */

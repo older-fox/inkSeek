@@ -174,8 +174,6 @@ const MAX_PROMPT_MESSAGES = 200;
 const MAX_SELF_HISTORY = 8;
 const MAX_SELF_HISTORY_TEXT = 90;
 const MAX_TOOL_RESULT = 6000;
-const PLANNER_MAX_TOKENS = 2000;
-const SCENE_PLANNER_MAX_TOKENS = 4000;
 
 @Injectable()
 export class MindPlannerService {
@@ -193,8 +191,6 @@ export class MindPlannerService {
    */
   async plan(input: PlannerInput): Promise<PlannerResult> {
     const startedAt = Date.now();
-    const maxTokens =
-      input.settings.sceneDetail === 'OFF' ? PLANNER_MAX_TOKENS : SCENE_PLANNER_MAX_TOKENS;
     const [stickerBrief, globalBannedWords] = await Promise.all([
       this.tools.stickerBrief(input.scene.persona.channelId, 12).catch(() => ''),
       this.config
@@ -230,7 +226,6 @@ export class MindPlannerService {
         providerId: input.settings.providerId,
         model: input.settings.model,
         temperature: 0.7,
-        maxTokens,
         source: 'mind.planner',
         runId: input.runId,
         log: input.dryRun ? false : undefined,
@@ -343,7 +338,6 @@ export class MindPlannerService {
           providerId: input.settings.providerId,
           model: input.settings.model,
           temperature: 0.5,
-          maxTokens,
           source: 'mind.planner',
           runId: input.runId,
           log: input.dryRun ? false : undefined,
@@ -444,7 +438,6 @@ export class MindPlannerService {
       providerId: input.settings.providerId,
       model: input.settings.model,
       temperature: 0.6,
-      maxTokens: 200,
       source: 'mind.activity',
     });
     const parsed = parseJsonObject(completion.text);
@@ -640,10 +633,11 @@ export class MindPlannerService {
       input.settings.sceneDetail === 'OFF' ? '' : buildSceneStyleSection(values);
     const personaCardSection = buildPersonaCardSection(values);
     const learnedStyleSection = (input.styleNotes ?? [])
-      .map((note) =>
-        `- ${styleDimensionLabel(note.dimension)}：${trim(note.content, 120)}${
-          note.samples[0] ? `（原句：${trim(note.samples[0], 40)}）` : ''
-        }`,
+      .map(
+        (note) =>
+          `- ${styleDimensionLabel(note.dimension)}：${trim(note.content, 120)}${
+            note.samples[0] ? `（原句：${trim(note.samples[0], 40)}）` : ''
+          }`,
       )
       .join('\n');
     const promotionSection = (input.stylePromotion ?? [])
@@ -823,7 +817,9 @@ export class MindPlannerService {
           repetition.topics.length > 0
             ? `最近你自己反复提到：${repetition.topics
                 .map((topic) => `${topic.text}（${topic.count} 次）`)
-                .join('、')}。如果这轮没有关于它们的新信息，就换一件别的事说，或先别提；不要把这些生活细节当成每轮都要延续的设定。`
+                .join(
+                  '、',
+                )}。如果这轮没有关于它们的新信息，就换一件别的事说，或先别提；不要把这些生活细节当成每轮都要延续的设定。`
             : '',
           repetition.identity.length > 0
             ? `你的身份/职业反复出现在话里：${repetition.identity
@@ -843,17 +839,23 @@ export class MindPlannerService {
           repetition.assistant.length > 0
             ? `你最近有助理腔：${repetition.assistant
                 .map((item) => `${item.text}（${item.count} 次）`)
-                .join('、')}。直接说「你/我」，听懂就接内容；不用回「收到/了解/我记下了」，认错就具体说错在哪。`
+                .join(
+                  '、',
+                )}。直接说「你/我」，听懂就接内容；不用回「收到/了解/我记下了」，认错就具体说错在哪。`
             : '',
           repetition.promises.length > 0
             ? `你最近爱预告以后要做什么：${repetition.promises
                 .map((item) => `${item.text}（${item.count} 次）`)
-                .join('、')}。要做就这一轮真的做（phone.play / video.watch / browser.*），不做就只回应现在；不要说「看到好玩的讲给你听」「等我看完跟你说」，也不要用「反正闲着也是闲着」垫话。`
+                .join(
+                  '、',
+                )}。要做就这一轮真的做（phone.play / video.watch / browser.*），不做就只回应现在；不要说「看到好玩的讲给你听」「等我看完跟你说」，也不要用「反正闲着也是闲着」垫话。`
             : '',
           repetition.ledger.length > 0
             ? `你最近老把亲近或帮忙说成账：${repetition.ledger
                 .map((item) => `${item.text}（${item.count} 次）`)
-                .join('、')}。只有真的在谈钱（房租、工资、押金、陪玩收费）时才用这些词；别人对你好、亲你、送你东西时，直接接住或说自己的反应，不要换算成记账/欠账。`
+                .join(
+                  '、',
+                )}。只有真的在谈钱（房租、工资、押金、陪玩收费）时才用这些词；别人对你好、亲你、送你东西时，直接接住或说自己的反应，不要换算成记账/欠账。`
             : '',
         ]
           .filter(Boolean)
@@ -1845,9 +1847,7 @@ function buildStyleSection(values: Record<string, unknown> | null): string {
     list('in_character_triggers').length > 0
       ? `破面触发：${list('in_character_triggers').join('、')}`
       : '',
-    list('in_character_never').length > 0
-      ? `绝不：${list('in_character_never').join('、')}`
-      : '',
+    list('in_character_never').length > 0 ? `绝不：${list('in_character_never').join('、')}` : '',
     text('in_character_recovery') ? `破面收场：${text('in_character_recovery')}` : '',
     list('in_character_allowed_meta').length > 0
       ? `允许的元话题：${list('in_character_allowed_meta').join('、')}`
@@ -1858,16 +1858,12 @@ function buildStyleSection(values: Record<string, unknown> | null): string {
     list('forbidden_addresses').length > 0
       ? `禁止称呼：${list('forbidden_addresses').join('、')}`
       : '',
-    list('allowed_addresses').length > 0
-      ? `允许称呼：${list('allowed_addresses').join('、')}`
-      : '',
+    list('allowed_addresses').length > 0 ? `允许称呼：${list('allowed_addresses').join('、')}` : '',
     list('sensitivity_map').length > 0 ? `敏感点：${list('sensitivity_map').join('、')}` : '',
     text('touch_preference') ? `触碰偏好：${text('touch_preference')}` : '',
     text('explicit_level_char') ? `尺度上限：${text('explicit_level_char')}` : '',
     list('taboos').length > 0 ? `禁忌：${list('taboos').join('、')}` : '',
-    list('non_negotiable').length > 0
-      ? `不可妥协：${list('non_negotiable').join('、')}`
-      : '',
+    list('non_negotiable').length > 0 ? `不可妥协：${list('non_negotiable').join('、')}` : '',
     text('anchor_few_shot')
       ? `风格样本（只学情绪幅度和句长，不照抄；其中的惊叹、夸张反应和比喻不要搬进日常对话）：${text('anchor_few_shot')}`
       : '',
