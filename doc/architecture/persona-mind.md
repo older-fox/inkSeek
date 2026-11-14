@@ -519,7 +519,7 @@ type OutgoingBeat =
 语音合成支持两种引擎，二选一启用，切换由设置页「语音服务」下拉框完成：
 
 - **OpenAI 兼容**：`tts.speech` 保存 Endpoint、密钥、模型、音色、格式与语速，合成时 POST `{Endpoint}/audio/speech`。
-- **DeepSeek 内置**：`tts.deepseek` 只保存密钥与音色（`stella`/`tide`），合成时 POST `https://api.deepseek.com/v1/tools/tts`，固定返回 WAV，单次最多 10,000 字。
+- **DeepSeek 内置**：`tts.deepseek` 保存凭据来源与音色（`stella`/`tide`），合成时 POST `https://api.deepseek.com/v1/tools/tts`，固定返回 WAV，单次最多 10,000 字。凭据可以是手填密钥，也可以绑定 `baseUrl` 属于 `deepseek.com` 的模型提供商并实时复用其密钥；切换引擎或保存时若没显式指定，会自动绑定第一个可用的 DeepSeek 提供商，手填的新密钥优先并解除绑定。
 
 `tts.provider` 记录当前启用的引擎；两份配置互不覆盖，切换不会删除另一份。只有已有密钥的引擎才能被启用；未设置 `tts.provider` 时按已有密钥推断。每次保存（包括 OpenAI 兼容配置的修改）都会先用测试文本真实合成一次，失败不落库。密钥只保存服务端，接口只返回掩码提示。
 

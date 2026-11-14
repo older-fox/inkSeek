@@ -166,18 +166,17 @@ export class TtsService {
     const record = await this.configRow(CONFIG_KEYS.ttsDeepseek);
     const existing = readDeepseekConfig(record?.value);
     const manualKey = input.apiKey?.trim() ?? '';
-    const bound = input.clearKey
-      ? null
-      : input.providerId?.trim()
-        ? await this.requireDeepseekProvider(input.providerId.trim())
-        : null;
-    const providerId = input.clearKey
+    // 客户端没带 providerId 时沿用已保存的绑定；只有显式手填新密钥才解除绑定。
+    const requestedId = input.clearKey
       ? ''
-      : bound
-        ? bound.id
-        : manualKey
-          ? ''
-          : (existing?.providerId ?? '');
+      : input.providerId?.trim() || (manualKey ? '' : (existing?.providerId ?? ''));
+    let bound = requestedId ? await this.requireDeepseekProvider(requestedId) : null;
+    // 既没选也没填（例如页面未刷新、下拉还没展开）时直接复用第一个 DeepSeek 提供商，
+    // 和切换引擎时的自动绑定保持一致，避免「明明有凭据却报缺少凭据」。
+    if (!input.clearKey && !bound && !manualKey && !existing?.apiKey) {
+      bound = (await this.deepseekProviders())[0] ?? null;
+    }
+    const providerId = input.clearKey ? '' : bound ? bound.id : '';
     const apiKey = input.clearKey || bound ? '' : manualKey || existing?.apiKey || '';
     const candidate: DeepseekConfig = {
       endpoint: existing?.endpoint ?? DEEPSEEK_TTS_ENDPOINT,
