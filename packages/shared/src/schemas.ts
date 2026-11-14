@@ -138,6 +138,8 @@ export type DeepseekTtsVoiceId = (typeof deepseekTtsVoices)[number];
 
 export const deepseekTtsSettingsSchema = z.object({
   apiKey: z.string().trim().max(512, 'API Key 过长').optional().or(z.literal('')),
+  /** Reuse this model provider's key instead of a manually entered one. */
+  providerId: z.string().trim().max(64, '提供商标识过长').optional().default(''),
   clearKey: z.boolean().optional().default(false),
   voiceId: z.enum(deepseekTtsVoices).default('stella'),
 });
@@ -186,8 +188,7 @@ export const sendChatMessageSchema = z
     voices: z.array(chatVoiceDataUrlSchema).max(1, '一次最多发送 1 条语音').optional().default([]),
   })
   .refine(
-    (value) =>
-      value.text.trim().length > 0 || value.images.length > 0 || value.voices.length > 0,
+    (value) => value.text.trim().length > 0 || value.images.length > 0 || value.voices.length > 0,
     {
       message: '请输入消息内容',
       path: ['text'],

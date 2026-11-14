@@ -5,6 +5,7 @@ import {
   ttsProviders,
   ttsTestSchema,
   type DeepseekTtsVoiceId,
+  type ModelProviderSummary,
   type SettingsOverview,
   type TtsAudioFormat,
   type TtsOverview,
@@ -26,7 +27,7 @@ import {
   Mic,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -77,6 +78,25 @@ const VOICE_LABELS: Record<DeepseekTtsVoiceId, string> = {
   tide: '暗潮 Tide',
 };
 
+/** True when a model provider points at DeepSeek's own API. */
+function isDeepseekProvider(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.trim().toLowerCase();
+    return host === 'deepseek.com' || host.endsWith('.deepseek.com');
+  } catch {
+    return false;
+  }
+}
+
+/** Host shown next to a provider option; malformed URLs fall back to the raw value. */
+function providerHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return baseUrl;
+  }
+}
+
 const timestampFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: 'short',
   day: 'numeric',
@@ -86,20 +106,23 @@ const timestampFormatter = new Intl.DateTimeFormat('zh-CN', {
 
 interface TtsSettingsSectionProps {
   tts: TtsOverview | null;
+  providers: ModelProviderSummary[];
 }
 
 /**
  * Speech synthesis settings for two interchangeable engines. The dropdown
  * picks which one is active; both configurations stay saved, and every save
  * synthesizes a probe clip before persisting, so a broken setup never lands.
+ * DeepSeek can borrow the key of an already configured DeepSeek provider.
  */
-export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
+export function TtsSettingsSection({ tts, providers }: TtsSettingsSectionProps) {
   const queryClient = useQueryClient();
   const [showKey, setShowKey] = useState(false);
   const [clearKey, setClearKey] = useState(false);
   const [deepseekKey, setDeepseekKey] = useState('');
   const [showDeepseekKey, setShowDeepseekKey] = useState(false);
   const [clearDeepseekKey, setClearDeepseekKey] = useState(false);
+  const [deepseekProviderId, setDeepseekProviderId] = useState(tts?.deepseek?.providerId ?? '');
   const [deepseekVoice, setDeepseekVoice] = useState<DeepseekTtsVoiceId>(
     tts?.deepseek?.voiceId ?? 'stella',
   );
@@ -113,6 +136,12 @@ export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
   const provider = tts?.provider ?? 'openai';
   const openai = tts?.openai ?? null;
   const deepseek = tts?.deepseek ?? null;
+  /** Configured model providers that point at DeepSeek and can lend their key. */
+  const deepseekProviders = useMemo(
+    () => providers.filter((item) => isDeepseekProvider(item.baseUrl)),
+    [providers],
+  );
+  const boundProvider = deepseekProviders.find((item) => item.id === deepseekProviderId);
 
   const form = useForm<TtsFormValues>({
     resolver: zodResolver(ttsFormSchema),
@@ -148,6 +177,7 @@ export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
     setDeepseekKey('');
     setShowDeepseekKey(false);
     setClearDeepseekKey(false);
+    setDeepseekProviderId(tts?.deepseek?.providerId ?? '');
     setDeepseekVoice(tts?.deepseek?.voiceId ?? 'stella');
   }, [tts?.deepseek]);
 
@@ -231,12 +261,13 @@ export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
   });
 
   const handleSaveDeepseek = () => {
-    if (!deepseek?.hasKey && !deepseekKey.trim() && !clearDeepseekKey) {
-      toast.error('请填写 DeepSeek API Key');
+    if (!clearDeepseekKey && !deepseekProviderId && !deepseek?.hasKey && !deepseekKey.trim()) {
+      toast.error('请选择一个已接入的 DeepSeek 提供商，或填写 API Key');
       return;
     }
     saveDeepseekMutation.mutate({
-      apiKey: deepseekKey,
+      apiKey: deepseekProviderId ? '' : deepseekKey,
+      providerId: clearDeepseekKey ? '' : deepseekProviderId,
       voiceId: deepseekVoice,
       clearKey: clearDeepseekKey,
     });
@@ -254,10 +285,14 @@ export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
       ? '已保存，留空保持不变'
       : '仅保存在服务端，不会回显';
   const deepseekKeyHint = clearDeepseekKey
-    ? '保存后将清除密钥'
-    : deepseek?.hasKey
-      ? '已保存，留空保持不变'
-      : '使用 DeepSeek 官方 API Key';
+    ? '保存后将清除 DeepSeek 凭据'
+    : deepseekProviderId
+      ? boundProvider
+        ? `使用「${boundProvider.name}」的密钥`
+        : '绑定的提供商已不可用，请重新选择'
+      : deepseek?.hasKey
+        ? '已保存，留空保持不变'
+        : '使用 DeepSeek 官方 API Key';
   const activeUpdatedAt = (provider === 'openai' ? openai : deepseek)?.updatedAt;
 
   return (
@@ -509,34 +544,94 @@ export function TtsSettingsSection({ tts }: TtsSettingsSectionProps) {
             {'，固定输出 WAV，单次最多 10,000 字；无需填写 Endpoint、模型或格式。'}
           </p>
 
-          <Field label="API Key" htmlFor="settings-deepseek-tts-key" hint={deepseekKeyHint}>
-            <InputShell
-              icon={<KeyRound className="size-4" strokeWidth={1.7} />}
-              trailing={
-                <button
-                  type="button"
-                  onClick={() => setShowDeepseekKey((value) => !value)}
-                  className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
-                  aria-label={showDeepseekKey ? '隐藏 API Key' : '显示 API Key'}
-                >
-                  {showDeepseekKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              }
-            >
-              <input
-                id="settings-deepseek-tts-key"
-                type={showDeepseekKey ? 'text' : 'password'}
-                autoComplete="new-password"
-                spellCheck={false}
-                value={deepseekKey}
-                disabled={clearDeepseekKey}
-                onChange={(event) => setDeepseekKey(event.target.value)}
-                placeholder={
-                  deepseek?.hasKey && !clearDeepseekKey ? '留空保持已保存密钥' : 'sk-...'
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-[0.7rem] font-medium uppercase tracking-[0.16em] text-mist-500">
+                凭据来源
+              </span>
+              <span className="flex items-center gap-1 text-[0.68rem] text-mist-600">
+                <KeyRound className="size-3" />
+                {deepseekProviders.length > 0 ? '可复用模型提供商' : '未接入 DeepSeek 提供商'}
+              </span>
+            </div>
+            <div className="relative">
+              <select
+                id="settings-deepseek-tts-provider"
+                aria-label="DeepSeek 凭据来源"
+                className="wizard-input wizard-select"
+                value={deepseekProviderId}
+                disabled={clearDeepseekKey || saveDeepseekMutation.isPending}
+                onChange={(event) => setDeepseekProviderId(event.target.value)}
+              >
+                <option value="">手动填写 API Key</option>
+                {deepseekProviders.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {providerHost(item.baseUrl)} · {item.keyHint}
+                  </option>
+                ))}
+                {deepseekProviderId &&
+                  !deepseekProviders.some((item) => item.id === deepseekProviderId) && (
+                    <option value={deepseekProviderId}>已失效的提供商</option>
+                  )}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-mist-600" />
+            </div>
+            <p className="text-[0.68rem] leading-5 text-mist-600">
+              {deepseekProviders.length > 0
+                ? '接入过 DeepSeek 的模型提供商可以直接复用密钥，密钥仍只在服务端读取。'
+                : '还没有接入 DeepSeek 的模型提供商，可以在下方手动填写密钥。'}
+            </p>
+          </div>
+
+          {!deepseekProviderId ? (
+            <Field label="API Key" htmlFor="settings-deepseek-tts-key" hint={deepseekKeyHint}>
+              <InputShell
+                icon={<KeyRound className="size-4" strokeWidth={1.7} />}
+                trailing={
+                  <button
+                    type="button"
+                    onClick={() => setShowDeepseekKey((value) => !value)}
+                    className="-mr-1 rounded-md p-1.5 text-mist-600 transition hover:text-mist-200"
+                    aria-label={showDeepseekKey ? '隐藏 API Key' : '显示 API Key'}
+                  >
+                    {showDeepseekKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
                 }
-              />
-            </InputShell>
-          </Field>
+              >
+                <input
+                  id="settings-deepseek-tts-key"
+                  type={showDeepseekKey ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  value={deepseekKey}
+                  disabled={clearDeepseekKey}
+                  onChange={(event) => setDeepseekKey(event.target.value)}
+                  placeholder={
+                    deepseek?.hasKey && !deepseekProviderId && !clearDeepseekKey
+                      ? '留空保持已保存密钥'
+                      : 'sk-...'
+                  }
+                />
+              </InputShell>
+            </Field>
+          ) : (
+            <div className="rounded-xl border border-mist-100/[0.07] bg-ink-950/40 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2 text-[0.78rem] text-mist-200">
+                  <KeyRound className="size-3.5 text-brass-300" />
+                  {boundProvider ? boundProvider.name : '已失效的提供商'}
+                </span>
+                <span className="font-mono text-[0.66rem] text-mist-600">
+                  {boundProvider ? boundProvider.keyHint : '—'}
+                </span>
+              </div>
+              <p className="mt-1.5 text-[0.68rem] leading-5 text-mist-600">
+                {boundProvider
+                  ? `使用模型提供商里保存的密钥（${providerHost(boundProvider.baseUrl)}）；更换密钥只需在模型提供商里修改。`
+                  : '绑定的提供商已被删除，请重新选择或改为手动填写。'}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <div className="flex items-baseline justify-between gap-3">

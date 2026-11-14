@@ -98,6 +98,9 @@ export interface DeepseekTtsSettings {
   voiceId: DeepseekTtsVoiceId;
   hasKey: boolean;
   keyHint: string;
+  /** Bound model provider whose key is reused; null means a manually saved key. */
+  providerId: string | null;
+  providerName: string | null;
   updatedAt: string;
 }
 

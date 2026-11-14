@@ -52,7 +52,17 @@ interface DeepseekConfig {
   /** Fixed official endpoint unless an override was stored for a compatible proxy. */
   endpoint: string;
   apiKey: string;
+  /** Model provider whose key is reused; empty means a manually saved key. */
+  providerId: string;
   voiceId: DeepseekTtsVoiceId;
+}
+
+/** The subset of a ModelProvider row needed to borrow its key. */
+interface KeyProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
 }
 
 interface SpeechResult {
@@ -90,18 +100,19 @@ export class TtsService {
     if (!openai && !deepseek) {
       return null;
     }
+    const bound = deepseek?.providerId ? await this.findProvider(deepseek.providerId) : null;
     const provider = readProvider(
       providerRecord?.value,
       Boolean(openai?.apiKey),
-      Boolean(deepseek?.apiKey),
+      hasDeepseekKey(deepseek, bound),
     );
     return {
       provider,
       openai: openai ? toSettings(openai, openaiRecord?.updatedAt ?? new Date()) : null,
       deepseek: deepseek
-        ? toDeepseekSettings(deepseek, deepseekRecord?.updatedAt ?? new Date())
+        ? toDeepseekSettings(deepseek, deepseekRecord?.updatedAt ?? new Date(), bound)
         : null,
-      ready: provider === 'openai' ? Boolean(openai?.apiKey) : Boolean(deepseek?.apiKey),
+      ready: provider === 'openai' ? Boolean(openai?.apiKey) : hasDeepseekKey(deepseek, bound),
     };
   }
 
@@ -114,7 +125,7 @@ export class TtsService {
       where: { key: CONFIG_KEYS.ttsSpeech },
     });
     const existing = readConfig(record?.value);
-    const apiKey = input.clearKey ? '' : (input.apiKey?.trim() || existing?.apiKey || '');
+    const apiKey = input.clearKey ? '' : input.apiKey?.trim() || existing?.apiKey || '';
 
     const candidate: TtsConfig = {
       endpoint: input.endpoint,
@@ -146,27 +157,49 @@ export class TtsService {
     return { tts: await this.requireOverview(), latencyMs: 0 };
   }
 
-  /** Same lifecycle for the DeepSeek engine: reuse the key, probe, then persist. */
+  /**
+   * Same lifecycle for the DeepSeek engine: reuse the key, probe, then persist.
+   * The credential can be a manually entered key or a bound DeepSeek model
+   * provider, whose key is read live so rotating it in one place is enough.
+   */
   async saveDeepseek(input: DeepseekTtsSettingsInput): Promise<TtsSettingsResult> {
     const record = await this.configRow(CONFIG_KEYS.ttsDeepseek);
     const existing = readDeepseekConfig(record?.value);
-    const apiKey = input.clearKey ? '' : (input.apiKey?.trim() || existing?.apiKey || '');
+    const manualKey = input.apiKey?.trim() ?? '';
+    const bound = input.clearKey
+      ? null
+      : input.providerId?.trim()
+        ? await this.requireDeepseekProvider(input.providerId.trim())
+        : null;
+    const providerId = input.clearKey
+      ? ''
+      : bound
+        ? bound.id
+        : manualKey
+          ? ''
+          : (existing?.providerId ?? '');
+    const apiKey = input.clearKey || bound ? '' : manualKey || existing?.apiKey || '';
     const candidate: DeepseekConfig = {
       endpoint: existing?.endpoint ?? DEEPSEEK_TTS_ENDPOINT,
       apiKey,
+      providerId,
       voiceId: input.voiceId,
     };
 
     if (!input.clearKey) {
-      if (!apiKey) {
+      if (!bound && !apiKey) {
         throw new BadRequestException({
           code: 'TTS_KEY_REQUIRED',
-          message: '请填写 DeepSeek API Key',
-          fieldErrors: { apiKey: ['请填写 DeepSeek API Key'] },
+          message:
+            '还没有可用的 DeepSeek 凭据：请选择已接入的 DeepSeek 模型提供商，或手动填写 API Key',
+          fieldErrors: { apiKey: ['请选择提供商或填写 API Key'] },
         });
       }
       const startedAt = performance.now();
-      await this.requestDeepseek(candidate, PROBE_TEXT);
+      await this.requestDeepseek(
+        bound ? { ...candidate, apiKey: bound.apiKey } : candidate,
+        PROBE_TEXT,
+      );
       await this.config.set(CONFIG_KEYS.ttsDeepseek, { ...candidate }, true);
       return {
         tts: await this.requireOverview(),
@@ -180,18 +213,25 @@ export class TtsService {
 
   /**
    * Switches the active engine. Only an engine that already has a key can be
-   * enabled, so "active but unusable" cannot be stored by accident.
+   * enabled; selecting DeepSeek before saving anything binds the first
+   * configured DeepSeek model provider automatically, so an existing provider
+   * key is enough to turn the engine on.
    */
   async setProvider(input: TtsProviderInput): Promise<{ tts: TtsOverview }> {
     const view = await this.overview();
     const configured =
-      input.provider === 'openai'
-        ? Boolean(view?.openai?.hasKey)
-        : Boolean(view?.deepseek?.hasKey);
+      input.provider === 'openai' ? Boolean(view?.openai?.hasKey) : Boolean(view?.deepseek?.hasKey);
     if (!configured) {
+      if (input.provider === 'deepseek' && (await this.autoBindDeepseek())) {
+        await this.config.set(CONFIG_KEYS.ttsProvider, input.provider);
+        return { tts: await this.requireOverview() };
+      }
       throw new BadRequestException({
         code: 'TTS_PROVIDER_NOT_CONFIGURED',
-        message: `请先填写并保存 ${PROVIDER_LABELS[input.provider]} 的 API Key，再启用它`,
+        message:
+          input.provider === 'deepseek'
+            ? '还没有 DeepSeek 凭据：请先在设置 → 模型提供商里接入 DeepSeek（api.deepseek.com），或在语音合成里手动填写 API Key'
+            : `请先填写并保存 ${PROVIDER_LABELS.openai} 的 API Key，再启用它`,
       });
     }
     await this.config.set(CONFIG_KEYS.ttsProvider, input.provider);
@@ -243,13 +283,32 @@ export class TtsService {
     ]);
     const openai = readConfig(openaiRecord?.value);
     const deepseek = readDeepseekConfig(deepseekRecord?.value);
+    const bound = deepseek?.providerId ? await this.findProvider(deepseek.providerId) : null;
     const provider = readProvider(
       providerRecord?.value,
       Boolean(openai?.apiKey),
-      Boolean(deepseek?.apiKey),
+      hasDeepseekKey(deepseek, bound),
     );
     if (provider === 'deepseek') {
-      if (!deepseek?.apiKey) {
+      if (!deepseek) {
+        throw notConfigured('DeepSeek 内置');
+      }
+      if (deepseek.providerId) {
+        if (!bound) {
+          throw new BadRequestException({
+            code: 'TTS_PROVIDER_MISSING',
+            message: '绑定的 DeepSeek 模型提供商已不存在，请回到设置重新选择',
+          });
+        }
+        if (!bound.apiKey) {
+          throw new BadRequestException({
+            code: 'TTS_PROVIDER_KEY_MISSING',
+            message: `模型提供商「${bound.name}」没有保存密钥，请先在模型提供商里补上`,
+          });
+        }
+        return { provider, config: { ...deepseek, apiKey: bound.apiKey } };
+      }
+      if (!deepseek.apiKey) {
         throw notConfigured('DeepSeek 内置');
       }
       return { provider, config: deepseek };
@@ -274,6 +333,68 @@ export class TtsService {
 
   private configRow(key: string) {
     return this.prisma.systemConfig.findUnique({ where: { key } });
+  }
+
+  private findProvider(id: string): Promise<KeyProvider | null> {
+    return this.prisma.modelProvider.findUnique({
+      where: { id },
+      select: { id: true, name: true, baseUrl: true, apiKey: true },
+    });
+  }
+
+  /** Loads a provider chosen for key reuse and rejects anything that cannot speak TTS. */
+  private async requireDeepseekProvider(id: string): Promise<KeyProvider> {
+    const provider = await this.findProvider(id);
+    if (!provider) {
+      throw new BadRequestException({
+        code: 'TTS_PROVIDER_MISSING',
+        message: '选择的模型提供商不存在，请刷新设置页后重新选择',
+      });
+    }
+    if (!isDeepseekBaseUrl(provider.baseUrl)) {
+      throw new BadRequestException({
+        code: 'TTS_PROVIDER_INVALID',
+        message: `「${provider.name}」的地址不是 DeepSeek，不能用于内置语音`,
+      });
+    }
+    if (!provider.apiKey) {
+      throw new BadRequestException({
+        code: 'TTS_PROVIDER_KEY_MISSING',
+        message: `模型提供商「${provider.name}」没有保存密钥`,
+      });
+    }
+    return provider;
+  }
+
+  /** Configured model providers that point at DeepSeek and can lend their key. */
+  private async deepseekProviders(): Promise<KeyProvider[]> {
+    const rows = await this.prisma.modelProvider.findMany({
+      select: { id: true, name: true, baseUrl: true, apiKey: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.filter((row) => Boolean(row.apiKey) && isDeepseekBaseUrl(row.baseUrl));
+  }
+
+  /**
+   * Binds the oldest configured DeepSeek provider and probes it. Returns false
+   * when no provider matches, leaving the caller to explain what is missing.
+   */
+  private async autoBindDeepseek(): Promise<boolean> {
+    const candidate = (await this.deepseekProviders())[0];
+    if (!candidate) {
+      return false;
+    }
+    const record = await this.configRow(CONFIG_KEYS.ttsDeepseek);
+    const existing = readDeepseekConfig(record?.value);
+    const next: DeepseekConfig = {
+      endpoint: existing?.endpoint ?? DEEPSEEK_TTS_ENDPOINT,
+      apiKey: '',
+      providerId: candidate.id,
+      voiceId: existing?.voiceId ?? 'stella',
+    };
+    await this.requestDeepseek({ ...next, apiKey: candidate.apiKey }, PROBE_TEXT);
+    await this.config.set(CONFIG_KEYS.ttsDeepseek, { ...next }, true);
+    return true;
   }
 
   /** One POST to `/audio/speech` bounded by a timeout; maps transport and status errors. */
@@ -461,8 +582,11 @@ function readConfig(value: unknown): TtsConfig | null {
   if (!endpoint || !model || !voice) {
     return null;
   }
-  const format = FORMAT_MIME[record.format as TtsAudioFormat] ? (record.format as TtsAudioFormat) : 'mp3';
-  const speed = typeof record.speed === 'number' && Number.isFinite(record.speed) ? record.speed : 1;
+  const format = FORMAT_MIME[record.format as TtsAudioFormat]
+    ? (record.format as TtsAudioFormat)
+    : 'mp3';
+  const speed =
+    typeof record.speed === 'number' && Number.isFinite(record.speed) ? record.speed : 1;
   return {
     endpoint,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
@@ -503,6 +627,7 @@ function readDeepseekConfig(value: unknown): DeepseekConfig | null {
   return {
     endpoint,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
+    providerId: typeof record.providerId === 'string' ? record.providerId.trim() : '',
     voiceId,
   };
 }
@@ -519,13 +644,43 @@ function readProvider(value: unknown, hasOpenaiKey: boolean, hasDeepseekKey: boo
 }
 
 /** Projects the DeepSeek configuration into its masked client view. */
-function toDeepseekSettings(config: DeepseekConfig, updatedAt: Date): DeepseekTtsSettings {
+function toDeepseekSettings(
+  config: DeepseekConfig,
+  updatedAt: Date,
+  provider: KeyProvider | null,
+): DeepseekTtsSettings {
+  const key = provider ? provider.apiKey : config.apiKey;
   return {
     voiceId: config.voiceId,
-    hasKey: Boolean(config.apiKey),
-    keyHint: config.apiKey.length > 4 ? `••••${config.apiKey.slice(-4)}` : '••••',
+    hasKey: Boolean(key),
+    keyHint: hintOf(key),
+    providerId: config.providerId || null,
+    providerName: provider?.name ?? null,
     updatedAt: updatedAt.toISOString(),
   };
+}
+
+/** True when the bound provider has a key; a manual config falls back to its own. */
+function hasDeepseekKey(config: DeepseekConfig | null, provider: KeyProvider | null): boolean {
+  if (!config) {
+    return false;
+  }
+  return config.providerId ? Boolean(provider?.apiKey) : Boolean(config.apiKey);
+}
+
+/** Recognizes DeepSeek's own endpoint, including api.deepseek.com. */
+function isDeepseekBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.trim().toLowerCase();
+    return host === 'deepseek.com' || host.endsWith('.deepseek.com');
+  } catch {
+    return false;
+  }
+}
+
+/** Masks a key down to its last four characters for display. */
+function hintOf(key: string): string {
+  return key.length > 4 ? `••••${key.slice(-4)}` : '••••';
 }
 
 /** Strips trailing slashes so path concatenation yields exactly one separator. */

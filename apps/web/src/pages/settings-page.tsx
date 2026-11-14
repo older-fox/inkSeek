@@ -156,7 +156,7 @@ export function SettingsPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
-              <TtsSettingsSection tts={overview?.tts ?? null} />
+              <TtsSettingsSection tts={overview?.tts ?? null} providers={providers} />
             </motion.div>
 
             <motion.div
