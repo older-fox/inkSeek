@@ -7,9 +7,9 @@
 #   · 所有外部依赖都走可覆盖的加速地址（见下方 build args / .gitlab-ci.yml 变量）。
 #   · 运行镜像只带 production 依赖；Prisma Client 在构建阶段生成并编译进 dist。
 #
-# 目标（CI 分别构建）：
-#   runtime（默认）：对外仅 3000（Nginx），API 仅内部 127.0.0.1:3100，挂载 /app/data 持久化聊天媒体
-#   migrate：单独镜像，保留给手动/应急迁移；常规版本升级由 runtime 启动时自动执行。
+# 目标：
+#   runtime：对外仅 3000（Nginx），API 仅内部 127.0.0.1:3100，挂载 /app/data 持久化聊天媒体；
+#   容器启动时自动执行 `prisma migrate deploy`，无需单独的迁移镜像。
 #
 # 加速 build args（CI 中同名变量可覆盖）：
 #   NODE_IMAGE            基础镜像，默认 Docker Hub 加速域名
@@ -46,17 +46,23 @@ WORKDIR /app
 # prisma generate 只读 schema，不会连接数据库；给一个占位值满足 prisma.config.ts 的 env()。
 ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
 
-# 先只拷清单和 Prisma schema：package.json / lock 不变时，pnpm install 层可复用。
+# 只拷清单：package.json / lockfile 不变时依赖安装层可复用。
+# schema 刻意不放这里：它随迁移频繁变化，放进来会让安装层每次都失效。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY apps/api/package.json apps/api/prisma.config.ts ./apps/api/
-COPY apps/api/prisma ./apps/api/prisma
+COPY scripts ./scripts
+COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
 
-# 根 postinstall 会执行 pnpm db:generate；schema 已在上下文里，可以直接生成。
+# 此刻还没有 schema，根 postinstall 会跳过 Prisma 生成（scripts/postinstall.mjs）；
+# 生成挪到下面 schema 拷贝之后，改模型/加迁移只重跑一次 generate。
 # --mount=type=cache 在本地 BuildKit 生效；kaniko 会忽略它（构建不会失败）。
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm install --frozen-lockfile
+
+COPY apps/api/prisma.config.ts ./apps/api/
+COPY apps/api/prisma ./apps/api/prisma
+RUN pnpm db:generate
 
 # 源码放在依赖之后 COPY：改业务代码不会让依赖层失效。
 COPY packages/shared/tsconfig.json ./packages/shared/
@@ -178,20 +184,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3100/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-
-# ---------- 迁移镜像：手动/应急用，常规升级由 runtime 启动时自动 migrate ----------
-FROM ${NODE_IMAGE} AS migrate
-ARG NPM_REGISTRY
-ARG PRISMA_ENGINES_MIRROR
-ARG PRISMA_VERSION
-WORKDIR /app/apps/api
-# prisma.config.ts 是 ESM；npm 安装 prisma 时也不需要跑 generate（此时还没有 schema）。
-ENV PRISMA_ENGINES_MIRROR=${PRISMA_ENGINES_MIRROR} \
-    PRISMA_SKIP_POSTINSTALL_GENERATE=true
-RUN set -eu; \
-    printf '{"type":"module","private":true}\n' > package.json; \
-    npm install --no-audit --no-fund --registry "$NPM_REGISTRY" prisma@${PRISMA_VERSION}
-COPY apps/api/prisma.config.ts ./prisma.config.ts
-COPY apps/api/prisma ./prisma
-# 运行方式：docker run --rm -e DATABASE_URL=... <image>/migrate
-ENTRYPOINT ["/app/apps/api/node_modules/.bin/prisma", "migrate", "deploy"]
