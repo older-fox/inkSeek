@@ -20,6 +20,9 @@ apps/api/prisma/*.db
 # runtime chat media
 data/
 
+# local promo recording page
+promo/
+
 # tooling / editors
 .idea/
 .vscode/*
