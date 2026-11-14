@@ -963,6 +963,12 @@ model AgentRun {
   model            String?
   promptTokens     Int?
   completionTokens Int?
+  /// Prompt tokens served by the provider's prefix cache.
+  cachedTokens     Int?
+  /// Prompt tokens that missed the cache; cached + miss ≈ promptTokens.
+  cacheMissTokens  Int?
+  /// Thinking tokens reported by the provider; counted inside completionTokens.
+  reasoningTokens  Int?
   latencyMs        Int?
   decision         Json?
   socialRead       Json?
@@ -1178,6 +1184,12 @@ model LlmCallLog {
   imageCount       Int      @default(0)
   promptTokens     Int?
   completionTokens Int?
+  /// Prompt tokens served by the provider's prefix cache.
+  cachedTokens     Int?
+  /// Prompt tokens that missed the cache; cached + miss ≈ promptTokens.
+  cacheMissTokens  Int?
+  /// 1-based step inside the planner's tool loop; null for one-shot calls.
+  step             Int?
   /// Normalized provider stop reason (`stop`, `length`, `tool_calls`, …).
   finishReason     String?
   /// Reasoning tokens reported by thinking models; already counted in completionTokens.

@@ -38,6 +38,13 @@ export interface LlmCompletionInput {
   source?: string;
   /** Mind run that owns this call; lets the run detail show its prompts. */
   runId?: string | null;
+  /** 1-based step inside a planner tool loop; omitted for one-shot calls. */
+  step?: number;
+  /**
+   * Earlier turns sent as separate messages so providers can cache the prefix.
+   * The final `prompt` always becomes the last user message.
+   */
+  history?: readonly LlmHistoryMessage[];
   /** Attribution for usage outside a run (vision descriptions, screenshots). */
   channelId?: string | null;
   personaId?: string | null;
@@ -45,6 +52,11 @@ export interface LlmCompletionInput {
   log?: boolean;
   /** Aborts the HTTP request when the owning turn is superseded. */
   signal?: AbortSignal;
+}
+
+export interface LlmHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export interface LlmCompletion {
@@ -55,6 +67,10 @@ export interface LlmCompletion {
   latencyMs: number;
   promptTokens?: number;
   completionTokens?: number;
+  /** Input tokens served from the provider's prefix cache, when reported. */
+  cachedTokens?: number;
+  /** Input tokens that missed the cache, when reported. */
+  cacheMissTokens?: number;
   /** Normalized stop reason; `length` means the budget ran out. */
   finishReason?: string;
   /** Reasoning tokens, counted inside `completionTokens` by thinking models. */
@@ -65,6 +81,8 @@ interface LlmUsage {
   text: string;
   promptTokens?: number;
   completionTokens?: number;
+  cachedTokens?: number;
+  cacheMissTokens?: number;
   finishReason?: string;
   reasoningTokens?: number;
 }
@@ -128,6 +146,8 @@ export class LlmService {
         latencyMs,
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
+        cachedTokens: usage.cachedTokens,
+        cacheMissTokens: usage.cacheMissTokens,
         finishReason: usage.finishReason,
         reasoningTokens: usage.reasoningTokens,
       };
@@ -146,6 +166,9 @@ export class LlmService {
           imageCount: input.images?.length ?? 0,
           promptTokens: usage.promptTokens ?? null,
           completionTokens: usage.completionTokens ?? null,
+          cachedTokens: usage.cachedTokens ?? null,
+          cacheMissTokens: usage.cacheMissTokens ?? null,
+          step: input.step ?? null,
           finishReason: usage.finishReason ?? null,
           reasoningTokens: usage.reasoningTokens ?? null,
           latencyMs,
@@ -169,6 +192,9 @@ export class LlmService {
           imageCount: input.images?.length ?? 0,
           promptTokens: usage?.promptTokens ?? null,
           completionTokens: usage?.completionTokens ?? null,
+          cachedTokens: usage?.cachedTokens ?? null,
+          cacheMissTokens: usage?.cacheMissTokens ?? null,
+          step: input.step ?? null,
           finishReason: usage?.finishReason ?? null,
           reasoningTokens: usage?.reasoningTokens ?? null,
           latencyMs: Math.round(performance.now() - startedAt),
@@ -254,6 +280,9 @@ export class LlmService {
     // the entire request; scrub both segments before building any protocol body.
     const prompt = sanitizeText(input.prompt);
     const system = input.system ? sanitizeText(input.system) : null;
+    const history = (input.history ?? [])
+      .map((message) => ({ role: message.role, content: sanitizeText(message.content) }))
+      .filter((message) => message.content.trim().length > 0);
 
     if (provider.protocol === 'anthropic') {
       const content = [
@@ -280,17 +309,27 @@ export class LlmService {
           max_tokens: maxTokens,
           temperature,
           ...(system ? { system } : {}),
-          messages: [{ role: 'user', content }],
+          messages: [
+            ...history.map((message) => ({ role: message.role, content: message.content })),
+            { role: 'user', content },
+          ],
         },
         timeoutMs,
         input.signal,
       );
 
       const usage = asRecord(asRecord(payload).usage);
+      const inputTokens = readUsageNumber(usage['input_tokens']);
+      const cachedTokens = readUsageNumber(usage['cache_read_input_tokens']);
       return {
         text: joinTextBlocks(asRecord(payload).content),
-        promptTokens: readUsageNumber(usage['input_tokens']),
+        promptTokens: inputTokens,
         completionTokens: readUsageNumber(usage['output_tokens']),
+        cachedTokens,
+        cacheMissTokens:
+          cachedTokens !== undefined && inputTokens !== undefined
+            ? Math.max(0, inputTokens - cachedTokens)
+            : undefined,
         finishReason: normalizeFinishReason(asRecord(payload)['stop_reason']),
       };
     }
@@ -308,6 +347,10 @@ export class LlmService {
         {
           ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
           contents: [
+            ...history.map((message) => ({
+              role: message.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: message.content }],
+            })),
             {
               role: 'user',
               parts: [
@@ -326,10 +369,17 @@ export class LlmService {
 
       const candidate = asRecord((asRecord(payload).candidates as unknown[] | undefined)?.[0]);
       const usage = asRecord(asRecord(payload).usageMetadata);
+      const promptTokens = readUsageNumber(usage['promptTokenCount']);
+      const cachedTokens = readUsageNumber(usage['cachedContentTokenCount']);
       return {
         text: joinTextBlocks(asRecord(candidate.content).parts),
-        promptTokens: readUsageNumber(usage['promptTokenCount']),
+        promptTokens,
         completionTokens: readUsageNumber(usage['candidatesTokenCount']),
+        cachedTokens,
+        cacheMissTokens:
+          cachedTokens !== undefined && promptTokens !== undefined
+            ? Math.max(0, promptTokens - cachedTokens)
+            : undefined,
         finishReason: normalizeFinishReason(candidate['finishReason']),
         reasoningTokens:
           readUsageNumber(usage['thoughtsTokenCount']) ??
@@ -363,6 +413,7 @@ export class LlmService {
         max_tokens: maxTokens,
         messages: [
           ...(system ? [{ role: 'system', content: system }] : []),
+          ...history.map((message) => ({ role: message.role, content: message.content })),
           { role: 'user', content },
         ],
       },
@@ -373,10 +424,24 @@ export class LlmService {
     const choice = asRecord((asRecord(payload).choices as unknown[] | undefined)?.[0]);
     const usage = asRecord(asRecord(payload).usage);
     const details = asRecord(usage['completion_tokens_details']);
+    const promptDetails = asRecord(usage['prompt_tokens_details']);
+    const promptTokens = readUsageNumber(usage['prompt_tokens']);
+    // DeepSeek reports hit/miss at the top level; OpenAI reports cached tokens
+    // inside prompt_tokens_details and counts them in prompt_tokens.
+    const cachedTokens =
+      readUsageNumber(usage['prompt_cache_hit_tokens']) ??
+      readUsageNumber(promptDetails['cached_tokens']);
+    const cacheMissTokens =
+      readUsageNumber(usage['prompt_cache_miss_tokens']) ??
+      (cachedTokens !== undefined && promptTokens !== undefined
+        ? Math.max(0, promptTokens - cachedTokens)
+        : undefined);
     return {
       text: joinTextBlocks(asRecord(choice.message).content),
-      promptTokens: readUsageNumber(usage['prompt_tokens']),
+      promptTokens,
       completionTokens: readUsageNumber(usage['completion_tokens']),
+      cachedTokens,
+      cacheMissTokens,
       finishReason: normalizeFinishReason(choice['finish_reason']),
       reasoningTokens: readUsageNumber(details['reasoning_tokens']),
     };

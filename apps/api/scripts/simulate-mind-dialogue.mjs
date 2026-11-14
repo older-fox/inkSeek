@@ -142,18 +142,18 @@ try {
 
   /** Row counts across every table a rehearsal touches; diffing before/after exposes hidden writes. */
   const audit = async () => {
-    const [agentRun, agentStep, llmPromptLog, memory, message, heartbeat, todo, intention] =
+    const [agentRun, agentStep, llmCallLog, memory, message, heartbeat, todo, intention] =
       await Promise.all([
         prisma.agentRun.count(),
         prisma.agentStep.count(),
-        prisma.llmPromptLog.count(),
+        prisma.llmCallLog.count(),
         prisma.personaMemory.count(),
         prisma.chatMessageRecord.count(),
         prisma.mindHeartbeatLog.count(),
         prisma.agentTodo.count(),
         prisma.agentIntention.count(),
       ]);
-    return { agentRun, agentStep, llmPromptLog, memory, message, heartbeat, todo, intention };
+    return { agentRun, agentStep, llmCallLog, memory, message, heartbeat, todo, intention };
   };
   const before = await audit();
 
@@ -209,7 +209,7 @@ try {
   const after = await audit();
   const writable = [
     'agentRun',
-    'llmPromptLog',
+    'llmCallLog',
     'memory',
     'message',
     'heartbeat',

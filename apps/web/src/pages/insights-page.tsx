@@ -407,9 +407,30 @@ function UsageStrip({ usage }: { usage: MindInsightUsage }) {
           </span>
         </span>
         <span className="text-[0.72rem] text-mist-500">
-          输入 {tokenFormat.format(usage.promptTokens)} · 输出{' '}
+          输入 {tokenFormat.format(usage.promptTokens)}
+          {usage.cachedTokens + usage.cacheMissTokens > 0 && (
+            <span className="text-mist-600">
+              （缓存命中 {tokenFormat.format(usage.cachedTokens)} · 未命中{' '}
+              {tokenFormat.format(usage.cacheMissTokens)}）
+            </span>
+          )}
+          {' · 输出 '}
           {tokenFormat.format(usage.completionTokens)}
+          {usage.reasoningTokens > 0 && (
+            <span className="text-mist-600">
+              （思考 {tokenFormat.format(usage.reasoningTokens)}）
+            </span>
+          )}
         </span>
+        {usage.cachedTokens + usage.cacheMissTokens > 0 && (
+          <span
+            className="rounded-full border border-jade-400/20 px-2 py-0.5 font-mono text-[0.62rem] text-jade-300"
+            title="缓存命中 / 全部输入"
+          >
+            命中{' '}
+            {Math.round((usage.cachedTokens / (usage.cachedTokens + usage.cacheMissTokens)) * 100)}%
+          </span>
+        )}
         <span className="text-[0.72rem] text-mist-500">
           {usage.runs} 次运行 · 平均 {tokenFormat.format(usage.averageTokens)}/次
         </span>

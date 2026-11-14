@@ -663,6 +663,7 @@ function PromptTrace({
                   <span>{log.model ?? '未记录模型'}</span>
                   <span>
                     {log.promptTokens ?? '—'} / {log.completionTokens ?? '—'} tokens
+                    {log.cachedTokens != null ? <span>缓存 {log.cachedTokens}</span> : null}
                   </span>
                   <span>{log.latencyMs ?? '—'}ms</span>
                   {log.imageCount > 0 ? <span>{log.imageCount} 图</span> : null}
@@ -1163,6 +1164,7 @@ function PromptList() {
                     <span>{log.model ?? '未记录模型'}</span>
                     <span>
                       {log.promptTokens ?? '—'} / {log.completionTokens ?? '—'} tokens
+                      {log.cachedTokens != null ? <span>缓存 {log.cachedTokens}</span> : null}
                     </span>
                     {log.error ? <span className="text-signal-400">失败</span> : null}
                   </div>

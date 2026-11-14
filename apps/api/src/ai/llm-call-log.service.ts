@@ -17,6 +17,10 @@ export interface LlmCallLogInput {
   imageCount: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  cachedTokens?: number | null;
+  cacheMissTokens?: number | null;
+  /** 1-based planner step; omitted for one-shot calls. */
+  step?: number | null;
   finishReason?: string | null;
   reasoningTokens?: number | null;
   latencyMs: number;

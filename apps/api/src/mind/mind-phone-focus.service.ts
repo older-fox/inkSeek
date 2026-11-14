@@ -375,6 +375,9 @@ export class MindPhoneFocusService {
         notes: appendNote(notes, notable),
         promptTokens: completion.promptTokens,
         completionTokens: completion.completionTokens,
+        cachedTokens: completion.cachedTokens,
+        cacheMissTokens: completion.cacheMissTokens,
+        reasoningTokens: completion.reasoningTokens,
         latencyMs: completion.latencyMs,
       });
       return { continue: false, delayMs: 0, ended: 'SUCCEEDED', brief };
@@ -473,6 +476,9 @@ export class MindPhoneFocusService {
         reason,
         promptTokens: completion.promptTokens ?? 0,
         completionTokens: completion.completionTokens ?? 0,
+        cachedTokens: completion.cachedTokens,
+        cacheMissTokens: completion.cacheMissTokens,
+        reasoningTokens: completion.reasoningTokens,
         latencyMs: Date.now() - startedAt,
       });
       if (activity && readString(state.activity) !== activity) {
@@ -600,6 +606,9 @@ export class MindPhoneFocusService {
       notes?: string[];
       promptTokens?: number;
       completionTokens?: number;
+      cachedTokens?: number;
+      cacheMissTokens?: number;
+      reasoningTokens?: number;
       latencyMs?: number;
       keepScreen?: boolean;
     },
@@ -659,6 +668,15 @@ export class MindPhoneFocusService {
               : {}),
             ...(extra?.completionTokens !== undefined
               ? { completionTokens: { increment: extra.completionTokens } }
+              : {}),
+            ...(extra?.cachedTokens !== undefined
+              ? { cachedTokens: { increment: extra.cachedTokens } }
+              : {}),
+            ...(extra?.cacheMissTokens !== undefined
+              ? { cacheMissTokens: { increment: extra.cacheMissTokens } }
+              : {}),
+            ...(extra?.reasoningTokens !== undefined
+              ? { reasoningTokens: { increment: extra.reasoningTokens } }
               : {}),
             ...(extra?.latencyMs !== undefined
               ? { latencyMs: { increment: extra.latencyMs } }
@@ -723,6 +741,9 @@ export class MindPhoneFocusService {
       reason: string;
       promptTokens: number;
       completionTokens: number;
+      cachedTokens?: number;
+      cacheMissTokens?: number;
+      reasoningTokens?: number;
       latencyMs: number;
     },
   ): Promise<void> {
@@ -757,6 +778,15 @@ export class MindPhoneFocusService {
         data: {
           promptTokens: { increment: input.promptTokens },
           completionTokens: { increment: input.completionTokens },
+          ...(input.cachedTokens !== undefined
+            ? { cachedTokens: { increment: input.cachedTokens } }
+            : {}),
+          ...(input.cacheMissTokens !== undefined
+            ? { cacheMissTokens: { increment: input.cacheMissTokens } }
+            : {}),
+          ...(input.reasoningTokens !== undefined
+            ? { reasoningTokens: { increment: input.reasoningTokens } }
+            : {}),
           latencyMs: { increment: input.latencyMs },
         },
       })

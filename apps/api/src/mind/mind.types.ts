@@ -810,49 +810,62 @@ export function formatSceneForPrompt(
   messages: readonly SceneMessage[],
   timeZone?: string | null,
 ): string {
+  return formatSceneMessageLines(messages, timeZone).join('\n');
+}
+
+/**
+ * One line per scene message. The planner sends these as separate messages so
+ * the provider can cache the unchanged prefix across turns and tool steps.
+ */
+export function formatSceneMessageLines(
+  messages: readonly SceneMessage[],
+  timeZone?: string | null,
+): string[] {
   let previousDay = '';
   let previousAt: number | null = null;
-  return messages
-    .map((message) => {
-      const at = new Date(message.sentAt);
-      const valid = !Number.isNaN(at.getTime());
-      const day = valid ? localDateKey(at, timeZone) : '';
-      const clock = valid ? formatLocalClock(at, timeZone) : message.sentAt;
-      const label = valid ? (day === previousDay ? clock : `${day.slice(5)} ${clock}`) : clock;
-      const gap = previousAt !== null && valid ? at.getTime() - previousAt : 0;
-      const gapLabel = gap >= 30 * 60_000 ? ` · 隔 ${formatElapsed(gap)}` : '';
-      if (valid) {
-        previousDay = day;
-        previousAt = at.getTime();
-      }
-      const sender = message.isSelf
-        ? '我'
-        : `${message.senderName}${message.replyToSelf ? '（回复我）' : ''}`;
-      const images =
-        message.imageRefs && message.imageRefs.length > 0
-          ? message.imageRefs
-              .map((ref) =>
-                ref.description ? `[图片#${ref.id}：${ref.description}]` : `[图片#${ref.id}]`,
-              )
-              .join(' ')
-          : message.images.length > 0
-            ? `[图片：${message.images.join('；')}]`
-            : message.imageCount > 0
-              ? '[图片]'
-              : '';
-      const text = message.text.trim();
-      // Image-only messages are not empty; avoid prefixing them with [空消息].
-      const body =
-        [text, images].filter(Boolean).join(' ') ||
-        (message.kind === 'FACE' ? '[表情]' : '[空消息]');
-      return `[${label}${gapLabel}] ${sender}：${body}`;
-    })
-    .join('\n');
+  return messages.map((message) => {
+    const at = new Date(message.sentAt);
+    const valid = !Number.isNaN(at.getTime());
+    const day = valid ? localDateKey(at, timeZone) : '';
+    const clock = valid ? formatLocalClock(at, timeZone) : message.sentAt;
+    const label = valid ? (day === previousDay ? clock : `${day.slice(5)} ${clock}`) : clock;
+    const gap = previousAt !== null && valid ? at.getTime() - previousAt : 0;
+    const gapLabel = gap >= 30 * 60_000 ? ` · 隔 ${formatElapsed(gap)}` : '';
+    if (valid) {
+      previousDay = day;
+      previousAt = at.getTime();
+    }
+    const sender = message.isSelf
+      ? '我'
+      : `${message.senderName}${message.replyToSelf ? '（回复我）' : ''}`;
+    const images =
+      message.imageRefs && message.imageRefs.length > 0
+        ? message.imageRefs
+            .map((ref) =>
+              ref.description ? `[图片#${ref.id}：${ref.description}]` : `[图片#${ref.id}]`,
+            )
+            .join(' ')
+        : message.images.length > 0
+          ? `[图片：${message.images.join('；')}]`
+          : message.imageCount > 0
+            ? '[图片]'
+            : '';
+    const text = message.text.trim();
+    // Image-only messages are not empty; avoid prefixing them with [空消息].
+    const body =
+      [text, images].filter(Boolean).join(' ') || (message.kind === 'FACE' ? '[表情]' : '[空消息]');
+    return `[${label}${gapLabel}] ${sender}：${body}`;
+  });
 }
 
 /** HH:MM in the persona zone. */
 function formatLocalClock(date: Date, timeZone?: string | null): string {
-  return formatZoned(date, timeZone, { hour: '2-digit', minute: '2-digit', hour12: false }, 'en-GB');
+  return formatZoned(
+    date,
+    timeZone,
+    { hour: '2-digit', minute: '2-digit', hour12: false },
+    'en-GB',
+  );
 }
 
 /** Short gap wording that promotes to the largest sensible unit. */

@@ -167,6 +167,9 @@ export class InsightsService {
       usage: {
         promptTokens: currentUsage.promptTokens,
         completionTokens: currentUsage.completionTokens,
+        cachedTokens: currentUsage.cachedTokens,
+        cacheMissTokens: currentUsage.cacheMissTokens,
+        reasoningTokens: currentUsage.reasoningTokens,
         totalTokens: currentUsage.totalTokens,
         runs: currentUsage.runs,
         averageTokens:
@@ -187,6 +190,9 @@ export class InsightsService {
   ): Promise<{
     promptTokens: number;
     completionTokens: number;
+    cachedTokens: number;
+    cacheMissTokens: number;
+    reasoningTokens: number;
     totalTokens: number;
     runs: number;
     byTrigger: { trigger: string; runs: number; tokens: number }[];
@@ -201,7 +207,13 @@ export class InsightsService {
           OR: [{ promptTokens: { not: null } }, { completionTokens: { not: null } }],
         },
         _count: { _all: true },
-        _sum: { promptTokens: true, completionTokens: true },
+        _sum: {
+          promptTokens: true,
+          completionTokens: true,
+          cachedTokens: true,
+          cacheMissTokens: true,
+          reasoningTokens: true,
+        },
       }),
       // Vision calls outside a run (image descriptions, video frames,
       // screenshots) are not on AgentRun; they land in the call log. Run-scoped
@@ -214,7 +226,13 @@ export class InsightsService {
           OR: [{ channelId }, { personaId }],
         },
         _count: { _all: true },
-        _sum: { promptTokens: true, completionTokens: true },
+        _sum: {
+          promptTokens: true,
+          completionTokens: true,
+          cachedTokens: true,
+          cacheMissTokens: true,
+          reasoningTokens: true,
+        },
       }),
     ]);
     const promptTokens =
@@ -223,6 +241,15 @@ export class InsightsService {
     const completionTokens =
       rows.reduce((sum, row) => sum + (row._sum.completionTokens ?? 0), 0) +
       (vision._sum.completionTokens ?? 0);
+    const cachedTokens =
+      rows.reduce((sum, row) => sum + (row._sum.cachedTokens ?? 0), 0) +
+      (vision._sum.cachedTokens ?? 0);
+    const cacheMissTokens =
+      rows.reduce((sum, row) => sum + (row._sum.cacheMissTokens ?? 0), 0) +
+      (vision._sum.cacheMissTokens ?? 0);
+    const reasoningTokens =
+      rows.reduce((sum, row) => sum + (row._sum.reasoningTokens ?? 0), 0) +
+      (vision._sum.reasoningTokens ?? 0);
     const byTrigger = rows
       .map((row) => ({
         trigger: String(row.trigger),
@@ -237,6 +264,9 @@ export class InsightsService {
     return {
       promptTokens,
       completionTokens,
+      cachedTokens,
+      cacheMissTokens,
+      reasoningTokens,
       totalTokens: promptTokens + completionTokens,
       runs: rows.reduce((sum, row) => sum + row._count._all, 0),
       byTrigger: byTrigger.sort((left, right) => right.tokens - left.tokens),
@@ -721,7 +751,11 @@ function formatUsage(usage: MindInsightFeed['usage']): string {
   const triggers = usage.byTrigger
     .map((item) => `${TRIGGER_LABELS[item.trigger] ?? item.trigger} ${item.tokens}`)
     .join('、');
-  return `共 ${usage.totalTokens} tokens（输入 ${usage.promptTokens} / 输出 ${usage.completionTokens}），${usage.runs} 次运行，平均 ${usage.averageTokens}/次${
+  const promptDetail =
+    usage.cachedTokens + usage.cacheMissTokens > 0
+      ? `（输入 ${usage.promptTokens}，其中缓存命中 ${usage.cachedTokens} / 未命中 ${usage.cacheMissTokens} / 输出 ${usage.completionTokens}，思考 ${usage.reasoningTokens}）`
+      : `（输入 ${usage.promptTokens} / 输出 ${usage.completionTokens}）`;
+  return `共 ${usage.totalTokens} tokens${promptDetail}，${usage.runs} 次运行，平均 ${usage.averageTokens}/次${
     triggers ? `；按用途：${triggers}` : ''
   }`;
 }

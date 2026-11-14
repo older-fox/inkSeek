@@ -543,6 +543,14 @@ export interface MindSimulationResult {
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
+  /** Input tokens served from the provider's prefix cache. */
+  cachedTokens: number;
+  /** Input tokens that missed the cache. */
+  cacheMissTokens: number;
+  /** Thinking tokens reported by the provider; inside completionTokens. */
+  reasoningTokens: number;
+  /** LLM calls spent on the plan, including the recovery call. */
+  steps: number;
   /** Warnings such as "mode was OFF, ran as SHADOW". */
   notes: string[];
 }
@@ -592,6 +600,12 @@ export interface LlmPromptLogRecord {
   imageCount: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  /** Input tokens served from the provider's prefix cache. */
+  cachedTokens: number | null;
+  /** Input tokens that missed the cache. */
+  cacheMissTokens: number | null;
+  /** 1-based planner step; null for one-shot calls. */
+  step: number | null;
   latencyMs: number | null;
   error: string | null;
   createdAt: string;

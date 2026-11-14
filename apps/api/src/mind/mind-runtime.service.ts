@@ -623,6 +623,9 @@ export class MindRuntimeService implements OnModuleInit {
         toolCalls: plannerResult.toolCalls.length,
         promptTokens: plannerResult.promptTokens,
         completionTokens: plannerResult.completionTokens,
+        cachedTokens: plannerResult.cachedTokens,
+        cacheMissTokens: plannerResult.cacheMissTokens,
+        reasoningTokens: plannerResult.reasoningTokens,
       },
       plannerResult.plan,
       plannerResult.latencyMs,
@@ -669,6 +672,9 @@ export class MindRuntimeService implements OnModuleInit {
         latencyMs: plannerResult.latencyMs,
         promptTokens: plannerResult.promptTokens,
         completionTokens: plannerResult.completionTokens,
+        cachedTokens: plannerResult.cachedTokens,
+        cacheMissTokens: plannerResult.cacheMissTokens,
+        reasoningTokens: plannerResult.reasoningTokens,
       });
     if (settings.styleLearningEnabled && plan.styleNotes?.length) {
       await this.styleNotes.addDrafts(scene.persona.id, scene.persona.channelId, plan.styleNotes);
@@ -1272,6 +1278,9 @@ export class MindRuntimeService implements OnModuleInit {
           toolCalls: plannerResult.toolCalls.length,
           promptTokens: plannerResult.promptTokens,
           completionTokens: plannerResult.completionTokens,
+          cachedTokens: plannerResult.cachedTokens,
+          cacheMissTokens: plannerResult.cacheMissTokens,
+          reasoningTokens: plannerResult.reasoningTokens,
         },
         plannerResult.plan,
         plannerResult.latencyMs,
@@ -1392,6 +1401,9 @@ export class MindRuntimeService implements OnModuleInit {
               latencyMs: plannerResult.latencyMs,
               promptTokens: plannerResult.promptTokens,
               completionTokens: plannerResult.completionTokens,
+              cachedTokens: plannerResult.cachedTokens,
+              cacheMissTokens: plannerResult.cacheMissTokens,
+              reasoningTokens: plannerResult.reasoningTokens,
             },
           });
           return skipped('回复回避窗口内，取消本次回复', {
@@ -1430,6 +1442,9 @@ export class MindRuntimeService implements OnModuleInit {
         latencyMs: plannerResult.latencyMs,
         promptTokens: plannerResult.promptTokens,
         completionTokens: plannerResult.completionTokens,
+        cachedTokens: plannerResult.cachedTokens,
+        cacheMissTokens: plannerResult.cacheMissTokens,
+        reasoningTokens: plannerResult.reasoningTokens,
       });
       await this.completeWakeItems(
         dueTodos.map((todo) => todo.id),
@@ -1476,6 +1491,9 @@ export class MindRuntimeService implements OnModuleInit {
           latencyMs: plannerResult.latencyMs,
           promptTokens: plannerResult.promptTokens,
           completionTokens: plannerResult.completionTokens,
+          cachedTokens: plannerResult.cachedTokens,
+          cacheMissTokens: plannerResult.cacheMissTokens,
+          reasoningTokens: plannerResult.reasoningTokens,
         },
       });
       return {
@@ -1645,6 +1663,10 @@ export class MindRuntimeService implements OnModuleInit {
       latencyMs: plannerResult.latencyMs,
       promptTokens: plannerResult.promptTokens,
       completionTokens: plannerResult.completionTokens,
+      cachedTokens: plannerResult.cachedTokens,
+      cacheMissTokens: plannerResult.cacheMissTokens,
+      reasoningTokens: plannerResult.reasoningTokens,
+      steps: plannerResult.steps,
       notes,
     };
   }
@@ -1921,6 +1943,9 @@ export class MindRuntimeService implements OnModuleInit {
       latencyMs?: number;
       promptTokens?: number;
       completionTokens?: number;
+      cachedTokens?: number;
+      cacheMissTokens?: number;
+      reasoningTokens?: number;
       error?: string;
     },
   ): Promise<void> {
@@ -1938,6 +1963,9 @@ export class MindRuntimeService implements OnModuleInit {
         model: input.model ?? null,
         promptTokens: input.promptTokens ?? null,
         completionTokens: input.completionTokens ?? null,
+        cachedTokens: input.cachedTokens ?? null,
+        cacheMissTokens: input.cacheMissTokens ?? null,
+        reasoningTokens: input.reasoningTokens ?? null,
         error: input.error ?? null,
       },
     });

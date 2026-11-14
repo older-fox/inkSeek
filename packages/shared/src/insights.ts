@@ -57,6 +57,12 @@ export type MindInsightUsageTrigger = z.infer<typeof mindInsightUsageTriggerSche
 export const mindInsightUsageSchema = z.object({
   promptTokens: z.number().int(),
   completionTokens: z.number().int(),
+  /** Input tokens served from the provider's prefix cache. */
+  cachedTokens: z.number().int(),
+  /** Input tokens that missed the cache. */
+  cacheMissTokens: z.number().int(),
+  /** Thinking tokens reported by the provider; inside completionTokens. */
+  reasoningTokens: z.number().int(),
   totalTokens: z.number().int(),
   runs: z.number().int(),
   averageTokens: z.number().int(),
